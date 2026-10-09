@@ -1,0 +1,8 @@
+{
+  "name": "@stepsheet/step-spec",
+  "version": "0.1.0",
+  "description": "Shared JSON schemas and typings for StepSheet step engine",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "MIT"
+}

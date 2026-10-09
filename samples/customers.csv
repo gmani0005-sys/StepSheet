@@ -1,0 +1,101 @@
+customer_id,customer_name,region,segment,email
+CUST-1001,Patricia Smith,East,Consumer,patricia.smith1@example.com
+CUST-1002,Linda Jones,North,Home Office,linda.jones2@example.com
+CUST-1003,Sarah Williams,Central,Corporate,sarah.williams3@example.com
+CUST-1004,Mary Smith,North,Consumer,mary.smith4@example.com
+CUST-1005,Linda Taylor,Central,Consumer,linda.taylor5@example.com
+CUST-1006,Sarah Miller,Central,Corporate,sarah.miller6@example.com
+CUST-1007,Linda Anderson,Central,Corporate,linda.anderson7@example.com
+CUST-1008,James Garcia,West,Corporate,james.garcia8@example.com
+CUST-1009,William Jones,South,Corporate,william.jones9@example.com
+CUST-1010,Patricia Williams,West,Consumer,patricia.williams10@example.com
+CUST-1011,Barbara Lopez,Central,Corporate,barbara.lopez11@example.com
+CUST-1012,Mary Anderson,Central,Consumer,mary.anderson12@example.com
+CUST-1013,Richard Williams,Central,Corporate,richard.williams13@example.com
+CUST-1014,Karen Lopez,Central,Consumer,karen.lopez14@example.com
+CUST-1015,John Johnson,South,Corporate,john.johnson15@example.com
+CUST-1016,John Davis,North,Corporate,john.davis16@example.com
+CUST-1017,William Anderson,East,Consumer,william.anderson17@example.com
+CUST-1018,Barbara Lopez,South,Home Office,barbara.lopez18@example.com
+CUST-1019,William Williams,Central,Home Office,william.williams19@example.com
+CUST-1020,Jennifer Moore,South,Consumer,jennifer.moore20@example.com
+CUST-1021,Joseph Gonzalez,East,Home Office,joseph.gonzalez21@example.com
+CUST-1022,Sarah Davis,East,Consumer,sarah.davis22@example.com
+CUST-1023,Linda Johnson,East,Corporate,linda.johnson23@example.com
+CUST-1024,William Williams,South,Home Office,william.williams24@example.com
+CUST-1025,David Miller,West,Corporate,david.miller25@example.com
+CUST-1026,Joseph Jones,East,Consumer,joseph.jones26@example.com
+CUST-1027,Linda Moore,Central,Corporate,linda.moore27@example.com
+CUST-1028,Charles Wilson,Central,Corporate,charles.wilson28@example.com
+CUST-1029,Barbara Davis,South,Home Office,barbara.davis29@example.com
+CUST-1030,Jessica Williams,North,Consumer,jessica.williams30@example.com
+CUST-1031,Robert Garcia,West,Home Office,robert.garcia31@example.com
+CUST-1032,John Gonzalez,West,Home Office,john.gonzalez32@example.com
+CUST-1033,Joseph Taylor,East,Home Office,joseph.taylor33@example.com
+CUST-1034,James Brown,Central,Corporate,james.brown34@example.com
+CUST-1035,David Brown,East,Corporate,david.brown35@example.com
+CUST-1036,Jennifer Anderson,North,Home Office,jennifer.anderson36@example.com
+CUST-1037,William Taylor,South,Home Office,william.taylor37@example.com
+CUST-1038,Patricia Martinez,Central,Home Office,patricia.martinez38@example.com
+CUST-1039,Michael Jones,East,Consumer,michael.jones39@example.com
+CUST-1040,Sarah Taylor,North,Home Office,sarah.taylor40@example.com
+CUST-1041,David Thomas,North,Consumer,david.thomas41@example.com
+CUST-1042,Barbara Martinez,South,Consumer,barbara.martinez42@example.com
+CUST-1043,Linda Jackson,North,Consumer,linda.jackson43@example.com
+CUST-1044,Jessica Williams,Central,Consumer,jessica.williams44@example.com
+CUST-1045,Robert Thomas,Central,Consumer,robert.thomas45@example.com
+CUST-1046,William Taylor,Central,Corporate,william.taylor46@example.com
+CUST-1047,Michael Moore,South,Home Office,michael.moore47@example.com
+CUST-1048,Elizabeth Gonzalez,East,Corporate,elizabeth.gonzalez48@example.com
+CUST-1049,Thomas Anderson,North,Consumer,thomas.anderson49@example.com
+CUST-1050,Linda Williams,East,Consumer,linda.williams50@example.com
+CUST-1051,Charles Moore,South,Home Office,charles.moore51@example.com
+CUST-1052,Linda Smith,North,Home Office,linda.smith52@example.com
+CUST-1053,Mary Davis,North,Consumer,mary.davis53@example.com
+CUST-1054,David Williams,Central,Consumer,david.williams54@example.com
+CUST-1055,William Thomas,South,Home Office,william.thomas55@example.com
+CUST-1056,Robert Jackson,Central,Corporate,robert.jackson56@example.com
+CUST-1057,Linda Thomas,West,Consumer,linda.thomas57@example.com
+CUST-1058,Patricia Brown,West,Corporate,patricia.brown58@example.com
+CUST-1059,Susan Wilson,West,Home Office,susan.wilson59@example.com
+CUST-1060,Mary Brown,North,Corporate,mary.brown60@example.com
+CUST-1061,David Brown,South,Consumer,david.brown61@example.com
+CUST-1062,Michael Moore,West,Consumer,michael.moore62@example.com
+CUST-1063,Susan Garcia,East,Corporate,susan.garcia63@example.com
+CUST-1064,Linda Williams,West,Home Office,linda.williams64@example.com
+CUST-1065,Patricia Johnson,Central,Consumer,patricia.johnson65@example.com
+CUST-1066,John Davis,South,Corporate,john.davis66@example.com
+CUST-1067,Jessica Thomas,South,Corporate,jessica.thomas67@example.com
+CUST-1068,Mary Garcia,West,Consumer,mary.garcia68@example.com
+CUST-1069,Richard Rodriguez,West,Corporate,richard.rodriguez69@example.com
+CUST-1070,Susan Moore,West,Consumer,susan.moore70@example.com
+CUST-1071,Michael Martinez,South,Consumer,michael.martinez71@example.com
+CUST-1072,Charles Moore,North,Home Office,charles.moore72@example.com
+CUST-1073,David Johnson,North,Home Office,david.johnson73@example.com
+CUST-1074,Jessica Taylor,Central,Consumer,jessica.taylor74@example.com
+CUST-1075,Mary Taylor,North,Consumer,mary.taylor75@example.com
+CUST-1076,John Martin,North,Home Office,john.martin76@example.com
+CUST-1077,Linda Gonzalez,North,Home Office,linda.gonzalez77@example.com
+CUST-1078,Linda Jackson,Central,Consumer,linda.jackson78@example.com
+CUST-1079,Karen Williams,West,Home Office,karen.williams79@example.com
+CUST-1080,Charles Jackson,Central,Corporate,charles.jackson80@example.com
+CUST-1081,William Miller,East,Consumer,william.miller81@example.com
+CUST-1082,William Gonzalez,South,Home Office,william.gonzalez82@example.com
+CUST-1083,Elizabeth Anderson,East,Consumer,elizabeth.anderson83@example.com
+CUST-1084,James Anderson,Central,Home Office,james.anderson84@example.com
+CUST-1085,Patricia Williams,Central,Consumer,patricia.williams85@example.com
+CUST-1086,Thomas Rodriguez,South,Corporate,thomas.rodriguez86@example.com
+CUST-1087,John Davis,East,Corporate,john.davis87@example.com
+CUST-1088,Jennifer Anderson,Central,Home Office,jennifer.anderson88@example.com
+CUST-1089,Elizabeth Martin,Central,Consumer,elizabeth.martin89@example.com
+CUST-1090,Sarah Martinez,North,Consumer,sarah.martinez90@example.com
+CUST-1091,William Brown,North,Home Office,william.brown91@example.com
+CUST-1092,Sarah Jones,East,Corporate,sarah.jones92@example.com
+CUST-1093,Karen Miller,East,Consumer,karen.miller93@example.com
+CUST-1094,William Taylor,West,Corporate,william.taylor94@example.com
+CUST-1095,Mary Williams,West,Corporate,mary.williams95@example.com
+CUST-1096,Mary Smith,East,Consumer,mary.smith96@example.com
+CUST-1097,William Garcia,West,Home Office,william.garcia97@example.com
+CUST-1098,Susan Moore,North,Consumer,susan.moore98@example.com
+CUST-1099,John Jones,Central,Consumer,john.jones99@example.com
+CUST-1100,Barbara Jackson,Central,Consumer,barbara.jackson100@example.com

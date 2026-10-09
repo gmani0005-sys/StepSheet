@@ -10,6 +10,10 @@ import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar'
 import { ReviewGeneratedStepModal } from '../components/ai/ReviewGeneratedStepModal';
 import { QualityModal } from '../components/quality/QualityModal';
 import { ExportModal } from '../components/export/ExportModal';
+import { TemplatesModal } from '../components/templates/TemplatesModal';
+import { VersionHistoryModal } from '../components/versioning/VersionHistoryModal';
+import { ShareModal } from '../components/collab/ShareModal';
+import { AuditModal } from '../components/audit/AuditModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 describe('StepSheet Workbench', () => {
@@ -157,6 +161,65 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Export & Output Suite')).toBeDefined();
     expect(screen.getAllByText(/Live Excel Formulas/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Files & Spreadsheets/i)).toBeDefined();
+  });
+
+  it('renders TemplatesModal with Catalog and Save tabs', () => {
+    const ds = useWorkbenchStore.getState().selectedDataset;
+    render(
+      <TemplatesModal
+        isOpen={true}
+        onClose={() => {}}
+        dataset={ds}
+        columns={[{ name: 'id', data_type: 'integer', physical_type: 'INT64', nullable: false }]}
+        currentSteps={[]}
+        onApplySteps={() => {}}
+      />
+    );
+    expect(screen.getByText('Pipeline Templates & Reusability')).toBeDefined();
+    expect(screen.getByText('Template Catalog')).toBeDefined();
+  });
+
+  it('renders VersionHistoryModal with Timeline and Diff tabs', () => {
+    render(
+      <VersionHistoryModal
+        isOpen={true}
+        onClose={() => {}}
+        projectId="test-proj-id"
+        currentSteps={[]}
+        onRestoreSteps={() => {}}
+      />
+    );
+    expect(screen.getByText('Project Versioning & Step Diff')).toBeDefined();
+    expect(screen.getByText(/Version Timeline/i)).toBeDefined();
+    expect(screen.getByText('Step Diff & Comparison')).toBeDefined();
+  });
+
+  it('renders ShareModal with roles and link generator', () => {
+    render(
+      <ShareModal
+        isOpen={true}
+        onClose={() => {}}
+        projectId="test-proj-id"
+        projectTitle="Test Project"
+      />
+    );
+    expect(screen.getByText('Share Project & Access Control')).toBeDefined();
+    expect(screen.getByText('Viewer')).toBeDefined();
+    expect(screen.getByText('Editor')).toBeDefined();
+    expect(screen.getByText('Generate Share Link')).toBeDefined();
+  });
+
+  it('renders AuditModal with governance trail and filters', () => {
+    render(
+      <AuditModal
+        isOpen={true}
+        onClose={() => {}}
+        projectId="test-proj-id"
+      />
+    );
+    expect(screen.getByText('Audit Trail & Governance')).toBeDefined();
+    expect(screen.getByText('All Actions')).toBeDefined();
+    expect(screen.getByText('Versions')).toBeDefined();
   });
 });
 

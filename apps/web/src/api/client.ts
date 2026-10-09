@@ -331,5 +331,141 @@ export const api = {
     if (!res.ok) throw new Error('Failed to export pipeline specification');
     return res.blob();
   },
+
+  // Templates & Column Mapping
+  async listTemplates(): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/templates`, {
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) throw new Error('Failed to list templates');
+    return res.json();
+  },
+
+  async createTemplate(templateData: any): Promise<any> {
+    const res = await fetch(`${API_BASE}/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify(templateData),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to save template');
+    }
+    return res.json();
+  },
+
+  async suggestColumnMapping(templateId: string, datasetId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/templates/${templateId}/suggest-mapping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to suggest column mapping');
+    }
+    return res.json();
+  },
+
+  async applyTemplate(templateId: string, datasetId: string, columnMapping: Record<string, string>): Promise<any> {
+    const res = await fetch(`${API_BASE}/templates/${templateId}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, column_mapping: columnMapping }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to apply template');
+    }
+    return res.json();
+  },
+
+  // Project Versioning & Step Diff
+  async listVersions(projectId: string): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/versions`, {
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) throw new Error('Failed to list versions');
+    return res.json();
+  },
+
+  async createVersion(projectId: string, message: string, steps: any[], datasetId?: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/versions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ message, steps, dataset_id: datasetId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create version');
+    }
+    return res.json();
+  },
+
+  async diffVersions(projectId: string, fromVersion: number, toVersion: number): Promise<any> {
+    const res = await fetch(
+      `${API_BASE}/projects/${projectId}/versions/diff?from_version=${fromVersion}&to_version=${toVersion}`,
+      { headers: { ...getAuthHeader() } }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to diff versions');
+    }
+    return res.json();
+  },
+
+  async restoreVersion(projectId: string, versionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/versions/${versionId}/restore`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to restore version');
+    }
+    return res.json();
+  },
+
+  // Sharing & Access Control
+  async createShare(projectId: string, role: string = 'viewer', expiresInDays?: number): Promise<any> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/shares`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ role, expires_in_days: expiresInDays }),
+    });
+    if (!res.ok) throw new Error('Failed to create share link');
+    return res.json();
+  },
+
+  async listShares(projectId: string): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/shares`, {
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) throw new Error('Failed to list shares');
+    return res.json();
+  },
+
+  async revokeShare(projectId: string, shareId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/shares/${shareId}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) throw new Error('Failed to revoke share link');
+  },
+
+  async getShareAccess(token: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/share/${token}`);
+    if (!res.ok) throw new Error('Invalid or expired share link');
+    return res.json();
+  },
+
+  // Audit Trail
+  async listAuditLogs(projectId: string, action?: string, limit: number = 50, offset: number = 0): Promise<any> {
+    let url = `${API_BASE}/projects/${projectId}/audit?limit=${limit}&offset=${offset}`;
+    if (action) url += `&action=${encodeURIComponent(action)}`;
+    const res = await fetch(url, { headers: { ...getAuthHeader() } });
+    if (!res.ok) throw new Error('Failed to fetch audit logs');
+    return res.json();
+  },
 };
 

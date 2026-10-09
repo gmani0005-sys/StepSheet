@@ -20,6 +20,10 @@ import { PivotUnpivotModal } from '../components/transforms/PivotUnpivotModal';
 import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar';
 import { QualityModal } from '../components/quality/QualityModal';
 import { ExportModal } from '../components/export/ExportModal';
+import { TemplatesModal } from '../components/templates/TemplatesModal';
+import { VersionHistoryModal } from '../components/versioning/VersionHistoryModal';
+import { ShareModal } from '../components/collab/ShareModal';
+import { AuditModal } from '../components/audit/AuditModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -28,6 +32,10 @@ export const WorkbenchPage: React.FC = () => {
   const [isRelationshipsOpen, setIsRelationshipsOpen] = useState(false);
   const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isVersionsOpen, setIsVersionsOpen] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [exportInitialTab, setExportInitialTab] = useState<'files' | 'code' | 'run'>('files');
   const {
     loadDatasets,
@@ -38,6 +46,7 @@ export const WorkbenchPage: React.FC = () => {
     selectedDataset,
     steps,
     columns,
+    setPipelineSteps,
   } = useWorkbenchStore();
   const { initAuth } = useAuthStore();
 
@@ -61,6 +70,10 @@ export const WorkbenchPage: React.FC = () => {
           setExportInitialTab('run');
           setIsExportModalOpen(true);
         }}
+        onOpenTemplates={() => setIsTemplatesOpen(true)}
+        onOpenVersions={() => setIsVersionsOpen(true)}
+        onOpenShare={() => setIsShareOpen(true)}
+        onOpenAudit={() => setIsAuditOpen(true)}
       />
 
       {/* Main 3-Panel Layout */}
@@ -154,6 +167,37 @@ export const WorkbenchPage: React.FC = () => {
         dataset={selectedDataset}
         steps={steps}
         initialTab={exportInitialTab}
+      />
+
+      <TemplatesModal
+        isOpen={isTemplatesOpen}
+        onClose={() => setIsTemplatesOpen(false)}
+        dataset={selectedDataset}
+        columns={columns}
+        currentSteps={steps}
+        onApplySteps={setPipelineSteps}
+      />
+
+      <VersionHistoryModal
+        isOpen={isVersionsOpen}
+        onClose={() => setIsVersionsOpen(false)}
+        projectId={selectedDataset?.project_id || 'default-project'}
+        currentSteps={steps}
+        datasetId={selectedDataset?.id}
+        onRestoreSteps={setPipelineSteps}
+      />
+
+      <ShareModal
+        isOpen={isShareOpen}
+        onClose={() => setIsShareOpen(false)}
+        projectId={selectedDataset?.project_id || 'default-project'}
+        projectTitle={selectedDataset?.name || 'StepSheet Project'}
+      />
+
+      <AuditModal
+        isOpen={isAuditOpen}
+        onClose={() => setIsAuditOpen(false)}
+        projectId={selectedDataset?.project_id || 'default-project'}
       />
     </div>
   );

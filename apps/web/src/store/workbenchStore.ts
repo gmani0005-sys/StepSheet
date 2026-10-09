@@ -69,6 +69,7 @@ interface WorkbenchState {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   runPipelinePreview: () => Promise<void>;
+  setPipelineSteps: (newSteps: StepDefinition[]) => Promise<void>;
   openStepWizard: (type: StepType, step?: StepDefinition) => void;
   closeStepWizard: () => void;
 }
@@ -282,6 +283,22 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       activeTab: 'applied',
     }));
     await get().runPipelinePreview();
+  },
+
+  setPipelineSteps: async (newSteps: StepDefinition[]) => {
+    const currentSteps = get().steps;
+    set((state) => ({
+      undoStack: [...state.undoStack, currentSteps],
+      redoStack: [],
+      steps: newSteps,
+      activeStepIndex: null,
+      activeTab: 'applied',
+    }));
+    if (newSteps.length === 0) {
+      await get().fetchRows(0);
+    } else {
+      await get().runPipelinePreview();
+    }
   },
 
   removeStep: async (stepId: string) => {

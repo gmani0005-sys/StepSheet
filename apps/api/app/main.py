@@ -50,6 +50,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def add_request_id_header(request, call_next):
+    req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
 # Health endpoint
 @app.get("/health", tags=["System"])
 def health_check():

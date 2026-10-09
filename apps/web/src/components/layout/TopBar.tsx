@@ -15,6 +15,10 @@ import {
   ShieldCheck,
   LogOut,
   User as UserIcon,
+  LayoutTemplate,
+  History,
+  Share2,
+  Activity,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { useAuthStore } from '../../store/authStore';
@@ -25,6 +29,10 @@ interface TopBarProps {
   onOpenQuality?: () => void;
   onOpenExport?: () => void;
   onOpenRunFull?: () => void;
+  onOpenTemplates?: () => void;
+  onOpenVersions?: () => void;
+  onOpenShare?: () => void;
+  onOpenAudit?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -33,6 +41,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenQuality,
   onOpenExport,
   onOpenRunFull,
+  onOpenTemplates,
+  onOpenVersions,
+  onOpenShare,
+  onOpenAudit,
 }) => {
   const {
     selectedDataset,
@@ -143,6 +155,39 @@ export const TopBar: React.FC<TopBarProps> = ({
         >
           <Download size={13} className="text-sky-400" />
           <span>Export</span>
+        </button>
+        <div className="w-px h-4 bg-slate-800 mx-1" />
+        <button
+          onClick={onOpenTemplates}
+          title="Pipeline templates with column mapping"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
+        >
+          <LayoutTemplate size={13} className="text-purple-400" />
+          <span>Templates</span>
+        </button>
+        <button
+          onClick={onOpenVersions}
+          title="Project version history and step diff"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
+        >
+          <History size={13} className="text-violet-400" />
+          <span>Versions</span>
+        </button>
+        <button
+          onClick={onOpenShare}
+          title="Share project with role-based links"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
+        >
+          <Share2 size={13} className="text-sky-400" />
+          <span>Share</span>
+        </button>
+        <button
+          onClick={onOpenAudit}
+          title="Audit log and governance trail"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
+        >
+          <Activity size={13} className="text-amber-400" />
+          <span>Audit</span>
         </button>
       </div>
 

@@ -18,18 +18,26 @@ import { DateTransformModal } from '../components/transforms/DateTransformModal'
 import { MathTransformModal } from '../components/transforms/MathTransformModal';
 import { PivotUnpivotModal } from '../components/transforms/PivotUnpivotModal';
 import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar';
+import { QualityModal } from '../components/quality/QualityModal';
+import { ExportModal } from '../components/export/ExportModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useAuthStore } from '../store/authStore';
 
 export const WorkbenchPage: React.FC = () => {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isRelationshipsOpen, setIsRelationshipsOpen] = useState(false);
+  const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportInitialTab, setExportInitialTab] = useState<'files' | 'code' | 'run'>('files');
   const {
     loadDatasets,
     isStepWizardOpen,
     activeWizardStepType,
     closeStepWizard,
     openStepWizard,
+    selectedDataset,
+    steps,
+    columns,
   } = useWorkbenchStore();
   const { initAuth } = useAuthStore();
 
@@ -44,6 +52,15 @@ export const WorkbenchPage: React.FC = () => {
       <TopBar
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onOpenRelationships={() => setIsRelationshipsOpen(true)}
+        onOpenQuality={() => setIsQualityModalOpen(true)}
+        onOpenExport={() => {
+          setExportInitialTab('files');
+          setIsExportModalOpen(true);
+        }}
+        onOpenRunFull={() => {
+          setExportInitialTab('run');
+          setIsExportModalOpen(true);
+        }}
       />
 
       {/* Main 3-Panel Layout */}
@@ -121,6 +138,22 @@ export const WorkbenchPage: React.FC = () => {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+      />
+
+      <QualityModal
+        isOpen={isQualityModalOpen}
+        onClose={() => setIsQualityModalOpen(false)}
+        dataset={selectedDataset}
+        steps={steps}
+        columns={columns}
+      />
+
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        dataset={selectedDataset}
+        steps={steps}
+        initialTab={exportInitialTab}
       />
     </div>
   );

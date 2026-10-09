@@ -12,6 +12,7 @@ import {
   Layers,
   Database,
   Sparkles,
+  ShieldCheck,
   LogOut,
   User as UserIcon,
 } from 'lucide-react';
@@ -21,9 +22,18 @@ import { useAuthStore } from '../../store/authStore';
 interface TopBarProps {
   onOpenAuthModal?: () => void;
   onOpenRelationships?: () => void;
+  onOpenQuality?: () => void;
+  onOpenExport?: () => void;
+  onOpenRunFull?: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal, onOpenRelationships }) => {
+export const TopBar: React.FC<TopBarProps> = ({
+  onOpenAuthModal,
+  onOpenRelationships,
+  onOpenQuality,
+  onOpenExport,
+  onOpenRunFull,
+}) => {
   const {
     selectedDataset,
     totalRows,
@@ -111,15 +121,25 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal, onOpenRelations
           <span>Canvas / ER</span>
         </button>
         <button
+          onClick={onOpenQuality}
+          title="Data integrity & quality rules"
           className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
-          onClick={() => alert(`Running full pipeline (${steps.length} steps) across complete dataset.`)}
+        >
+          <ShieldCheck size={13} className="text-emerald-400" />
+          <span>Data Quality</span>
+        </button>
+        <button
+          onClick={onOpenRunFull || onOpenExport}
+          title="Execute pipeline across 100% of rows"
+          className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
         >
           <Play size={13} className="text-emerald-400 fill-emerald-400" />
           <span>Run Full</span>
         </button>
         <button
+          onClick={onOpenExport}
+          title="Export spreadsheet with live formulas, code, or pipeline spec"
           className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
-          onClick={() => alert('Exporting will generate Excel with live formulas, Power Query M, SQL, and Polars in Phase 6.')}
         >
           <Download size={13} className="text-sky-400" />
           <span>Export</span>

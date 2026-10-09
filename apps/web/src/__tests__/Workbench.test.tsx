@@ -8,6 +8,8 @@ import { ConditionalModal } from '../components/transforms/ConditionalModal';
 import { GroupByModal } from '../components/transforms/GroupByModal';
 import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar';
 import { ReviewGeneratedStepModal } from '../components/ai/ReviewGeneratedStepModal';
+import { QualityModal } from '../components/quality/QualityModal';
+import { ExportModal } from '../components/export/ExportModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 describe('StepSheet Workbench', () => {
@@ -124,6 +126,37 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Review AI Generated Step')).toBeDefined();
     expect(screen.getByText('Review Required')).toBeDefined();
     expect(screen.getByText('Confirm & Apply to Pipeline')).toBeDefined();
+  });
+
+  it('renders QualityModal with Audit & Health Scorecard tabs', () => {
+    const ds = useWorkbenchStore.getState().selectedDataset;
+    render(
+      <QualityModal
+        isOpen={true}
+        onClose={() => {}}
+        dataset={ds}
+        steps={[]}
+        columns={[{ name: 'id', data_type: 'integer', physical_type: 'INT64', nullable: false }]}
+      />
+    );
+    expect(screen.getByText('Data Integrity & Quality Suite')).toBeDefined();
+    expect(screen.getByText(/Audit Results & Violations/i)).toBeDefined();
+    expect(screen.getByText(/Custom Rule Builder/i)).toBeDefined();
+  });
+
+  it('renders ExportModal with format options (Excel, CSV, Parquet, JSON, Code, Full Run)', () => {
+    const ds = useWorkbenchStore.getState().selectedDataset;
+    render(
+      <ExportModal
+        isOpen={true}
+        onClose={() => {}}
+        dataset={ds}
+        steps={[]}
+      />
+    );
+    expect(screen.getByText('Export & Output Suite')).toBeDefined();
+    expect(screen.getAllByText(/Live Excel Formulas/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Files & Spreadsheets/i)).toBeDefined();
   });
 });
 

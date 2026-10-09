@@ -219,4 +219,117 @@ export const api = {
     if (!res.ok) throw new Error('Failed to get AI status');
     return res.json();
   },
+
+  // Data Integrity & Quality
+  async runQualityCheck(datasetId: string, rules: any[], steps: any[] = []): Promise<any> {
+    const res = await fetch(`${API_BASE}/quality/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, rules, pipeline_steps: steps }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Quality check failed');
+    }
+    return res.json();
+  },
+
+  async runQuickAudit(datasetId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/quality/quick-audit/${datasetId}`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Quick audit failed');
+    }
+    return res.json();
+  },
+
+  async downloadFailingRows(datasetId: string, rule: any, steps: any[] = []): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/quality/export-failing-rows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, rules: [rule], pipeline_steps: steps }),
+    });
+    if (!res.ok) throw new Error('Failed to export failing rows');
+    return res.blob();
+  },
+
+  // Export & Full Runner
+  async exportExcel(datasetId: string, steps: any[], includeFormulas = true, includeDocumentation = true): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/export/excel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({
+        dataset_id: datasetId,
+        steps,
+        include_formulas: includeFormulas,
+        include_documentation: includeDocumentation,
+      }),
+    });
+    if (!res.ok) throw new Error('Failed to export Excel');
+    return res.blob();
+  },
+
+  async exportCsv(datasetId: string, steps: any[]): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/export/csv`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, steps }),
+    });
+    if (!res.ok) throw new Error('Failed to export CSV');
+    return res.blob();
+  },
+
+  async exportParquet(datasetId: string, steps: any[]): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/export/parquet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, steps }),
+    });
+    if (!res.ok) throw new Error('Failed to export Parquet');
+    return res.blob();
+  },
+
+  async exportJson(datasetId: string, steps: any[]): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/export/json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, steps }),
+    });
+    if (!res.ok) throw new Error('Failed to export JSON');
+    return res.blob();
+  },
+
+  async exportCode(datasetId: string, steps: any[]): Promise<any> {
+    const res = await fetch(`${API_BASE}/export/code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, steps }),
+    });
+    if (!res.ok) throw new Error('Failed to export code');
+    return res.json();
+  },
+
+  async runFullPipeline(datasetId: string, steps: any[]): Promise<any> {
+    const res = await fetch(`${API_BASE}/export/run-full`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, steps }),
+    });
+    if (!res.ok) throw new Error('Failed to run full pipeline');
+    return res.json();
+  },
+
+  async exportPipelineSpec(datasetId: string, steps: any[]): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/export/pipeline-spec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ dataset_id: datasetId, steps }),
+    });
+    if (!res.ok) throw new Error('Failed to export pipeline specification');
+    return res.blob();
+  },
 };
+

@@ -9,7 +9,15 @@ export type StepType =
   | 'split_column'
   | 'xlookup'
   | 'append'
-  | 'join';
+  | 'join'
+  | 'conditional'
+  | 'group_by'
+  | 'window_calc'
+  | 'text_transform'
+  | 'date_transform'
+  | 'math_transform'
+  | 'pivot'
+  | 'unpivot';
 
 export interface StepDefinition {
   id: string;

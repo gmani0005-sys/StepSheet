@@ -10,6 +10,13 @@ import { JoinBuilderModal } from '../components/joins/JoinBuilderModal';
 import { XLookupModal } from '../components/joins/XLookupModal';
 import { AppendModal } from '../components/joins/AppendModal';
 import { RelationshipsModal } from '../components/joins/RelationshipsModal';
+import { ConditionalModal } from '../components/transforms/ConditionalModal';
+import { GroupByModal } from '../components/transforms/GroupByModal';
+import { WindowCalcModal } from '../components/transforms/WindowCalcModal';
+import { TextTransformModal } from '../components/transforms/TextTransformModal';
+import { DateTransformModal } from '../components/transforms/DateTransformModal';
+import { MathTransformModal } from '../components/transforms/MathTransformModal';
+import { PivotUnpivotModal } from '../components/transforms/PivotUnpivotModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -71,6 +78,40 @@ export const WorkbenchPage: React.FC = () => {
         isOpen={isRelationshipsOpen}
         onClose={() => setIsRelationshipsOpen(false)}
         onOpenJoinBuilder={() => openStepWizard('join')}
+      />
+
+      {/* Phase 4: Transformation Suite Modals */}
+      <ConditionalModal
+        isOpen={isStepWizardOpen && activeWizardStepType === 'conditional'}
+        onClose={closeStepWizard}
+      />
+      <GroupByModal
+        isOpen={isStepWizardOpen && activeWizardStepType === 'group_by'}
+        onClose={closeStepWizard}
+      />
+      <WindowCalcModal
+        isOpen={isStepWizardOpen && activeWizardStepType === 'window_calc'}
+        onClose={closeStepWizard}
+      />
+      <TextTransformModal
+        isOpen={isStepWizardOpen && activeWizardStepType === 'text_transform'}
+        onClose={closeStepWizard}
+      />
+      <DateTransformModal
+        isOpen={isStepWizardOpen && activeWizardStepType === 'date_transform'}
+        onClose={closeStepWizard}
+      />
+      <MathTransformModal
+        isOpen={isStepWizardOpen && activeWizardStepType === 'math_transform'}
+        onClose={closeStepWizard}
+      />
+      <PivotUnpivotModal
+        isOpen={
+          isStepWizardOpen &&
+          (activeWizardStepType === 'pivot' || activeWizardStepType === 'unpivot')
+        }
+        initialMode={activeWizardStepType === 'unpivot' ? 'unpivot' : 'pivot'}
+        onClose={closeStepWizard}
       />
 
       <AuthModal

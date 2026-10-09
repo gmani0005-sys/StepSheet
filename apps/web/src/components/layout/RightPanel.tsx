@@ -22,6 +22,9 @@ import {
   Sparkles,
   Info,
   GitBranch,
+  Calendar,
+  TrendingUp,
+  TableProperties,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { StepType } from '../../types/steps';
@@ -50,7 +53,7 @@ export const RightPanel: React.FC = () => {
 
   const stepCategories = [
     {
-      category: 'Cleaning & Shape (Phase 2)',
+      category: 'Cleaning & Shape',
       icon: Filter,
       items: [
         { id: 'filter_rows', name: 'Filter Rows', desc: 'Keep or remove rows by visual rule conditions' },
@@ -61,10 +64,12 @@ export const RightPanel: React.FC = () => {
         { id: 'fill_down', name: 'Fill Down / Up', desc: 'Propagate values to fill missing blanks' },
         { id: 'replace_values', name: 'Replace Values', desc: 'Find and replace values or nulls' },
         { id: 'split_column', name: 'Split Column', desc: 'Split by delimiter into multiple columns' },
+        { id: 'pivot', name: 'Pivot Table', desc: 'Reshape rows into columns with aggregation' },
+        { id: 'unpivot', name: 'Unpivot Columns', desc: 'Melt multiple columns into rows' },
       ],
     },
     {
-      category: 'Lookup & Join (Phase 3)',
+      category: 'Lookup & Join',
       icon: GitBranch,
       items: [
         { id: 'xlookup', name: 'XLOOKUP / VLOOKUP', desc: 'Bring columns from another table with exact match' },
@@ -73,11 +78,39 @@ export const RightPanel: React.FC = () => {
       ],
     },
     {
-      category: 'Logical & Aggregation (Phase 4)',
+      category: 'Logical & Conditional',
+      icon: Sparkles,
+      items: [
+        { id: 'conditional', name: 'IF / IFS / SWITCH', desc: 'Visual rule rows with conditions and default fallback' },
+      ],
+    },
+    {
+      category: 'Aggregation & Summary',
       icon: Calculator,
       items: [
-        { id: 'if_condition', name: 'IF / IFS Builder', desc: 'Visual rule rows with AND/OR groups' },
-        { id: 'group_by', name: 'Group By & Aggregate', desc: 'SUMIFS, COUNTIFS, AVERAGEIFS across dimensions' },
+        { id: 'group_by', name: 'Group By & Aggregate', desc: 'SUM, COUNT, DISTINCT COUNT, AVG, MIN, MAX' },
+        { id: 'window_calc', name: 'Window Calculations', desc: 'Running total, Rank, Moving average, Lag / Lead' },
+      ],
+    },
+    {
+      category: 'Text & String',
+      icon: Type,
+      items: [
+        { id: 'text_transform', name: 'Text Operations', desc: 'Trim, uppercase, lowercase, proper case, substring, concat' },
+      ],
+    },
+    {
+      category: 'Date & Time',
+      icon: Calendar,
+      items: [
+        { id: 'date_transform', name: 'Date & Time Operations', desc: 'Extract parts, EOMONTH, DATEDIF, add time, fiscal year' },
+      ],
+    },
+    {
+      category: 'Numeric & Math',
+      icon: TrendingUp,
+      items: [
+        { id: 'math_transform', name: 'Numeric & Math', desc: 'Arithmetic (+, -, *, /), round, abs, percent change, bins' },
       ],
     },
   ];
@@ -307,25 +340,7 @@ export const RightPanel: React.FC = () => {
                       <div
                         key={item.id}
                         onClick={() => {
-                          if (
-                            [
-                              'change_type',
-                              'rename_column',
-                              'filter_rows',
-                              'sort_rows',
-                              'remove_duplicates',
-                              'fill_down',
-                              'replace_values',
-                              'split_column',
-                              'xlookup',
-                              'join',
-                              'append',
-                            ].includes(item.id)
-                          ) {
-                            openStepWizard(item.id as StepType);
-                          } else {
-                            alert(`${item.name} is scheduled for Phase 4.`);
-                          }
+                          openStepWizard(item.id as StepType);
                         }}
                         className="p-2 rounded-lg bg-slate-950/40 hover:bg-slate-800/80 border border-slate-800/60 hover:border-slate-700 cursor-pointer transition-all group"
                       >

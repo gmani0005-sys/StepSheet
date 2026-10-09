@@ -55,7 +55,19 @@ export const StepBuilderModal: React.FC = () => {
   if (
     !isStepWizardOpen ||
     !activeWizardStepType ||
-    ['join', 'xlookup', 'append'].includes(activeWizardStepType)
+    [
+      'join',
+      'xlookup',
+      'append',
+      'conditional',
+      'group_by',
+      'window_calc',
+      'text_transform',
+      'date_transform',
+      'math_transform',
+      'pivot',
+      'unpivot',
+    ].includes(activeWizardStepType)
   )
     return null;
 

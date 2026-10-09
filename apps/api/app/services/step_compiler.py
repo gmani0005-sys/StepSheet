@@ -453,6 +453,317 @@ class StepCompiler:
                 else:
                     generated.excel_formula = f'Note: {j_type.replace("_", " ").title()} join cannot be expressed as a single standard Excel cell formula.'
 
+            # Phase 4: Logical & Conditional
+            elif stype in ["conditional", "if_condition"]:
+                new_col = params.get("new_column", "conditional_col")
+                rules = params.get("rules", [])
+                else_val = params.get("else_value")
+
+                when_clauses = []
+                for r in rules:
+                    cond = cls._build_filter_condition(r["column"], r.get("operator", "eq"), r.get("value"))
+                    res = str(r.get("result", "")).replace("'", "''")
+                    when_clauses.append(f"WHEN {cond} THEN '{res}'")
+
+                if else_val is not None:
+                    else_escaped = str(else_val).replace("'", "''")
+                    else_part = f"ELSE '{else_escaped}'"
+                else:
+                    else_part = "ELSE NULL"
+
+                case_expr = f"CASE {' '.join(when_clauses)} {else_part} END"
+                proj = [f'"{c}"' for c in current_cols] + [f'{case_expr} AS "{new_col}"']
+                current_cols.append(new_col)
+
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+
+                generated.sql = f'{case_expr} AS "{new_col}"'
+                generated.polars = f'df = df.with_columns(pl.when(...).then(...).otherwise(...).alias("{new_col}"))'
+                generated.power_query_m = f'Table.AddColumn(Source, "{new_col}", each if ... then ... else ...)'
+                generated.excel_formula = f'=IFS(...) or =IF(...)'
+
+            # Phase 4: Aggregation & Group By
+            elif stype in ["group_by", "aggregate"]:
+                group_cols = params.get("group_by_columns", [])
+                aggs = params.get("aggregations", [])
+
+                agg_projs = []
+                new_cols = list(group_cols)
+                for agg in aggs:
+                    col = agg["column"]
+                    func = agg["agg_func"].lower()
+                    out_name = agg.get("output_column") or f"{func}_{col}"
+
+                    if func == "sum":
+                        expr = f'SUM("{col}")'
+                    elif func == "count":
+                        expr = f'COUNT("{col}")'
+                    elif func == "distinct_count":
+                        expr = f'COUNT(DISTINCT "{col}")'
+                    elif func == "avg":
+                        expr = f'ROUND(AVG("{col}"), 4)'
+                    elif func == "min":
+                        expr = f'MIN("{col}")'
+                    elif func == "max":
+                        expr = f'MAX("{col}")'
+                    else:
+                        expr = f'SUM("{col}")'
+
+                    agg_projs.append(f'{expr} AS "{out_name}"')
+                    new_cols.append(out_name)
+
+                if group_cols:
+                    group_by_clause = "GROUP BY " + ", ".join([f'"{c}"' for c in group_cols])
+                    select_clause = ", ".join([f'"{c}"' for c in group_cols] + agg_projs)
+                else:
+                    group_by_clause = ""
+                    select_clause = ", ".join(agg_projs)
+
+                current_cols = new_cols
+                cte_sql = f"{curr_cte} AS (\n    SELECT row_number() OVER () AS _row_id, {select_clause} FROM {prev_cte} {group_by_clause}\n)"
+                ctes.append(cte_sql)
+
+                generated.sql = f"SELECT {select_clause} FROM table {group_by_clause}"
+                generated.polars = f"df = df.group_by({group_cols}).agg([{', '.join(agg_projs)}])"
+                generated.power_query_m = f"Table.Group(Source, {json.dumps(group_cols)}, ...)"
+                generated.excel_formula = f"=SUMIFS(...) or =COUNTIFS(...)"
+
+            # Phase 4: Window Functions
+            elif stype in ["window_calc", "window_function"]:
+                calc_type = params.get("calc_type", "running_total")
+                t_col = params["target_column"]
+                out_col = params.get("output_column") or f"{calc_type}_{t_col}"
+                parts = params.get("partition_by", [])
+                order_col = params.get("order_by") or "_row_id"
+                order_dir = params.get("order_direction", "asc").upper()
+                w_size = params.get("window_size", 3)
+                offset = params.get("offset", 1)
+
+                part_clause = f"PARTITION BY {', '.join([f'\"{c}\"' for c in parts])}" if parts else ""
+                order_clause = f"ORDER BY \"{order_col}\" {order_dir}"
+                over_core = f"OVER ({part_clause} {order_clause}".strip()
+
+                if calc_type == "running_total":
+                    expr = f'SUM("{t_col}") {over_core} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)'
+                elif calc_type == "rank":
+                    expr = f'DENSE_RANK() {over_core})'
+                elif calc_type == "percent_of_total":
+                    part_only = f"OVER ({part_clause})" if part_clause else "OVER ()"
+                    expr = f'ROUND(CAST("{t_col}" AS DOUBLE) * 100.0 / NULLIF(SUM("{t_col}") {part_only}, 0), 2)'
+                elif calc_type == "moving_avg":
+                    expr = f'ROUND(AVG("{t_col}") {over_core} ROWS BETWEEN {w_size - 1} PRECEDING AND CURRENT ROW), 2)'
+                elif calc_type == "lag":
+                    expr = f'LAG("{t_col}", {offset}) {over_core})'
+                elif calc_type == "lead":
+                    expr = f'LEAD("{t_col}", {offset}) {over_core})'
+                else:
+                    expr = f'SUM("{t_col}") {over_core})'
+
+                proj = [f'"{c}"' for c in current_cols] + [f'{expr} AS "{out_col}"']
+                current_cols.append(out_col)
+
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+
+                generated.sql = f'{expr} AS "{out_col}"'
+                generated.polars = f'df = df.with_columns({expr}.alias("{out_col}"))'
+                generated.power_query_m = f'Table.AddColumn(Source, "{out_col}", ...)'
+                generated.excel_formula = f'=SUM($B$2:B2) or =RANK(B2, $B$2:$B$100)'
+
+            # Phase 4: Text Operations
+            elif stype in ["text_transform", "text_operation"]:
+                col = params["column"]
+                op = params.get("operation", "trim").lower()
+                out_col = params.get("output_column") or col
+                length = params.get("length", 5)
+                start = params.get("start", 1)
+                delim = params.get("delimiter", " ")
+                concat_cols = params.get("concat_columns", [])
+                sep = params.get("concat_separator", " ")
+
+                safe_col = f'CAST("{col}" AS VARCHAR)'
+
+                if op == "trim":
+                    expr = f'TRIM({safe_col})'
+                elif op == "clean":
+                    expr = f"REGEXP_REPLACE({safe_col}, '[\r\n\t]+', ' ', 'g')"
+                elif op == "upper":
+                    expr = f'UPPER({safe_col})'
+                elif op == "lower":
+                    expr = f'LOWER({safe_col})'
+                elif op == "proper":
+                    expr = f"array_to_string(list_transform(str_split({safe_col}, ' '), x -> concat(upper(x[1]), lower(x[2:]))), ' ')"
+                elif op == "left":
+                    expr = f'SUBSTR({safe_col}, 1, {length})'
+                elif op == "right":
+                    expr = f'RIGHT({safe_col}, {length})'
+                elif op == "mid":
+                    expr = f'SUBSTR({safe_col}, {start}, {length})'
+                elif op == "length":
+                    expr = f'LENGTH({safe_col})'
+                elif op == "concat":
+                    all_c = [f'COALESCE(CAST("{c}" AS VARCHAR), \'\')' for c in [col] + concat_cols]
+                    escaped_sep = sep.replace("'", "''")
+                    expr = f"CONCAT_WS('{escaped_sep}', {', '.join(all_c)})"
+                elif op == "extract_delimiter":
+                    escaped_delim = delim.replace("'", "''")
+                    pos = params.get("position", "before")
+                    part_idx = 1 if pos == "before" else 2
+                    expr = f"SPLIT_PART({safe_col}, '{escaped_delim}', {part_idx})"
+                else:
+                    expr = f'TRIM({safe_col})'
+
+                proj = []
+                if out_col == col:
+                    for c in current_cols:
+                        if c == col:
+                            proj.append(f'{expr} AS "{c}"')
+                        else:
+                            proj.append(f'"{c}"')
+                else:
+                    proj = [f'"{c}"' for c in current_cols] + [f'{expr} AS "{out_col}"']
+                    current_cols.append(out_col)
+
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+
+                generated.sql = f'{expr} AS "{out_col}"'
+                generated.polars = f'df = df.with_columns({expr}.alias("{out_col}"))'
+                generated.power_query_m = f'Table.TransformColumns(Source, {{"{col}", ...}})'
+                generated.excel_formula = f'={op.upper()}({col}2)'
+
+            # Phase 4: Date & Time Operations
+            elif stype in ["date_transform", "date_operation"]:
+                col = params["column"]
+                op = params.get("operation", "extract_part").lower()
+                out_col = params.get("output_column") or f"{col}_{op}"
+                safe_col = f'TRY_CAST("{col}" AS DATE)'
+
+                if op == "extract_part":
+                    part = params.get("date_part", "year").lower()
+                    if part == "day_name":
+                        expr = f"STRFTIME({safe_col}, '%A')"
+                    elif part == "weekday":
+                        expr = f"DAYOFWEEK({safe_col})"
+                    else:
+                        expr = f"DATE_PART('{part}', {safe_col})"
+                elif op == "eomonth":
+                    expr = f"LAST_DAY({safe_col})"
+                elif op == "datedif":
+                    sec_col = params.get("second_column", col)
+                    unit = params.get("unit", "day").lower()
+                    expr = f"DATE_DIFF('{unit}', {safe_col}, TRY_CAST(\"{sec_col}\" AS DATE))"
+                elif op == "add_time":
+                    amt = params.get("amount", 1)
+                    unit = params.get("unit", "day").upper()
+                    expr = f"({safe_col} + INTERVAL {amt} {unit})"
+                elif op == "fiscal_year":
+                    f_start = params.get("fiscal_start_month", 1)
+                    expr = f"CASE WHEN DATE_PART('month', {safe_col}) >= {f_start} THEN DATE_PART('year', {safe_col}) + 1 ELSE DATE_PART('year', {safe_col}) END"
+                else:
+                    expr = f"DATE_PART('year', {safe_col})"
+
+                proj = [f'"{c}"' for c in current_cols] + [f'{expr} AS "{out_col}"']
+                current_cols.append(out_col)
+
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+
+                generated.sql = f'{expr} AS "{out_col}"'
+                generated.polars = f'df = df.with_columns({expr}.alias("{out_col}"))'
+                generated.power_query_m = f'Table.AddColumn(Source, "{out_col}", ...)'
+                generated.excel_formula = f'=YEAR({col}2) or =EOMONTH({col}2, 0)'
+
+            # Phase 4: Numeric & Math
+            elif stype in ["math_transform", "math_operation"]:
+                col1 = params["column1"]
+                col2 = params.get("column2")
+                op = params.get("operation", "arithmetic").lower()
+                out_col = params.get("output_column") or f"{col1}_calc"
+                decimals = params.get("decimals", 2)
+
+                safe_c1 = f'CAST("{col1}" AS DOUBLE)'
+                safe_c2 = f'CAST("{col2}" AS DOUBLE)' if col2 else "0"
+
+                if op == "arithmetic":
+                    math_op = params.get("math_operator", "+")
+                    if math_op == "/":
+                        expr = f'({safe_c1} / NULLIF({safe_c2}, 0))'
+                    else:
+                        expr = f'({safe_c1} {math_op} {safe_c2})'
+                elif op == "round":
+                    expr = f'ROUND({safe_c1}, {decimals})'
+                elif op == "roundup":
+                    expr = f'CEIL({safe_c1})'
+                elif op == "rounddown":
+                    expr = f'FLOOR({safe_c1})'
+                elif op == "abs":
+                    expr = f'ABS({safe_c1})'
+                elif op == "mod":
+                    expr = f'({safe_c1} % NULLIF({safe_c2}, 0))'
+                elif op == "percent_change":
+                    expr = f'ROUND(({safe_c2} - {safe_c1}) * 100.0 / NULLIF({safe_c1}, 0), {decimals})'
+                elif op == "bin":
+                    bins = params.get("bins", [])
+                    when_parts = []
+                    for b in bins:
+                        b_max = b.get("max")
+                        b_lbl = str(b.get("label", "")).replace("'", "''")
+                        if b_max is not None:
+                            when_parts.append(f"WHEN {safe_c1} <= {b_max} THEN '{b_lbl}'")
+                    fallback = str(params.get("bin_other", "Other")).replace("'", "''")
+                    expr = f"CASE {' '.join(when_parts)} ELSE '{fallback}' END"
+                else:
+                    expr = f'ROUND({safe_c1}, {decimals})'
+
+                proj = [f'"{c}"' for c in current_cols] + [f'{expr} AS "{out_col}"']
+                current_cols.append(out_col)
+
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+
+                generated.sql = f'{expr} AS "{out_col}"'
+                generated.polars = f'df = df.with_columns({expr}.alias("{out_col}"))'
+                generated.power_query_m = f'Table.AddColumn(Source, "{out_col}", ...)'
+                generated.excel_formula = f'=ROUND({col1}2, {decimals})'
+
+            # Phase 4: Pivot & Unpivot
+            elif stype == "pivot":
+                pivot_col = params["pivot_column"]
+                val_col = params["value_column"]
+                agg_func = params.get("agg_func", "sum").lower()
+                idx_cols = params.get("index_columns", [])
+
+                idx_clause = f"GROUP BY {', '.join([f'\"{c}\"' for c in idx_cols])}" if idx_cols else ""
+                cte_sql = f"""{curr_cte} AS (
+    SELECT row_number() OVER () AS _row_id, * FROM (
+        PIVOT {prev_cte} ON "{pivot_col}" USING {agg_func}("{val_col}") {idx_clause}
+    )
+)"""
+                ctes.append(cte_sql)
+                generated.sql = f'PIVOT table ON "{pivot_col}" USING {agg_func}("{val_col}") {idx_clause}'
+                generated.polars = f'df = df.pivot(index={idx_cols}, on="{pivot_col}", values="{val_col}")'
+                generated.power_query_m = f'Table.Pivot(Source, ...)'
+                generated.excel_formula = 'Excel Pivot Table'
+
+            elif stype == "unpivot":
+                val_cols = params.get("value_columns", [])
+                name_col = params.get("name_column", "attribute")
+                val_out_col = params.get("value_column", "value")
+
+                val_cols_str = ", ".join([f'"{c}"' for c in val_cols])
+                cte_sql = f"""{curr_cte} AS (
+    SELECT row_number() OVER () AS _row_id, * FROM (
+        UNPIVOT {prev_cte} ON {val_cols_str} INTO NAME "{name_col}" VALUE "{val_out_col}"
+    )
+)"""
+                ctes.append(cte_sql)
+                generated.sql = f'UNPIVOT table ON {val_cols_str} INTO NAME "{name_col}" VALUE "{val_out_col}"'
+                generated.polars = f'df = df.unpivot(on={val_cols}, variable_name="{name_col}", value_name="{val_out_col}")'
+                generated.power_query_m = f'Table.UnpivotOtherColumns(Source, ...)'
+                generated.excel_formula = 'Power Query Unpivot'
+
             summaries.append(
                 StepSummary(
                     step_id=step.id,
@@ -463,9 +774,12 @@ class StepCompiler:
                 )
             )
 
-        final_proj = ", ".join([f'"{c}"' for c in current_cols])
         final_cte = f"step_{step_counter}"
-        compiled_sql = f"WITH\n" + ",\n".join(ctes) + f"\nSELECT {final_proj} FROM {final_cte}"
+        if any(s.type in ["pivot", "unpivot"] and s.enabled for s in steps):
+            compiled_sql = f"WITH\n" + ",\n".join(ctes) + f"\nSELECT * EXCLUDE(_row_id) FROM {final_cte}"
+        else:
+            final_proj = ", ".join([f'"{c}"' for c in current_cols])
+            compiled_sql = f"WITH\n" + ",\n".join(ctes) + f"\nSELECT {final_proj} FROM {final_cte}"
 
         return compiled_sql, summaries, current_cols
 

@@ -4,6 +4,8 @@ import React from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { AppendModal } from '../components/joins/AppendModal';
 import { RelationshipsModal } from '../components/joins/RelationshipsModal';
+import { ConditionalModal } from '../components/transforms/ConditionalModal';
+import { GroupByModal } from '../components/transforms/GroupByModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 describe('StepSheet Workbench', () => {
@@ -19,8 +21,7 @@ describe('StepSheet Workbench', () => {
       selectedDataset: {
         id: 'd1',
         name: 'Orders',
-        file_path: 'orders.parquet',
-        parquet_path: 'orders.parquet',
+        original_filename: 'orders.csv',
         file_format: 'csv',
         file_size_bytes: 1000,
         row_count: 50,
@@ -36,8 +37,7 @@ describe('StepSheet Workbench', () => {
         {
           id: 'd1',
           name: 'Orders',
-          file_path: 'orders.parquet',
-          parquet_path: 'orders.parquet',
+          original_filename: 'orders.csv',
           file_format: 'csv',
           file_size_bytes: 1000,
           row_count: 50,
@@ -49,8 +49,7 @@ describe('StepSheet Workbench', () => {
         {
           id: 'd2',
           name: 'Customers',
-          file_path: 'cust.parquet',
-          parquet_path: 'cust.parquet',
+          original_filename: 'cust.csv',
           file_format: 'csv',
           file_size_bytes: 1000,
           row_count: 20,
@@ -82,6 +81,18 @@ describe('StepSheet Workbench', () => {
     );
     expect(screen.getByText('Multi-Table Relationships & ER Canvas')).toBeDefined();
     expect(screen.getByText('Project Datasets (2)')).toBeDefined();
+  });
+
+  it('renders ConditionalModal with IF / IFS builder', () => {
+    render(<ConditionalModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText('IF / IFS / Conditional Column')).toBeDefined();
+    expect(screen.getByText('Add Else If Rule')).toBeDefined();
+  });
+
+  it('renders GroupByModal with aggregations', () => {
+    render(<GroupByModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText('Group By & Aggregations')).toBeDefined();
+    expect(screen.getByText('Add Aggregation')).toBeDefined();
   });
 });
 

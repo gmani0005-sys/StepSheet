@@ -138,4 +138,30 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch column profile');
     return res.json();
   },
+
+  // Pipeline Preview & Execution
+  async previewPipeline(
+    datasetId: string,
+    steps: any[],
+    params: { offset?: number; limit?: number } = {}
+  ): Promise<any> {
+    const res = await fetch(`${API_BASE}/pipelines/preview`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify({
+        dataset_id: datasetId,
+        steps,
+        offset: params.offset ?? 0,
+        limit: params.limit ?? 100,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to preview pipeline');
+    }
+    return res.json();
+  },
 };

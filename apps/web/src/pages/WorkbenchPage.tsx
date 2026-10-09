@@ -5,6 +5,7 @@ import { RightPanel } from '../components/layout/RightPanel';
 import { DataGrid } from '../components/grid/DataGrid';
 import { ColumnProfilePopover } from '../components/profile/ColumnProfilePopover';
 import { AuthModal } from '../components/auth/AuthModal';
+import { StepBuilderModal } from '../components/steps/StepBuilderModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -37,6 +38,7 @@ export const WorkbenchPage: React.FC = () => {
 
       {/* Overlays */}
       <ColumnProfilePopover />
+      <StepBuilderModal />
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}

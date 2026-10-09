@@ -31,6 +31,11 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal }) => {
     isRightPanelOpen,
     toggleLeftPanel,
     toggleRightPanel,
+    undo,
+    redo,
+    undoStack,
+    redoStack,
+    steps,
   } = useWorkbenchStore();
 
   const { user, isAuthenticated, logout } = useAuthStore();
@@ -65,6 +70,11 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal }) => {
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">
               {totalRows.toLocaleString()} rows • {columns.length} cols
             </span>
+            {steps.length > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20 font-mono">
+                {steps.filter((s) => s.enabled).length} active step(s)
+              </span>
+            )}
             <span className="text-[11px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
               Live Preview (Sampled)
             </span>
@@ -75,23 +85,25 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal }) => {
       {/* Center: Pipeline Actions */}
       <div className="hidden lg:flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-lg border border-slate-800/80">
         <button
-          disabled
-          title="Undo (Ctrl+Z)"
-          className="p-1.5 text-slate-500 hover:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+          onClick={undo}
+          disabled={undoStack.length === 0}
+          title="Undo step edit (Ctrl+Z)"
+          className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
         >
           <RotateCcw size={15} />
         </button>
         <button
-          disabled
-          title="Redo (Ctrl+Y)"
-          className="p-1.5 text-slate-500 hover:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+          onClick={redo}
+          disabled={redoStack.length === 0}
+          title="Redo step edit (Ctrl+Y)"
+          className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
         >
           <RotateCw size={15} />
         </button>
         <div className="w-px h-4 bg-slate-800 mx-1" />
         <button
           className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
-          onClick={() => alert('Full dataset processing job started on DuckDB engine.')}
+          onClick={() => alert(`Running full pipeline (${steps.length} steps) across complete dataset.`)}
         >
           <Play size={13} className="text-emerald-400 fill-emerald-400" />
           <span>Run Full</span>

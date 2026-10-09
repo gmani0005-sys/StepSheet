@@ -6,7 +6,10 @@ export type StepType =
   | 'remove_duplicates'
   | 'fill_down'
   | 'replace_values'
-  | 'split_column';
+  | 'split_column'
+  | 'xlookup'
+  | 'append'
+  | 'join';
 
 export interface StepDefinition {
   id: string;

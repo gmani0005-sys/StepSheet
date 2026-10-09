@@ -72,6 +72,9 @@ class StepSchema(BaseModel):
         "fill_down",
         "replace_values",
         "split_column",
+        "xlookup",
+        "append",
+        "join",
     ]
     label: str
     enabled: bool = True

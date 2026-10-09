@@ -52,7 +52,12 @@ export const StepBuilderModal: React.FC = () => {
     }
   }, [columns]);
 
-  if (!isStepWizardOpen || !activeWizardStepType) return null;
+  if (
+    !isStepWizardOpen ||
+    !activeWizardStepType ||
+    ['join', 'xlookup', 'append'].includes(activeWizardStepType)
+  )
+    return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

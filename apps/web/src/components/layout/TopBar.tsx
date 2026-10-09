@@ -20,9 +20,10 @@ import { useAuthStore } from '../../store/authStore';
 
 interface TopBarProps {
   onOpenAuthModal?: () => void;
+  onOpenRelationships?: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal }) => {
+export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal, onOpenRelationships }) => {
   const {
     selectedDataset,
     totalRows,
@@ -101,6 +102,14 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenAuthModal }) => {
           <RotateCw size={15} />
         </button>
         <div className="w-px h-4 bg-slate-800 mx-1" />
+        <button
+          onClick={onOpenRelationships}
+          title="Multi-table relationships & ER canvas"
+          className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
+        >
+          <Layers size={13} className="text-indigo-400" />
+          <span>Canvas / ER</span>
+        </button>
         <button
           className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 rounded transition-colors"
           onClick={() => alert(`Running full pipeline (${steps.length} steps) across complete dataset.`)}

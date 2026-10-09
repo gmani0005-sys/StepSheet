@@ -164,4 +164,34 @@ export const api = {
     }
     return res.json();
   },
+
+  // Joins & Lookups
+  async checkJoinHealth(data: {
+    left_dataset_id: string;
+    right_dataset_id: string;
+    key_pairs: any[];
+    join_type: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE}/joins/health-check`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Health check failed');
+    }
+    return res.json();
+  },
+
+  async suggestJoinKeys(leftId: string, rightId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/joins/suggest-keys/${leftId}/${rightId}`, {
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) throw new Error('Failed to suggest keys');
+    return res.json();
+  },
 };

@@ -1,13 +1,14 @@
+import os
 import json
 from typing import List, Dict, Any, Tuple, Optional
 from app.schemas.steps import StepSchema, GeneratedCode, StepSummary
-from app.schemas.dataset import ColumnSchema
 
 
 class StepCompiler:
     """
     Compiles typed pipeline steps into clean, executable DuckDB SQL queries
     and generates equivalent Polars, Power Query M, and Excel formulas.
+    Supports all Phase 2 transformations and Phase 3 Lookup & Join suite.
     """
 
     DUCKDB_TYPE_MAP = {
@@ -40,18 +41,19 @@ class StepCompiler:
         parquet_path: str,
         steps: List[StepSchema],
         initial_columns: List[str],
+        dataset_paths: Optional[Dict[str, str]] = None,
     ) -> Tuple[str, List[StepSummary], List[str]]:
         """
         Compiles the entire step sequence into a CTE-based DuckDB SQL statement.
         Returns: (compiled_sql, step_summaries, final_column_names)
         """
+        dataset_paths = dataset_paths or {}
         parquet_sql = parquet_path.replace("\\", "/")
         ctes: List[str] = []
         current_cols = list(initial_columns)
         summaries: List[StepSummary] = []
 
         # Base step: source data
-        # We include an auto-incrementing row_id to support stable deterministic windowing (e.g. fill_down, remove_duplicates)
         ctes.append(
             f"step_0 AS (\n    SELECT row_number() OVER () AS _row_id, * FROM read_parquet('{parquet_sql}')\n)"
         )
@@ -70,12 +72,12 @@ class StepCompiler:
             params = step.params
             generated = GeneratedCode(sql="", polars="", power_query_m="", excel_formula=None)
 
+            # Phase 2 steps
             if stype == "change_type":
                 col = params["column"]
                 ttype = params["target_type"]
                 duck_type = cls.DUCKDB_TYPE_MAP.get(ttype, "VARCHAR")
-                
-                # Projection
+
                 proj = []
                 for c in current_cols:
                     if c == col:
@@ -89,7 +91,7 @@ class StepCompiler:
                 generated.sql = f'TRY_CAST("{col}" AS {duck_type}) AS "{col}"'
                 generated.polars = f'df = df.with_columns(pl.col("{col}").cast({cls.POLARS_TYPE_MAP.get(ttype, "pl.Utf8")}))'
                 generated.power_query_m = f'Table.TransformColumnTypes(Source, {{"{col}", {cls.PQ_TYPE_MAP.get(ttype, "type text")}}})'
-                if ttype == "integer" or ttype == "float":
+                if ttype in ["integer", "float"]:
                     generated.excel_formula = f'=VALUE({col}2)'
                 elif ttype == "text":
                     generated.excel_formula = f'=TEXT({col}2, "@")'
@@ -169,7 +171,11 @@ class StepCompiler:
                 col = params["column"]
                 direction = params.get("direction", "down")
                 fn = "LAST_VALUE" if direction == "down" else "FIRST_VALUE"
-                frame = "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" if direction == "down" else "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING"
+                frame = (
+                    "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
+                    if direction == "down"
+                    else "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING"
+                )
 
                 proj = []
                 for c in current_cols:
@@ -230,7 +236,6 @@ class StepCompiler:
 
                 for c in current_cols:
                     if c == col and not keep_orig:
-                        # Replace with split columns
                         for i, n_name in enumerate(new_names):
                             proj.append(f'string_split(CAST("{c}" AS VARCHAR), \'{escaped_delim}\')[{i+1}] AS "{n_name}"')
                             new_cols_added.append(n_name)
@@ -253,6 +258,201 @@ class StepCompiler:
                 generated.power_query_m = f'Table.SplitColumn(Source, "{col}", Splitter.SplitTextByDelimiter("{delim}"), {json.dumps(new_names)})'
                 generated.excel_formula = f'=TEXTSPLIT({col}2, "{delim}")'
 
+            # Phase 3: Lookup & Join suite
+            elif stype in ["xlookup", "lookup"]:
+                lk_ds_id = params["lookup_dataset_id"]
+                lk_path = dataset_paths.get(lk_ds_id, "")
+                lk_sql = lk_path.replace("\\", "/")
+                left_key = params["left_key_col"]
+                right_key = params["right_key_col"]
+                ret_cols = params.get("return_columns", [])
+                if_not_found = params.get("if_not_found", "Not found")
+
+                escaped_fallback = str(if_not_found).replace("'", "''")
+                ret_proj = []
+                for rc in ret_cols:
+                    # Rename if conflict with current_cols
+                    target_name = f"{rc}_lookup" if rc in current_cols else rc
+                    ret_proj.append(f'COALESCE(lk."{rc}", \'{escaped_fallback}\') AS "{target_name}"')
+                    current_cols.append(target_name)
+
+                lk_table_name = f"_lk_{step_counter}"
+                ctes.append(f"""{lk_table_name} AS (
+    SELECT * FROM (
+        SELECT *, row_number() OVER (PARTITION BY "{right_key}" ORDER BY 1) as _rn
+        FROM read_parquet('{lk_sql}')
+    ) WHERE _rn = 1
+)""")
+                left_proj = [f'{prev_cte}."{c}"' for c in current_cols[:-len(ret_cols)]]
+                cte_sql = f"""{curr_cte} AS (
+    SELECT {prev_cte}._row_id, {', '.join(left_proj)}, {', '.join(ret_proj)}
+    FROM {prev_cte}
+    LEFT JOIN {lk_table_name} lk ON {prev_cte}."{left_key}" = lk."{right_key}"
+)"""
+                ctes.append(cte_sql)
+
+                generated.sql = f'LEFT JOIN (SELECT * FROM read_parquet(...)) lk ON "{left_key}" = lk."{right_key}"'
+                generated.polars = f'df = df.join(lookup_df, left_on="{left_key}", right_on="{right_key}", how="left")'
+                generated.power_query_m = f'Table.NestedJoin(Source, {{"{left_key}"}}, LookupTable, {{"{right_key}"}}, "Lookup", JoinKind.LeftOuter)'
+                first_ret = ret_cols[0] if ret_cols else "Result"
+                generated.excel_formula = f'=XLOOKUP({left_key}2, LookupSheet!A:A, LookupSheet!B:B, "{if_not_found}", 0)'
+
+            elif stype in ["append", "append_tables"]:
+                app_ds_id = params["append_dataset_id"]
+                app_path = dataset_paths.get(app_ds_id, "")
+                app_sql = app_path.replace("\\", "/")
+                union_kw = "UNION" if params.get("union_type") == "distinct" else "UNION ALL"
+                align_mode = params.get("alignment_mode", "by_name")
+
+                if align_mode == "by_name" and app_path and os.path.exists(app_path):
+                    try:
+                        import duckdb
+                        temp_cols = [d[0] for d in duckdb.connect().execute(f"DESCRIBE SELECT * FROM read_parquet('{app_sql}') LIMIT 0").fetchall()]
+                        for tc in temp_cols:
+                            if tc != "_row_id" and tc not in current_cols:
+                                current_cols.append(tc)
+                    except Exception:
+                        pass
+
+                if align_mode == "by_position":
+                    proj_cols = ", ".join([f'"{c}"' for c in current_cols])
+                    cte_sql = f"""{curr_cte} AS (
+    SELECT row_number() OVER () AS _row_id, * FROM (
+        SELECT {proj_cols} FROM {prev_cte}
+        {union_kw}
+        SELECT {proj_cols} FROM read_parquet('{app_sql}')
+    )
+)"""
+                else:
+                    cte_sql = f"""{curr_cte} AS (
+    SELECT row_number() OVER () AS _row_id, * FROM (
+        SELECT * EXCLUDE(_row_id) FROM {prev_cte}
+        {union_kw} BY NAME
+        SELECT * FROM read_parquet('{app_sql}')
+    )
+)"""
+                ctes.append(cte_sql)
+
+                generated.sql = f"{union_kw} {'BY NAME ' if align_mode == 'by_name' else ''}SELECT * FROM read_parquet('{app_sql}')"
+                generated.polars = f'df = pl.concat([df, append_df], how="{"diagonal" if align_mode == "by_name" else "vertical"}")'
+                generated.power_query_m = f'Table.Combine({{Source, AppendTable}})'
+                generated.excel_formula = f'=VSTACK(Table1, Table2)'
+
+            elif stype in ["join", "join_builder"]:
+                r_ds_id = params.get("right_dataset_id")
+                j_type = params.get("join_type", "left").lower()
+                r_path = dataset_paths.get(r_ds_id, "")
+                r_sql = r_path.replace("\\", "/")
+                key_pairs = params.get("key_pairs", [])
+                selected_r_cols = params.get("selected_right_columns", [])
+                s_left = params.get("suffix_left", "_left")
+                s_right = params.get("suffix_right", "_right")
+                dedupe_r = params.get("dedupe_right_first", False)
+
+                # Right table CTE
+                r_cte = f"_r_{step_counter}"
+                if dedupe_r and key_pairs:
+                    dedup_p = ", ".join([f'"{kp["right_col"]}"' for kp in key_pairs])
+                    ctes.append(f"""{r_cte} AS (
+    SELECT * FROM (
+        SELECT *, row_number() OVER (PARTITION BY {dedup_p} ORDER BY 1) as _r_rn
+        FROM read_parquet('{r_sql}')
+    ) WHERE _r_rn = 1
+)""")
+                else:
+                    ctes.append(f"""{r_cte} AS (\n    SELECT * FROM read_parquet('{r_sql}')\n)""")
+
+                # Build ON conditions
+                on_conditions = []
+                for kp in key_pairs:
+                    lc = f'{prev_cte}."{kp["left_col"]}"'
+                    rc = f'{r_cte}."{kp["right_col"]}"'
+                    if kp.get("trim_whitespace"):
+                        lc = f"trim(cast({lc} as varchar))"
+                        rc = f"trim(cast({rc} as varchar))"
+                    if kp.get("case_insensitive"):
+                        lc = f"lower(cast({lc} as varchar))"
+                        rc = f"lower(cast({rc} as varchar))"
+                    on_conditions.append(f"{lc} = {rc}")
+
+                on_clause = f" ON {' AND '.join(on_conditions)}" if on_conditions else ""
+
+                # Handle join types
+                join_sql_kw = "LEFT JOIN"
+                pq_join_kind = "JoinKind.LeftOuter"
+                polars_how = "left"
+
+                if j_type == "inner":
+                    join_sql_kw = "INNER JOIN"
+                    pq_join_kind = "JoinKind.Inner"
+                    polars_how = "inner"
+                elif j_type == "right":
+                    join_sql_kw = "RIGHT JOIN"
+                    pq_join_kind = "JoinKind.RightOuter"
+                    polars_how = "right"
+                elif j_type == "full":
+                    join_sql_kw = "FULL OUTER JOIN"
+                    pq_join_kind = "JoinKind.FullOuter"
+                    polars_how = "full"
+                elif j_type == "left_semi":
+                    join_sql_kw = "SEMI JOIN"
+                    pq_join_kind = "JoinKind.LeftSemi"
+                    polars_how = "semi"
+                elif j_type == "left_anti":
+                    join_sql_kw = "ANTI JOIN"
+                    pq_join_kind = "JoinKind.LeftAnti"
+                    polars_how = "anti"
+                elif j_type == "cross":
+                    join_sql_kw = "CROSS JOIN"
+                    on_clause = ""
+                    pq_join_kind = "JoinKind.Inner"
+                    polars_how = "cross"
+
+                # Projection columns
+                new_projected_cols = []
+                proj = [f"{prev_cte}._row_id"]
+
+                if j_type in ["left_semi", "left_anti"]:
+                    # Keeps only left columns
+                    for c in current_cols:
+                        proj.append(f'{prev_cte}."{c}"')
+                        new_projected_cols.append(c)
+                else:
+                    for c in current_cols:
+                        if c in selected_r_cols:
+                            proj.append(f'{prev_cte}."{c}" AS "{c}{s_left}"')
+                            new_projected_cols.append(f"{c}{s_left}")
+                        else:
+                            proj.append(f'{prev_cte}."{c}"')
+                            new_projected_cols.append(c)
+
+                    for rc in selected_r_cols:
+                        if rc in current_cols:
+                            proj.append(f'{r_cte}."{rc}" AS "{rc}{s_right}"')
+                            new_projected_cols.append(f"{rc}{s_right}")
+                        else:
+                            proj.append(f'{r_cte}."{rc}"')
+                            new_projected_cols.append(rc)
+
+                current_cols = new_projected_cols
+
+                cte_sql = f"""{curr_cte} AS (
+    SELECT {', '.join(proj)}
+    FROM {prev_cte}
+    {join_sql_kw} {r_cte}{on_clause}
+)"""
+                ctes.append(cte_sql)
+
+                generated.sql = f"{join_sql_kw} right_table{on_clause}"
+                l_keys = [kp["left_col"] for kp in key_pairs]
+                r_keys = [kp["right_col"] for kp in key_pairs]
+                generated.polars = f'df = df.join(right_df, left_on={l_keys}, right_on={r_keys}, how="{polars_how}")'
+                generated.power_query_m = f'Table.NestedJoin(Source, {json.dumps(l_keys)}, RightTable, {json.dumps(r_keys)}, "Joined", {pq_join_kind})'
+                if j_type in ["left", "inner"]:
+                    generated.excel_formula = f'=XLOOKUP({l_keys[0] if l_keys else "Key"}2, RightSheet!A:A, RightSheet!B:B) (1:1 approximation)'
+                else:
+                    generated.excel_formula = f'Note: {j_type.replace("_", " ").title()} join cannot be expressed as a single standard Excel cell formula.'
+
             summaries.append(
                 StepSummary(
                     step_id=step.id,
@@ -263,7 +463,6 @@ class StepCompiler:
                 )
             )
 
-        # Final select projecting all columns except internal _row_id and _dedup_rank
         final_proj = ", ".join([f'"{c}"' for c in current_cols])
         final_cte = f"step_{step_counter}"
         compiled_sql = f"WITH\n" + ",\n".join(ctes) + f"\nSELECT {final_proj} FROM {final_cte}"

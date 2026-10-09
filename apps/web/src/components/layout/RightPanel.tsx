@@ -68,8 +68,8 @@ export const RightPanel: React.FC = () => {
       icon: GitBranch,
       items: [
         { id: 'xlookup', name: 'XLOOKUP / VLOOKUP', desc: 'Bring columns from another table with exact match' },
-        { id: 'join_builder', name: 'Join Builder', desc: 'Combine datasets with Venn diagrams and health check' },
-        { id: 'append_tables', name: 'Append (Union)', desc: 'Stack tables with column name alignment' },
+        { id: 'join', name: 'Join Builder', desc: 'Combine datasets with Venn diagrams and health check' },
+        { id: 'append', name: 'Append (Union)', desc: 'Stack tables with column name alignment' },
       ],
     },
     {
@@ -317,11 +317,14 @@ export const RightPanel: React.FC = () => {
                               'fill_down',
                               'replace_values',
                               'split_column',
+                              'xlookup',
+                              'join',
+                              'append',
                             ].includes(item.id)
                           ) {
                             openStepWizard(item.id as StepType);
                           } else {
-                            alert(`${item.name} is scheduled for Phase 3 / Phase 4.`);
+                            alert(`${item.name} is scheduled for Phase 4.`);
                           }
                         }}
                         className="p-2 rounded-lg bg-slate-950/40 hover:bg-slate-800/80 border border-slate-800/60 hover:border-slate-700 cursor-pointer transition-all group"

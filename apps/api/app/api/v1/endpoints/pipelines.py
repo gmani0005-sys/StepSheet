@@ -43,11 +43,24 @@ def preview_pipeline(
     initial_schema = dataset.schema_metadata or []
     initial_cols = [c["name"] for c in initial_schema]
 
+    # Collect all referenced datasets (for lookups, joins, appends)
+    dataset_paths = {dataset.id: local_parquet_path}
+    for s in req.steps:
+        params = s.params or {}
+        for key_name in ["lookup_dataset_id", "right_dataset_id", "append_dataset_id"]:
+            ref_id = params.get(key_name)
+            if ref_id and ref_id not in dataset_paths:
+                ref_ds = db.query(Dataset).filter(Dataset.id == ref_id).first()
+                if ref_ds:
+                    ref_path = storage.get_local_path(ref_ds.parquet_path)
+                    dataset_paths[ref_id] = ref_path
+
     try:
         compiled_sql, step_summaries, final_cols = step_compiler.compile_pipeline(
             parquet_path=local_parquet_path,
             steps=req.steps,
             initial_columns=initial_cols,
+            dataset_paths=dataset_paths,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to compile pipeline: {str(e)}")

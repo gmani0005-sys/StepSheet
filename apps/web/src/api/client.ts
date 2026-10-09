@@ -194,4 +194,29 @@ export const api = {
     if (!res.ok) throw new Error('Failed to suggest keys');
     return res.json();
   },
+
+  // AI Step Assistant
+  async generateAiStep(datasetId: string, prompt: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/ai/generate-step`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify({ dataset_id: datasetId, prompt }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to generate step with AI');
+    }
+    return res.json();
+  },
+
+  async getAiStatus(): Promise<any> {
+    const res = await fetch(`${API_BASE}/ai/status`, {
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) throw new Error('Failed to get AI status');
+    return res.json();
+  },
 };

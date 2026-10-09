@@ -17,6 +17,7 @@ import { TextTransformModal } from '../components/transforms/TextTransformModal'
 import { DateTransformModal } from '../components/transforms/DateTransformModal';
 import { MathTransformModal } from '../components/transforms/MathTransformModal';
 import { PivotUnpivotModal } from '../components/transforms/PivotUnpivotModal';
+import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -50,8 +51,11 @@ export const WorkbenchPage: React.FC = () => {
         {/* Left Panel: Datasets & Sheets */}
         <LeftPanel />
 
-        {/* Center Panel: Virtualized Data Grid */}
-        <DataGrid />
+        {/* Center Panel: Natural Language Assistant + Virtualized Data Grid */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <NaturalLanguageStepBar />
+          <DataGrid />
+        </div>
 
         {/* Right Panel: Step Builder & Catalog */}
         <RightPanel />

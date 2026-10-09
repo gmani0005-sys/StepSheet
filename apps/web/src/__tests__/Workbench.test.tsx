@@ -6,6 +6,8 @@ import { AppendModal } from '../components/joins/AppendModal';
 import { RelationshipsModal } from '../components/joins/RelationshipsModal';
 import { ConditionalModal } from '../components/transforms/ConditionalModal';
 import { GroupByModal } from '../components/transforms/GroupByModal';
+import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar';
+import { ReviewGeneratedStepModal } from '../components/ai/ReviewGeneratedStepModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 describe('StepSheet Workbench', () => {
@@ -93,6 +95,35 @@ describe('StepSheet Workbench', () => {
     render(<GroupByModal isOpen={true} onClose={() => {}} />);
     expect(screen.getByText('Group By & Aggregations')).toBeDefined();
     expect(screen.getByText('Add Aggregation')).toBeDefined();
+  });
+
+  it('renders NaturalLanguageStepBar with prompt input and suggestions', () => {
+    render(<NaturalLanguageStepBar />);
+    expect(screen.getByPlaceholderText(/Describe transformation in plain English/i)).toBeDefined();
+    expect(screen.getByText('Create Step')).toBeDefined();
+  });
+
+  it('renders ReviewGeneratedStepModal with review requirement', () => {
+    render(
+      <ReviewGeneratedStepModal
+        isOpen={true}
+        step={{
+          id: 's1',
+          type: 'filter_rows',
+          label: 'Filter amount > 100',
+          enabled: true,
+          params: { column: 'amount', operator: 'gt', value: '100' },
+        }}
+        explanation="Filters dataset to only rows where amount is greater than 100"
+        confidence={0.95}
+        provider="heuristic"
+        onClose={() => {}}
+        onApply={() => {}}
+      />
+    );
+    expect(screen.getByText('Review AI Generated Step')).toBeDefined();
+    expect(screen.getByText('Review Required')).toBeDefined();
+    expect(screen.getByText('Confirm & Apply to Pipeline')).toBeDefined();
   });
 });
 

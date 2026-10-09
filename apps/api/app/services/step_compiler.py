@@ -683,8 +683,29 @@ class StepCompiler:
                 out_col = params.get("output_column") or f"{col1}_calc"
                 decimals = params.get("decimals", 2)
 
-                safe_c1 = f'CAST("{col1}" AS DOUBLE)'
-                safe_c2 = f'CAST("{col2}" AS DOUBLE)' if col2 else "0"
+                is_num1 = False
+                try:
+                    float(str(col1).strip())
+                    is_num1 = True
+                except (ValueError, TypeError):
+                    is_num1 = False
+
+                is_num2 = False
+                try:
+                    if col2 is not None:
+                        float(str(col2).strip())
+                        is_num2 = True
+                except (ValueError, TypeError):
+                    is_num2 = False
+
+                safe_c1 = str(col1) if (is_num1 and col1 not in current_cols) else f'CAST("{col1}" AS DOUBLE)'
+                if col2 is not None and str(col2) != "":
+                    if is_num2 and col2 not in current_cols:
+                        safe_c2 = str(col2)
+                    else:
+                        safe_c2 = f'CAST("{col2}" AS DOUBLE)'
+                else:
+                    safe_c2 = "0"
 
                 if op == "arithmetic":
                     math_op = params.get("math_operator", "+")
@@ -717,16 +738,36 @@ class StepCompiler:
                 else:
                     expr = f'ROUND({safe_c1}, {decimals})'
 
-                proj = [f'"{c}"' for c in current_cols] + [f'{expr} AS "{out_col}"']
-                current_cols.append(out_col)
+                proj = []
+                if out_col in current_cols:
+                    for c in current_cols:
+                        if c == out_col:
+                            proj.append(f'{expr} AS "{c}"')
+                        else:
+                            proj.append(f'"{c}"')
+                else:
+                    proj = [f'"{c}"' for c in current_cols] + [f'{expr} AS "{out_col}"']
+                    current_cols.append(out_col)
 
                 cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
                 ctes.append(cte_sql)
 
                 generated.sql = f'{expr} AS "{out_col}"'
-                generated.polars = f'df = df.with_columns({expr}.alias("{out_col}"))'
-                generated.power_query_m = f'Table.AddColumn(Source, "{out_col}", ...)'
-                generated.excel_formula = f'=ROUND({col1}2, {decimals})'
+                if op == "arithmetic":
+                    math_op = params.get("math_operator", "+")
+                    c1_ref = f"{col1}2" if col1 in current_cols else str(col1)
+                    c2_ref = f"{col2}2" if (col2 and col2 in current_cols) else str(col2 or 0)
+                    generated.excel_formula = f"={c1_ref} {math_op} {c2_ref}"
+                    generated.polars = f'df = df.with_columns(({safe_c1} {math_op} {safe_c2}).alias("{out_col}"))'
+                    generated.power_query_m = f'Table.AddColumn(Source, "{out_col}", each [#{col1}] {math_op} [#{col2}])'
+                elif op == "round":
+                    generated.polars = f'df = df.with_columns({expr}.alias("{out_col}"))'
+                    generated.power_query_m = f'Table.AddColumn(Source, "{out_col}", ...)'
+                    generated.excel_formula = f'=ROUND({col1}2, {decimals})'
+                else:
+                    generated.polars = f'df = df.with_columns({expr}.alias("{out_col}"))'
+                    generated.power_query_m = f'Table.AddColumn(Source, "{out_col}", ...)'
+                    generated.excel_formula = f'=ROUND({col1}2, {decimals})'
 
             # Phase 4: Pivot & Unpivot
             elif stype == "pivot":

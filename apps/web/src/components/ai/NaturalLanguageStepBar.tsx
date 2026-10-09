@@ -44,6 +44,7 @@ export const NaturalLanguageStepBar: React.FC = () => {
   };
 
   const examplePrompts = [
+    'create discounted column = amount - discount',
     'Filter rows where amount > 100',
     'Sort by amount descending',
     'Calculate running total of amount',
@@ -68,7 +69,7 @@ export const NaturalLanguageStepBar: React.FC = () => {
               type="text"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe transformation in plain English (e.g. 'filter amount > 100', 'running total of sales')..."
+              placeholder="Describe transformation in plain English (e.g. 'discounted = amount - discount', 'filter amount > 100', 'running total of sales')..."
               className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl pl-9 pr-24 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60 shadow-inner"
               disabled={isLoading}
             />

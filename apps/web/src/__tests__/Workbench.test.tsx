@@ -352,8 +352,37 @@ describe('StepSheet Workbench', () => {
     expect(preview.rows[0].discounted).toBeDefined();
   });
 
-  it('renders DataGrid with native horizontal and vertical scroll container and column unique values dropdown', () => {
+  it('renders DataGrid transitioning from null selectedDataset to loaded dataset and opens column unique values dropdown', () => {
+    // 1. Start with selectedDataset: null (simulating initial startup render)
     useWorkbenchStore.setState({
+      selectedDataset: null,
+      columns: [],
+      rows: [],
+      allRows: [],
+      totalRows: 0,
+      filteredRows: 0,
+    });
+
+    const { rerender } = render(<DataGrid />);
+    expect(screen.getByText('Welcome to StepSheet')).toBeDefined();
+
+    // 2. Transition to loaded dataset (must not violate Rules of Hooks)
+    useWorkbenchStore.setState({
+      selectedDataset: {
+        id: 'ds-test',
+        name: 'Customers',
+        original_filename: 'customers.csv',
+        file_format: 'csv',
+        file_size_bytes: 1000,
+        row_count: 3,
+        column_count: 2,
+        schema_metadata: [
+          { name: 'region', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
+          { name: 'account_tier', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
       columns: [
         { name: 'region', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
         { name: 'account_tier', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
@@ -372,7 +401,7 @@ describe('StepSheet Workbench', () => {
       filteredRows: 3,
     });
 
-    render(<DataGrid />);
+    rerender(<DataGrid />);
     const container = screen.getByTestId('grid-scroll-container');
     expect(container).toBeDefined();
     expect(container.className).toContain('overflow-x-auto');

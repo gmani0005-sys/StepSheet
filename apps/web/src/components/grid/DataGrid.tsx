@@ -77,6 +77,11 @@ export const DataGrid: React.FC = () => {
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const safeAllRows = Array.isArray(allRows) ? allRows : [];
+  const safeSchemaColumns = Array.isArray(schemaColumns) ? schemaColumns : [];
+  const safeColumnFilters = columnValueFilters || {};
+
   // Close column unique-values dropdown on outside click or Escape
   useEffect(() => {
     if (!openDropdownCol) return;
@@ -86,7 +91,7 @@ export const DataGrid: React.FC = () => {
       if (dropdownRef.current && dropdownRef.current.contains(target)) {
         return;
       }
-      if (target.closest('[data-col-dropdown-trigger]')) {
+      if (target.closest && target.closest('[data-col-dropdown-trigger]')) {
         return;
       }
       setOpenDropdownCol(null);
@@ -108,16 +113,17 @@ export const DataGrid: React.FC = () => {
 
   // Compute unique values per column from the full dataset/pipeline rows (or current rows fallback)
   const sourceRowsForUniqueValues = useMemo(() => {
-    return allRows && allRows.length > 0 ? allRows : rows;
-  }, [allRows, rows]);
+    return safeAllRows.length > 0 ? safeAllRows : safeRows;
+  }, [safeAllRows, safeRows]);
 
   const uniqueValuesByColumn = useMemo(() => {
     const map: Record<string, UniqueValueItem[]> = {};
     const total = sourceRowsForUniqueValues.length;
 
-    schemaColumns.forEach((col) => {
+    safeSchemaColumns.forEach((col) => {
       const counts = new Map<string, { rawValue: any; count: number }>();
       sourceRowsForUniqueValues.forEach((row) => {
+        if (!row) return;
         const val = row[col.name];
         const key = toUniqueValueKey(val);
         const existing = counts.get(key);
@@ -163,7 +169,7 @@ export const DataGrid: React.FC = () => {
     });
 
     return map;
-  }, [schemaColumns, sourceRowsForUniqueValues]);
+  }, [safeSchemaColumns, sourceRowsForUniqueValues]);
 
   const handleOpenColumnDropdown = (colName: string, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -193,8 +199,8 @@ export const DataGrid: React.FC = () => {
   const columnHelper = createColumnHelper<Record<string, any>>();
 
   const columns = useMemo(() => {
-    return schemaColumns.map((col) => {
-      const activeFilterValues = columnValueFilters[col.name];
+    return safeSchemaColumns.map((col) => {
+      const activeFilterValues = safeColumnFilters[col.name];
       const hasActiveFilter = Array.isArray(activeFilterValues);
       const isDropdownOpen = openDropdownCol === col.name;
 
@@ -279,16 +285,16 @@ export const DataGrid: React.FC = () => {
       });
     });
   }, [
-    schemaColumns,
+    safeSchemaColumns,
     sortConditions,
-    columnValueFilters,
+    safeColumnFilters,
     openDropdownCol,
     toggleSort,
     openColumnProfile,
   ]);
 
   const table = useReactTable({
-    data: rows,
+    data: safeRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
@@ -302,6 +308,26 @@ export const DataGrid: React.FC = () => {
     estimateSize: () => 34,
     overscan: 10,
   });
+
+  // Active dropdown column metadata & unique values (computed before any early return)
+  const activeColSchema = openDropdownCol
+    ? safeSchemaColumns.find((c) => c.name === openDropdownCol)
+    : null;
+  const allUniqueItems = openDropdownCol ? uniqueValuesByColumn[openDropdownCol] || [] : [];
+  const filteredUniqueItems = dropdownSearch.trim()
+    ? allUniqueItems.filter((item) =>
+        item.displayLabel.toLowerCase().includes(dropdownSearch.trim().toLowerCase())
+      )
+    : allUniqueItems;
+
+  const activeColSelectedKeys: Set<string> = useMemo(() => {
+    if (!openDropdownCol) return new Set();
+    const explicit = safeColumnFilters[openDropdownCol];
+    if (Array.isArray(explicit)) {
+      return new Set(explicit);
+    }
+    return new Set(allUniqueItems.map((i) => i.key));
+  }, [openDropdownCol, safeColumnFilters, allUniqueItems]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -324,27 +350,7 @@ export const DataGrid: React.FC = () => {
 
   const startRow = totalRows === 0 || filteredRows === 0 ? 0 : offset + 1;
   const endRow = Math.min(offset + limit, filteredRows);
-  const activeFilterEntries = Object.entries(columnValueFilters);
-
-  // Active dropdown column metadata & unique values
-  const activeColSchema = openDropdownCol
-    ? schemaColumns.find((c) => c.name === openDropdownCol)
-    : null;
-  const allUniqueItems = openDropdownCol ? uniqueValuesByColumn[openDropdownCol] || [] : [];
-  const filteredUniqueItems = dropdownSearch.trim()
-    ? allUniqueItems.filter((item) =>
-        item.displayLabel.toLowerCase().includes(dropdownSearch.trim().toLowerCase())
-      )
-    : allUniqueItems;
-
-  const activeColSelectedKeys: Set<string> = useMemo(() => {
-    if (!openDropdownCol) return new Set();
-    const explicit = columnValueFilters[openDropdownCol];
-    if (Array.isArray(explicit)) {
-      return new Set(explicit);
-    }
-    return new Set(allUniqueItems.map((i) => i.key));
-  }, [openDropdownCol, columnValueFilters, allUniqueItems]);
+  const activeFilterEntries = Object.entries(safeColumnFilters);
 
   const isAllVisibleSelected =
     filteredUniqueItems.length > 0 &&
@@ -353,8 +359,8 @@ export const DataGrid: React.FC = () => {
   const handleToggleUniqueValue = (colName: string, itemKey: string) => {
     const colItems = uniqueValuesByColumn[colName] || [];
     const allKeys = colItems.map((i) => i.key);
-    const currentSelected = columnValueFilters[colName]
-      ? new Set(columnValueFilters[colName])
+    const currentSelected = safeColumnFilters[colName]
+      ? new Set(safeColumnFilters[colName])
       : new Set(allKeys);
 
     if (currentSelected.has(itemKey)) {
@@ -385,7 +391,6 @@ export const DataGrid: React.FC = () => {
     const visibleKeys = filteredUniqueItems.map((i) => i.key);
 
     if (!dropdownSearch.trim()) {
-      // Toggle all values in column
       if (isAllVisibleSelected) {
         setColumnValueFilter(colName, []);
       } else {
@@ -394,9 +399,8 @@ export const DataGrid: React.FC = () => {
       return;
     }
 
-    // When search is active inside dropdown, toggle visible matching keys
-    const currentSelected = columnValueFilters[colName]
-      ? new Set(columnValueFilters[colName])
+    const currentSelected = safeColumnFilters[colName]
+      ? new Set(safeColumnFilters[colName])
       : new Set(allKeys);
 
     if (isAllVisibleSelected) {
@@ -413,7 +417,7 @@ export const DataGrid: React.FC = () => {
   };
 
   const handleAddFilterAsPipelineStep = async (colName: string) => {
-    const selectedKeys = columnValueFilters[colName];
+    const selectedKeys = safeColumnFilters[colName];
     if (!selectedKeys || selectedKeys.length === 0) return;
 
     const cleanValues = selectedKeys.map((k) => (k === '__NULL__' ? '' : k));
@@ -569,7 +573,7 @@ export const DataGrid: React.FC = () => {
             {rowVirtualizer.getVirtualItems().length === 0 ? (
               <tr>
                 <td
-                  colSpan={schemaColumns.length + 1}
+                  colSpan={safeSchemaColumns.length + 1}
                   className="text-center py-12 text-xs text-slate-500"
                 >
                   {isLoadingRows ? 'Loading rows...' : 'No matching rows found.'}
@@ -580,7 +584,7 @@ export const DataGrid: React.FC = () => {
                 {rowVirtualizer.getVirtualItems()[0]?.start > 0 && (
                   <tr>
                     <td
-                      colSpan={schemaColumns.length + 1}
+                      colSpan={safeSchemaColumns.length + 1}
                       style={{ height: `${rowVirtualizer.getVirtualItems()[0]?.start}px` }}
                     />
                   </tr>
@@ -719,7 +723,7 @@ export const DataGrid: React.FC = () => {
               <span className="text-slate-500 font-mono text-[10px]">
                 {activeColSelectedKeys.size}/{allUniqueItems.length}
               </span>
-              {columnValueFilters[openDropdownCol] && (
+              {safeColumnFilters[openDropdownCol] && (
                 <button
                   type="button"
                   onClick={() => setColumnValueFilter(openDropdownCol, null)}
@@ -805,8 +809,8 @@ export const DataGrid: React.FC = () => {
 
           {/* Dropdown Footer */}
           <div className="px-3 py-2 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-2">
-            {columnValueFilters[openDropdownCol] &&
-            columnValueFilters[openDropdownCol].length > 0 ? (
+            {safeColumnFilters[openDropdownCol] &&
+            safeColumnFilters[openDropdownCol].length > 0 ? (
               <button
                 type="button"
                 onClick={() => handleAddFilterAsPipelineStep(openDropdownCol)}

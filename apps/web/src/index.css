@@ -31,3 +31,27 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
+
+/* Sleek horizontal chips scrollbar with transparent track & thin roller */
+.chips-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+
+.chips-scrollbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.chips-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chips-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+
+.chips-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+

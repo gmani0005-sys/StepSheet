@@ -103,7 +103,7 @@ export const AuditModal: React.FC<AuditModalProps> = ({
         </div>
 
         {/* Filter Bar */}
-        <div className="px-5 py-2.5 border-b border-slate-800 bg-slate-950/30 flex items-center gap-2 text-xs overflow-x-auto shrink-0">
+        <div className="px-5 pt-2 pb-2.5 border-b border-slate-800 bg-slate-950/30 flex items-center gap-2 text-xs overflow-x-auto shrink-0 chips-scrollbar">
           <span className="text-slate-500 flex items-center gap-1 mr-1">
             <Filter size={12} /> Filter:
           </span>

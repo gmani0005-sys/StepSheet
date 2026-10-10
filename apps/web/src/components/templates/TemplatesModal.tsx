@@ -226,7 +226,7 @@ export const TemplatesModal: React.FC<TemplatesModalProps> = ({
           </div>
 
           {activeTab === 'catalog' && (
-            <div className="flex items-center gap-1.5 pb-2 overflow-x-auto text-[11px]">
+            <div className="flex items-center gap-1.5 pt-0.5 pb-2.5 overflow-x-auto text-[11px] chips-scrollbar">
               {categories.map((cat) => (
                 <button
                   key={cat}

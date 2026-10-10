@@ -53,7 +53,7 @@ export const NaturalLanguageStepBar: React.FC = () => {
 
   return (
     <>
-      <div className="bg-slate-900/90 border-b border-slate-800/80 px-4 py-2.5 flex flex-col gap-2">
+      <div className="bg-slate-900/90 border-b border-slate-800/80 px-4 pt-2.5 pb-2 flex flex-col gap-2">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -93,9 +93,16 @@ export const NaturalLanguageStepBar: React.FC = () => {
           </div>
         </form>
 
-        {/* Suggestion Chips */}
-        <div className="flex items-center gap-2 text-[11px] overflow-x-auto pb-0.5">
-          <span className="text-slate-500 shrink-0 flex items-center gap-1">
+        {/* Suggestion Chips with proper spacing to prevent scrollbar overlapping */}
+        <div
+          className="flex items-center gap-2 text-[11px] overflow-x-auto pt-1 pb-3 chips-scrollbar select-none"
+          onWheel={(e) => {
+            if (e.deltaY !== 0 && !e.deltaX) {
+              e.currentTarget.scrollLeft += e.deltaY;
+            }
+          }}
+        >
+          <span className="text-slate-500 shrink-0 flex items-center gap-1 font-medium">
             <Wand2 size={11} className="text-indigo-400" />
             Try:
           </span>
@@ -104,12 +111,12 @@ export const NaturalLanguageStepBar: React.FC = () => {
               key={i}
               type="button"
               onClick={() => handleGenerate(eg)}
-              className="px-2 py-0.5 rounded-full bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800/80 hover:border-slate-700 shrink-0 transition-colors"
+              className="px-2.5 py-1 rounded-full bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800/80 hover:border-slate-700 shrink-0 transition-colors cursor-pointer"
             >
               {eg}
             </button>
           ))}
-          {error && <span className="text-rose-400 ml-2">{error}</span>}
+          {error && <span className="text-rose-400 ml-2 shrink-0">{error}</span>}
         </div>
       </div>
 

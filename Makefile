@@ -24,6 +24,9 @@ test-backend:
 test-frontend:
 	cd apps/web && npm test
 
+test-e2e:
+	cd apps/web && npx playwright test
+
 build:
 	cd apps/web && npm run build
 

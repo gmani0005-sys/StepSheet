@@ -18,6 +18,7 @@ export const LeftPanel: React.FC = () => {
     selectedDataset,
     selectDataset,
     uploadDataset,
+    loadSamples,
     deleteDataset,
     isLeftPanelOpen,
   } = useWorkbenchStore();
@@ -105,17 +106,33 @@ export const LeftPanel: React.FC = () => {
           </p>
           <p className="text-[11px] text-slate-500 mt-0.5">Drag & drop or click to browse</p>
         </div>
+
+        <button
+          onClick={loadSamples}
+          disabled={isUploading}
+          className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-medium transition-all"
+        >
+          <Sparkles size={13} />
+          <span>Load Sample Orders & Customers</span>
+        </button>
       </div>
 
       {/* Datasets List */}
       <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
         {datasets.length === 0 ? (
-          <div className="text-center py-10 px-4 text-slate-500">
+          <div className="text-center py-8 px-4 text-slate-500">
             <FolderOpen size={32} className="mx-auto mb-2 opacity-30" />
             <p className="text-xs">No datasets loaded yet.</p>
-            <p className="text-[11px] mt-1 text-slate-600">
-              Upload a file or choose a sample to start building steps.
+            <p className="text-[11px] mt-1 text-slate-600 mb-3">
+              Upload a file or load sample data to start building steps.
             </p>
+            <button
+              onClick={loadSamples}
+              className="inline-flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm shadow-emerald-600/30 transition-all"
+            >
+              <Sparkles size={13} />
+              <span>Load Sample Data</span>
+            </button>
           </div>
         ) : (
           datasets.map((ds) => {

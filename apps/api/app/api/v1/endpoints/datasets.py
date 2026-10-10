@@ -244,3 +244,108 @@ def delete_dataset(
     db.delete(dataset)
     db.commit()
     return None
+
+
+@router.post("/load-samples", response_model=List[DatasetResponse], status_code=status.HTTP_201_CREATED)
+def load_sample_datasets(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """
+    Ingest and register sample datasets (Orders and Customers) for quick demo and acceptance testing.
+    """
+    from pathlib import Path
+    import shutil
+
+    candidates = [
+        Path.cwd() / "samples",
+        Path(__file__).resolve().parents[6] / "samples",
+        Path(__file__).resolve().parents[4] / "samples",
+    ]
+    samples_dir = next((c for c in candidates if c.exists()), None)
+    if not samples_dir:
+        raise HTTPException(status_code=404, detail="Samples directory not found on server")
+
+    if not current_user:
+        current_user = db.query(User).filter(User.email == "demo@stepsheet.dev").first()
+        if not current_user:
+            from app.core.security import hash_password
+            current_user = User(
+                id=str(uuid.uuid4()),
+                email="demo@stepsheet.dev",
+                hashed_password=hash_password("demo123456"),
+                full_name="Demo Analyst",
+            )
+            db.add(current_user)
+            db.commit()
+            db.refresh(current_user)
+
+    storage = get_storage_service()
+    results: List[DatasetResponse] = []
+
+    sample_files = [
+        ("orders.xlsx", "xlsx", "Orders (Sample XLSX)"),
+        ("customers.csv", "csv", "Customers (Sample CSV)"),
+    ]
+
+    for fname, ext, friendly_name in sample_files:
+        src_path = samples_dir / fname
+        if not src_path.exists():
+            continue
+
+        dataset_id = str(uuid.uuid4())
+        raw_rel_path = f"raw/{dataset_id}_{fname}"
+        parquet_rel_path = f"parquet/{dataset_id}.parquet"
+
+        local_raw_path = storage.get_local_path(raw_rel_path)
+        local_parquet_path = storage.get_local_path(parquet_rel_path)
+        os.makedirs(os.path.dirname(local_raw_path), exist_ok=True)
+        os.makedirs(os.path.dirname(local_parquet_path), exist_ok=True)
+
+        shutil.copyfile(src_path, local_raw_path)
+
+        try:
+            row_count, col_count, columns = duckdb_engine.ingest_file_to_parquet(
+                source_path=local_raw_path,
+                target_parquet_path=local_parquet_path,
+                file_format=ext,
+            )
+        except Exception as e:
+            continue
+
+        file_size = os.path.getsize(local_parquet_path) if os.path.exists(local_parquet_path) else 0
+
+        dataset = Dataset(
+            id=dataset_id,
+            owner_id=current_user.id,
+            name=friendly_name,
+            original_filename=fname,
+            file_format=ext,
+            file_path=raw_rel_path,
+            parquet_path=parquet_rel_path,
+            row_count=row_count,
+            column_count=col_count,
+            file_size_bytes=file_size,
+            schema_metadata=[c.model_dump() for c in columns],
+        )
+        db.add(dataset)
+        db.commit()
+        db.refresh(dataset)
+
+        results.append(
+            DatasetResponse(
+                id=dataset.id,
+                project_id=dataset.project_id,
+                name=dataset.name,
+                original_filename=dataset.original_filename,
+                file_format=dataset.file_format,
+                row_count=dataset.row_count,
+                column_count=dataset.column_count,
+                file_size_bytes=dataset.file_size_bytes,
+                schema_metadata=columns,
+                created_at=dataset.created_at,
+                updated_at=dataset.updated_at,
+            )
+        )
+
+    return results

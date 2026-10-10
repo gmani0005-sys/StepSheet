@@ -86,6 +86,18 @@ export const api = {
     return res.json();
   },
 
+  async loadSampleDatasets(): Promise<Dataset[]> {
+    const res = await fetch(`${API_BASE}/datasets/load-samples`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to load sample datasets');
+    }
+    return res.json();
+  },
+
   async getRows(
     datasetId: string,
     params: {

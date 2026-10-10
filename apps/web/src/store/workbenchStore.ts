@@ -49,6 +49,7 @@ interface WorkbenchState {
   loadDatasets: () => Promise<void>;
   selectDataset: (datasetId: string) => Promise<void>;
   uploadDataset: (file: File, name?: string) => Promise<Dataset>;
+  loadSamples: () => Promise<void>;
   deleteDataset: (id: string) => Promise<void>;
   fetchRows: (newOffset?: number) => Promise<void>;
   setSearch: (query: string) => void;
@@ -148,6 +149,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     set((state) => ({ datasets: [ds, ...state.datasets] }));
     await get().selectDataset(ds.id);
     return ds;
+  },
+
+  loadSamples: async () => {
+    set({ isLoadingDatasets: true });
+    try {
+      const loaded = await api.loadSampleDatasets();
+      if (loaded.length > 0) {
+        await get().loadDatasets();
+        await get().selectDataset(loaded[0].id);
+      }
+    } catch (err: any) {
+      alert(`Failed to load samples: ${err.message}`);
+    } finally {
+      set({ isLoadingDatasets: false });
+    }
   },
 
   deleteDataset: async (id: string) => {

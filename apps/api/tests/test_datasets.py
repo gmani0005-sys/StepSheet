@@ -90,3 +90,13 @@ def test_upload_xlsx_dataset(client):
     assert data["column_count"] == 3
     assert data["file_format"] == "xlsx"
 
+
+def test_load_sample_datasets(client):
+    res = client.post("/api/v1/datasets/load-samples")
+    assert res.status_code == 201
+    loaded = res.json()
+    assert len(loaded) >= 1
+    names = [d["name"] for d in loaded]
+    assert any("Orders" in n or "Customers" in n for n in names)
+
+

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { AppendModal } from '../components/joins/AppendModal';
@@ -352,12 +352,42 @@ describe('StepSheet Workbench', () => {
     expect(preview.rows[0].discounted).toBeDefined();
   });
 
-  it('renders DataGrid with native horizontal and vertical scroll container', () => {
+  it('renders DataGrid with native horizontal and vertical scroll container and column unique values dropdown', () => {
+    useWorkbenchStore.setState({
+      columns: [
+        { name: 'region', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
+        { name: 'account_tier', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
+      ],
+      rows: [
+        { region: 'North', account_tier: 'Enterprise' },
+        { region: 'South', account_tier: 'SMB' },
+        { region: 'North', account_tier: 'Mid-Market' },
+      ],
+      allRows: [
+        { region: 'North', account_tier: 'Enterprise' },
+        { region: 'South', account_tier: 'SMB' },
+        { region: 'North', account_tier: 'Mid-Market' },
+      ],
+      totalRows: 3,
+      filteredRows: 3,
+    });
+
     render(<DataGrid />);
     const container = screen.getByTestId('grid-scroll-container');
     expect(container).toBeDefined();
     expect(container.className).toContain('overflow-x-auto');
     expect(container.className).toContain('grid-scrollbar');
+
+    // Open unique values dropdown on 'region' column
+    const dropdownBtn = screen.getByTestId('col-dropdown-region');
+    expect(dropdownBtn).toBeDefined();
+    fireEvent.click(dropdownBtn);
+
+    const dropdownMenu = screen.getByTestId('column-unique-dropdown');
+    expect(dropdownMenu).toBeDefined();
+    expect(screen.getByText('2 unique')).toBeDefined();
+    expect(screen.getByText('North')).toBeDefined();
+    expect(screen.getByText('South')).toBeDefined();
   });
 });
 

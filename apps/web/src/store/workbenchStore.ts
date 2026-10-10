@@ -91,6 +91,7 @@ interface WorkbenchState {
   selectedDataset: Dataset | null;
   columns: ColumnSchema[];
   rows: Record<string, any>[];
+  allRows: Record<string, any>[];
   totalRows: number;
   filteredRows: number;
   offset: number;
@@ -101,6 +102,7 @@ interface WorkbenchState {
   searchQuery: string;
   sortConditions: SortCondition[];
   filterConditions: FilterCondition[];
+  columnValueFilters: Record<string, string[]>;
 
   selectedColumnProfile: ColumnProfile | null;
   datasetProfile: DatasetProfileResponse | null;
@@ -135,6 +137,9 @@ interface WorkbenchState {
   fetchRows: (newOffset?: number) => Promise<void>;
   setSearch: (query: string) => void;
   toggleSort: (column: string) => void;
+  setColumnSort: (column: string, direction: 'asc' | 'desc' | null) => void;
+  setColumnValueFilter: (column: string, values: string[] | null) => void;
+  clearColumnValueFilters: () => void;
   openColumnProfile: (columnName: string) => Promise<void>;
   closeColumnProfile: () => void;
   setActiveTab: (tab: 'catalog' | 'applied' | 'details') => void;
@@ -267,6 +272,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     selectedDataset: null,
     columns: [],
     rows: [],
+    allRows: [],
     totalRows: 0,
     filteredRows: 0,
     offset: 0,
@@ -277,6 +283,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     searchQuery: '',
     sortConditions: [],
     filterConditions: [],
+    columnValueFilters: {},
 
     selectedColumnProfile: null,
     datasetProfile: null,
@@ -345,6 +352,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         searchQuery: '',
         sortConditions: [],
         filterConditions: [],
+        columnValueFilters: {},
         selectedColumnProfile: null,
         steps: restoredSteps,
         activeStepIndex: restoredActiveIdx,
@@ -429,6 +437,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         searchQuery: '',
         sortConditions: [],
         filterConditions: [],
+        columnValueFilters: {},
         selectedColumnProfile: null,
         steps: targetQuery.steps || [],
         activeStepIndex: targetQuery.activeStepIndex ?? null,
@@ -518,6 +527,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           selectedDataset: newSelected,
           columns: newSelected ? newSelected.schema_metadata : [],
           rows: newSelected ? state.rows : [],
+          allRows: newSelected ? state.allRows : [],
           steps: [],
           activeStepIndex: null,
           undoStack: [],
@@ -533,12 +543,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const { selectedDataset, limit, sortConditions, filterConditions, searchQuery, steps } = get();
       if (!selectedDataset) return;
 
+      const currentOffset = newOffset !== undefined ? newOffset : get().offset;
+      if (newOffset !== undefined) {
+        set({ offset: currentOffset });
+      }
+
       if (steps.length > 0) {
         await get().runPipelinePreview();
         return;
       }
 
-      const currentOffset = newOffset !== undefined ? newOffset : get().offset;
       set({ isLoadingRows: true });
       try {
         const res = await api.getRows(selectedDataset.id, {
@@ -550,6 +564,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         });
         set({
           rows: res.rows,
+          allRows: res.all_rows || res.rows,
           columns: res.columns,
           totalRows: res.total_rows,
           filteredRows: res.filtered_rows,
@@ -581,6 +596,39 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       get().fetchRows(0);
     },
 
+    setColumnSort: (column: string, direction: 'asc' | 'desc' | null) => {
+      const next: SortCondition[] = direction ? [{ column, direction }] : [];
+      set({ sortConditions: next });
+      get().fetchRows(0);
+    },
+
+    setColumnValueFilter: (column: string, values: string[] | null) => {
+      const nextMap = { ...get().columnValueFilters };
+      if (values === null) {
+        delete nextMap[column];
+      } else {
+        nextMap[column] = values;
+      }
+      const nextConditions: FilterCondition[] = Object.entries(nextMap).map(([col, vals]) => ({
+        column: col,
+        operator: 'in',
+        value: vals,
+      }));
+      set({
+        columnValueFilters: nextMap,
+        filterConditions: nextConditions,
+      });
+      get().fetchRows(0);
+    },
+
+    clearColumnValueFilters: () => {
+      set({
+        columnValueFilters: {},
+        filterConditions: [],
+      });
+      get().fetchRows(0);
+    },
+
     openColumnProfile: async (columnName: string) => {
       const { selectedDataset } = get();
       if (!selectedDataset) return;
@@ -603,7 +651,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     // Step Engine Implementation
     runPipelinePreview: async () => {
-      const { selectedDataset, steps, activeStepIndex, offset, limit } = get();
+      const {
+        selectedDataset,
+        steps,
+        activeStepIndex,
+        offset,
+        limit,
+        sortConditions,
+        filterConditions,
+        searchQuery,
+      } = get();
       if (!selectedDataset) return;
 
       const stepsToRun =
@@ -614,9 +671,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const res = await api.previewPipeline(selectedDataset.id, stepsToRun, {
           offset,
           limit,
+          sort: sortConditions,
+          filters: filterConditions,
+          search: searchQuery,
         });
         set({
           rows: res.rows,
+          allRows: res.all_rows || res.rows,
           columns: res.columns,
           totalRows: res.total_rows,
           filteredRows: res.filtered_rows,

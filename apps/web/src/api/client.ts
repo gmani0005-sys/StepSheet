@@ -231,7 +231,13 @@ export const api = {
   async previewPipeline(
     datasetId: string,
     steps: any[],
-    params: { offset?: number; limit?: number } = {}
+    params: {
+      offset?: number;
+      limit?: number;
+      sort?: SortCondition[];
+      filters?: FilterCondition[];
+      search?: string;
+    } = {}
   ): Promise<any> {
     return withFallback(
       async () => {

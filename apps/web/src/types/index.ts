@@ -28,7 +28,7 @@ export interface SortCondition {
 
 export interface FilterCondition {
   column: string;
-  operator: 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'is_null' | 'is_not_null';
+  operator: 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'is_null' | 'is_not_null' | 'in';
   value: any;
 }
 
@@ -40,6 +40,7 @@ export interface DatasetRowsResponse {
   limit: number;
   columns: ColumnSchema[];
   rows: Record<string, any>[];
+  all_rows?: Record<string, any>[];
 }
 
 export interface HistogramBin {

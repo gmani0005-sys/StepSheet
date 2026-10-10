@@ -353,9 +353,24 @@ function parseDelimitedText(text: string, delimiter = ','): Record<string, any>[
   return rows;
 }
 
+function normalizeUniqueValueKey(val: any): string {
+  if (val === null || val === undefined || val === '') return '__NULL__';
+  if (typeof val === 'boolean') return val ? 'true' : 'false';
+  return String(val);
+}
+
 function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): boolean {
   if (operator === 'is_null') return rowVal === null || rowVal === undefined || rowVal === '';
   if (operator === 'is_not_null') return rowVal !== null && rowVal !== undefined && rowVal !== '';
+  if (operator === 'in') {
+    const allowed: string[] = Array.isArray(targetVal)
+      ? targetVal.map((v) => normalizeUniqueValueKey(v))
+      : String(targetVal ?? '')
+          .split(',')
+          .map((s) => s.trim());
+    const rowKey = normalizeUniqueValueKey(rowVal);
+    return allowed.some((k) => k.toLowerCase() === rowKey.toLowerCase());
+  }
 
   const aStr = rowVal === null || rowVal === undefined ? '' : String(rowVal);
   const bStr = targetVal === null || targetVal === undefined ? '' : String(targetVal);
@@ -432,6 +447,15 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
       const col = p.column || 'col';
       const op = p.operator || 'eq';
       const val = p.value ?? '';
+      if (op === 'in' && Array.isArray(val)) {
+        const sqlList = val.map((v) => `'${v}'`).join(', ');
+        return {
+          sql: `SELECT * FROM prev_step WHERE "${col}" IN (${sqlList})`,
+          polars: `df = df.filter(pl.col("${col}").is_in(${JSON.stringify(val)}))`,
+          power_query_m: `Table.SelectRows(PrevStep, each List.Contains({${val.map((v) => `"${v}"`).join(', ')}}, Text.From([${col}])))`,
+          excel_formula: `=FILTER(Table1, ISNUMBER(MATCH(Table1[${col}], {${val.map((v) => `"${v}"`).join(',')}}, 0)))`,
+        };
+      }
       return {
         sql: `SELECT * FROM prev_step WHERE "${col}" ${op} '${val}'`,
         polars: `df = df.filter(pl.col("${col}") == "${val}")`,
@@ -1029,6 +1053,7 @@ export const localEngine = {
       limit,
       columns: ds.meta.schema_metadata,
       rows: sliced,
+      all_rows: ds.rows,
     };
   },
 
@@ -1105,13 +1130,57 @@ export const localEngine = {
   async previewPipeline(
     datasetId: string,
     steps: StepDefinition[],
-    params: { offset?: number; limit?: number } = {}
+    params: {
+      offset?: number;
+      limit?: number;
+      sort?: SortCondition[];
+      filters?: FilterCondition[];
+      search?: string;
+    } = {}
   ): Promise<any> {
     const all = getStoredDatasets();
     const ds = all.find((d) => d.meta.id === datasetId) || all[0];
     if (!ds) throw new Error('Dataset not found');
 
-    const { rows, columns, compiledSql, stepSummaries } = executePipelineSteps(ds.rows, steps, all);
+    const { rows: pipelineRows, columns, compiledSql, stepSummaries } = executePipelineSteps(
+      ds.rows,
+      steps,
+      all
+    );
+    let rows = [...pipelineRows];
+
+    if (params.filters && params.filters.length > 0) {
+      rows = rows.filter((r) =>
+        params.filters!.every((f) => evaluateRowCondition(r[f.column], f.operator, f.value))
+      );
+    }
+
+    if (params.search && params.search.trim()) {
+      const q = params.search.toLowerCase();
+      rows = rows.filter((r) =>
+        Object.values(r).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q))
+      );
+    }
+
+    if (params.sort && params.sort.length > 0) {
+      const sorts = params.sort;
+      rows.sort((a, b) => {
+        for (const s of sorts) {
+          const va = a[s.column];
+          const vb = b[s.column];
+          if (va === vb) continue;
+          if (va === null || va === undefined) return 1;
+          if (vb === null || vb === undefined) return -1;
+          const cmp =
+            typeof va === 'number' && typeof vb === 'number'
+              ? va - vb
+              : String(va).localeCompare(String(vb), undefined, { numeric: true });
+          return s.direction === 'desc' ? -cmp : cmp;
+        }
+        return 0;
+      });
+    }
+
     const offset = params.offset ?? 0;
     const limit = params.limit ?? 100;
 
@@ -1123,6 +1192,7 @@ export const localEngine = {
       limit,
       columns,
       rows: rows.slice(offset, offset + limit),
+      all_rows: pipelineRows,
       compiled_sql: compiledSql,
       steps: stepSummaries,
     };

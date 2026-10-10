@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -20,7 +20,6 @@ import {
   ChevronRight,
   RefreshCw,
   FileSpreadsheet,
-  Columns,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { DataType } from '../../types';
@@ -45,48 +44,6 @@ export const DataGrid: React.FC = () => {
 
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const tableContainerRef = useRef<HTMLDivElement>(null);
-
-  // Horizontal scroll sync state for bottom scroller bar
-  const [scrollLeft, setScrollLeft] = useState(0);
-  const [maxScrollLeft, setMaxScrollLeft] = useState(0);
-
-  const updateScrollMetrics = useCallback(() => {
-    const el = tableContainerRef.current;
-    if (!el) return;
-    setScrollLeft(el.scrollLeft);
-    setMaxScrollLeft(Math.max(0, el.scrollWidth - el.clientWidth));
-  }, []);
-
-  useEffect(() => {
-    updateScrollMetrics();
-    const el = tableContainerRef.current;
-    if (!el) return;
-
-    let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(() => updateScrollMetrics());
-      ro.observe(el);
-    }
-    window.addEventListener('resize', updateScrollMetrics);
-    return () => {
-      if (ro) ro.disconnect();
-      window.removeEventListener('resize', updateScrollMetrics);
-    };
-  }, [schemaColumns, rows, updateScrollMetrics]);
-
-  const handleHorizontalSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Number(e.target.value);
-    setScrollLeft(val);
-    if (tableContainerRef.current) {
-      tableContainerRef.current.scrollLeft = val;
-    }
-  };
-
-  const scrollColumnsBy = (delta: number) => {
-    const el = tableContainerRef.current;
-    if (!el) return;
-    el.scrollBy({ left: delta, behavior: 'smooth' });
-  };
 
   // Column helper
   const columnHelper = createColumnHelper<Record<string, any>>();
@@ -249,10 +206,10 @@ export const DataGrid: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Virtualized Table Body with Uncongested Columns & Horizontal Scroll */}
+      {/* Main Virtualized Table Body with Native Horizontal & Vertical Scrollers */}
       <div
         ref={tableContainerRef}
-        onScroll={updateScrollMetrics}
+        data-testid="grid-scroll-container"
         className="flex-1 overflow-x-auto overflow-y-auto relative min-h-0 grid-scrollbar"
       >
         <table className="min-w-full w-max text-left border-collapse table-auto">
@@ -327,57 +284,6 @@ export const DataGrid: React.FC = () => {
             )}
           </tbody>
         </table>
-      </div>
-
-      {/* Bottom Horizontal Column Scroller Bar */}
-      <div className="h-8 border-t border-slate-800/90 bg-slate-900/90 px-3 flex items-center justify-between gap-4 shrink-0 select-none">
-        <div className="flex items-center gap-2 text-[11px] text-slate-400 shrink-0">
-          <Columns size={12} className="text-emerald-400" />
-          <span>
-            <strong className="text-slate-200 font-mono">{schemaColumns.length}</strong> columns
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 flex-1 max-w-xl">
-          <button
-            type="button"
-            onClick={() => scrollColumnsBy(-240)}
-            disabled={scrollLeft <= 0}
-            className="px-1.5 py-0.5 text-[11px] font-medium bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 rounded flex items-center gap-0.5 transition-colors shrink-0"
-            title="Scroll columns left"
-          >
-            <ChevronLeft size={13} />
-            <span>Left</span>
-          </button>
-
-          <input
-            type="range"
-            min={0}
-            max={Math.max(1, maxScrollLeft)}
-            value={Math.min(scrollLeft, Math.max(1, maxScrollLeft))}
-            disabled={maxScrollLeft <= 0}
-            onChange={handleHorizontalSliderChange}
-            aria-label="Horizontal column scroller"
-            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-40 disabled:cursor-default"
-          />
-
-          <button
-            type="button"
-            onClick={() => scrollColumnsBy(240)}
-            disabled={scrollLeft >= maxScrollLeft - 1}
-            className="px-1.5 py-0.5 text-[11px] font-medium bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 rounded flex items-center gap-0.5 transition-colors shrink-0"
-            title="Scroll columns right"
-          >
-            <span>Right</span>
-            <ChevronRight size={13} />
-          </button>
-        </div>
-
-        <div className="text-[10px] font-mono text-slate-500 hidden sm:block shrink-0">
-          {maxScrollLeft > 0
-            ? `Horizontal Scroll: ${Math.round((scrollLeft / maxScrollLeft) * 100)}%`
-            : 'All columns visible'}
-        </div>
       </div>
     </div>
   );

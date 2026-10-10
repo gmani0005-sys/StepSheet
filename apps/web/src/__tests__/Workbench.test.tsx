@@ -352,11 +352,12 @@ describe('StepSheet Workbench', () => {
     expect(preview.rows[0].discounted).toBeDefined();
   });
 
-  it('renders DataGrid with bottom horizontal column scroller bar', () => {
+  it('renders DataGrid with native horizontal and vertical scroll container', () => {
     render(<DataGrid />);
-    expect(screen.getByLabelText('Horizontal column scroller')).toBeDefined();
-    expect(screen.getByTitle('Scroll columns left')).toBeDefined();
-    expect(screen.getByTitle('Scroll columns right')).toBeDefined();
+    const container = screen.getByTestId('grid-scroll-container');
+    expect(container).toBeDefined();
+    expect(container.className).toContain('overflow-x-auto');
+    expect(container.className).toContain('grid-scrollbar');
   });
 });
 

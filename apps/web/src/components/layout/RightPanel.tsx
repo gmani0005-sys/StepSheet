@@ -39,6 +39,9 @@ export const RightPanel: React.FC = () => {
     steps,
     activeStepIndex,
     stepSummaries,
+    queries,
+    activeQueryId,
+    addConnectionQuery,
     openStepWizard,
     openEditStepModal,
     removeStep,
@@ -175,11 +178,39 @@ export const RightPanel: React.FC = () => {
       {/* Tab 1: Applied Steps */}
       {activeTab === 'applied' && (
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="p-3 border-b border-slate-800/60 bg-slate-950/20 text-xs text-slate-400 flex items-center justify-between">
-            <span>{steps.length + 1} steps in pipeline</span>
-            <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-              Live DuckDB Preview
-            </span>
+          <div className="p-2.5 border-b border-slate-800/60 bg-slate-950/30 text-xs text-slate-400 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span>{steps.length + 1} steps in pipeline</span>
+              <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                Live DuckDB Preview
+              </span>
+            </div>
+            {selectedDataset && (
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[11px]">
+                {activeQueryId ? (
+                  <span className="text-sky-300 flex items-center gap-1 truncate font-medium">
+                    <GitBranch size={11} className="text-sky-400 shrink-0" />
+                    <span className="truncate">
+                      Query: {queries.find((q) => q.id === activeQueryId)?.name || selectedDataset.name}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-slate-500 truncate">Table: {selectedDataset.name}</span>
+                )}
+                {activeQueryId ? (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/15 text-sky-400 border border-sky-500/20 shrink-0">
+                    Saved in Connections
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => addConnectionQuery(selectedDataset.id)}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 shrink-0 transition-colors"
+                  >
+                    + Save to Connections
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-2">

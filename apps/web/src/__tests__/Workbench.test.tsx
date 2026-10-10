@@ -16,6 +16,7 @@ import { ShareModal } from '../components/collab/ShareModal';
 import { AuditModal } from '../components/audit/AuditModal';
 import { EditStepModal } from '../components/steps/EditStepModal';
 import { RightPanel } from '../components/layout/RightPanel';
+import { LeftPanel } from '../components/layout/LeftPanel';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 describe('StepSheet Workbench', () => {
@@ -262,6 +263,75 @@ describe('StepSheet Workbench', () => {
     render(<RightPanel />);
     expect(screen.getByText('Filter rows where amount > 100')).toBeDefined();
     expect(screen.getByTitle('Edit Step Parameters')).toBeDefined();
+  });
+
+  it('renders LeftPanel with Connections & Queries and preserves steps across tables', async () => {
+    const ds1 = {
+      id: 'ds-orders',
+      name: 'Orders',
+      original_filename: 'orders.xlsx',
+      file_format: 'xlsx',
+      file_size_bytes: 2048,
+      row_count: 1000,
+      column_count: 8,
+      schema_metadata: [
+        { name: 'order_id', data_type: 'text' as const, physical_type: 'VARCHAR', nullable: false },
+        { name: 'amount', data_type: 'float' as const, physical_type: 'DOUBLE', nullable: true },
+      ],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const ds2 = {
+      id: 'ds-customers',
+      name: 'Customers',
+      original_filename: 'customers.csv',
+      file_format: 'csv',
+      file_size_bytes: 1024,
+      row_count: 100,
+      column_count: 5,
+      schema_metadata: [
+        { name: 'customer_id', data_type: 'text' as const, physical_type: 'VARCHAR', nullable: false },
+        { name: 'region', data_type: 'text' as const, physical_type: 'VARCHAR', nullable: true },
+      ],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const appliedStep = {
+      id: 'step-1',
+      type: 'filter_rows' as const,
+      label: 'Filter amount > 50',
+      enabled: true,
+      params: { column: 'amount', operator: 'gt', value: '50' },
+    };
+
+    useWorkbenchStore.setState({
+      datasets: [ds1, ds2],
+      selectedDataset: ds1,
+      steps: [appliedStep],
+      queries: [],
+      activeQueryId: null,
+      datasetPipelines: {},
+      isLeftPanelOpen: true,
+    });
+
+    // Switch to ds2 (Customers) to inspect columns
+    await useWorkbenchStore.getState().selectDataset('ds-customers');
+    expect(useWorkbenchStore.getState().selectedDataset?.id).toBe('ds-customers');
+    // Steps on ds1 were auto-saved into Connections & Queries!
+    expect(useWorkbenchStore.getState().queries.length).toBeGreaterThanOrEqual(1);
+    expect(useWorkbenchStore.getState().queries[0].datasetId).toBe('ds-orders');
+    expect(useWorkbenchStore.getState().queries[0].steps.length).toBe(1);
+
+    // Switch back to ds1 (Orders) -> steps are automatically restored!
+    await useWorkbenchStore.getState().selectDataset('ds-orders');
+    expect(useWorkbenchStore.getState().selectedDataset?.id).toBe('ds-orders');
+    expect(useWorkbenchStore.getState().steps.length).toBe(1);
+    expect(useWorkbenchStore.getState().steps[0].label).toBe('Filter amount > 50');
+
+    render(<LeftPanel />);
+    expect(screen.getByText('Connections & Queries')).toBeDefined();
+    expect(screen.getByText('Datasets & Sheets')).toBeDefined();
   });
 });
 

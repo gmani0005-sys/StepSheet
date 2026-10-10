@@ -18,6 +18,7 @@ import { EditStepModal } from '../components/steps/EditStepModal';
 import { RightPanel } from '../components/layout/RightPanel';
 import { LeftPanel } from '../components/layout/LeftPanel';
 import { useWorkbenchStore } from '../store/workbenchStore';
+import { localEngine } from '../api/localEngine';
 
 describe('StepSheet Workbench', () => {
   it('renders brand name and actions in TopBar', () => {
@@ -333,5 +334,22 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Connections & Queries')).toBeDefined();
     expect(screen.getByText('Datasets & Sheets')).toBeDefined();
   });
+
+  it('executes standalone localEngine for single-click HTML mode', async () => {
+    const datasets = await localEngine.listDatasets();
+    expect(datasets.length).toBeGreaterThanOrEqual(2);
+
+    const aiRes = await localEngine.generateAiStep(
+      datasets[0].id,
+      'create discounted column = amount - discount'
+    );
+    expect(aiRes.step.type).toBe('math_transform');
+    expect(aiRes.step.params.target_column).toBe('discounted');
+
+    const preview = await localEngine.previewPipeline(datasets[0].id, [aiRes.step]);
+    expect(preview.rows.length).toBeGreaterThan(0);
+    expect(preview.rows[0].discounted).toBeDefined();
+  });
 });
+
 

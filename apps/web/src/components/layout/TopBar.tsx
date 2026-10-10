@@ -83,9 +83,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   }, [isProjectMenuOpen]);
 
   return (
-    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between select-none z-20 gap-3 min-w-0">
+    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between select-none z-20 gap-4 min-w-0">
       {/* Left Section: Brand & Active Dataset Metadata */}
-      <div className="flex items-center gap-3 min-w-0 shrink">
+      <div className="flex items-center gap-3 min-w-0 shrink-0">
         <button
           onClick={toggleLeftPanel}
           title={isLeftPanelOpen ? 'Collapse sidebar' : 'Expand sidebar'}
@@ -107,24 +107,15 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
 
         {selectedDataset && (
-          <div className="hidden md:flex items-center gap-2 ml-2 pl-3 border-l border-slate-800 min-w-0 shrink">
+          <div className="hidden md:flex items-center gap-2 ml-2 pl-3 border-l border-slate-800 shrink-0">
             <span
-              className="text-xs font-semibold text-slate-200 truncate max-w-[140px] lg:max-w-[200px] whitespace-nowrap shrink-0"
+              className="text-xs font-semibold text-slate-200 truncate max-w-[130px] lg:max-w-[180px] whitespace-nowrap shrink-0"
               title={selectedDataset.name}
             >
               {selectedDataset.name}
             </span>
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono whitespace-nowrap shrink-0">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono whitespace-nowrap shrink-0 border border-slate-700/50">
               {totalRows.toLocaleString()} rows • {columns.length} cols
-            </span>
-            {steps.length > 0 && (
-              <span className="text-[11px] px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-300 border border-sky-500/20 font-mono whitespace-nowrap shrink-0">
-                {steps.filter((s) => s.enabled).length} active step(s)
-              </span>
-            )}
-            <span className="text-[11px] px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/20 whitespace-nowrap shrink-0 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 animate-pulse" />
-              Live Preview
             </span>
           </div>
         )}
@@ -188,8 +179,8 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <div className="w-px h-4 bg-slate-800 mx-1 shrink-0" />
 
-        {/* Desktop Visible Governance Tools (xl and above) */}
-        <div className="hidden xl:flex items-center gap-1">
+        {/* Desktop Visible Governance Tools on wide screens (2xl and above) */}
+        <div className="hidden 2xl:flex items-center gap-1">
           <button
             onClick={onOpenTemplates}
             title="Pipeline templates with column mapping"
@@ -224,8 +215,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
         </div>
 
-        {/* Dropdown Menu on compact screens (< xl) */}
-        <div className="relative xl:hidden" ref={projectMenuRef}>
+        {/* Dropdown Menu on compact/laptop screens (< 2xl) */}
+        <div className="relative 2xl:hidden" ref={projectMenuRef}>
           <button
             type="button"
             onClick={() => setIsProjectMenuOpen(!isProjectMenuOpen)}

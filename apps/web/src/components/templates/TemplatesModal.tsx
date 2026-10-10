@@ -110,7 +110,8 @@ export const TemplatesModal: React.FC<TemplatesModalProps> = ({
     setIsApplying(true);
     try {
       const res = await api.applyTemplate(selectedTemplate.id, dataset.id, columnMapping);
-      onApplySteps(res.rewritten_steps);
+      const nextSteps = res.rewritten_steps || res.steps || selectedTemplate.steps || [];
+      onApplySteps(nextSteps);
       onClose();
     } catch (err: any) {
       alert(`Failed to apply template: ${err.message}`);
@@ -274,10 +275,13 @@ export const TemplatesModal: React.FC<TemplatesModalProps> = ({
                     <div className="mt-3 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
                       <div className="flex items-center gap-1.5">
                         <Layers size={13} className="text-indigo-400" />
-                        <span>{tpl.steps.length} Steps</span>
+                        <span>{(tpl.steps || []).length} Steps</span>
                       </div>
                       <div className="text-[11px] text-slate-500">
-                        Requires: {tpl.required_columns.map((c: any) => c.name).join(', ')}
+                        Requires:{' '}
+                        {(tpl.required_columns || [])
+                          .map((c: any) => (typeof c === 'string' ? c : c.name))
+                          .join(', ')}
                       </div>
                     </div>
                   </div>

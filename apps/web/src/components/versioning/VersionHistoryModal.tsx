@@ -121,7 +121,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
     setIsRestoring(true);
     try {
       await api.restoreVersion(projectId, v.id);
-      onRestoreSteps(v.steps_snapshot);
+      onRestoreSteps(v.steps_snapshot || v.steps || []);
       onClose();
     } catch (err: any) {
       alert(`Failed to restore version: ${err.message}`);
@@ -229,11 +229,11 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
                           </span>
                           <span className="flex items-center gap-1">
                             <User size={12} />
-                            {v.author_email}
+                            {v.author_email || v.created_by || 'local@stepsheet.app'}
                           </span>
                           <span className="flex items-center gap-1">
                             <Layers size={12} />
-                            {v.steps_snapshot.length} step(s)
+                            {(v.steps_snapshot || v.steps || []).length} step(s)
                           </span>
                         </div>
                       </div>

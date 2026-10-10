@@ -45,8 +45,9 @@ export const AuditModal: React.FC<AuditModalProps> = ({
     try {
       const filter = actionFilter === 'all' ? undefined : actionFilter;
       const res = await api.listAuditLogs(projectId, filter);
-      setLogs(res.items || []);
-      setTotal(res.total || 0);
+      const list = res.items || res.logs || [];
+      setLogs(list);
+      setTotal(res.total ?? list.length);
     } catch (err) {
       console.error(err);
     } finally {
@@ -137,7 +138,7 @@ export const AuditModal: React.FC<AuditModalProps> = ({
           ) : (
             <div className="space-y-3">
               {logs.map((log) => {
-                const badge = getActionBadge(log.action);
+                const badge = getActionBadge(log.action || '');
                 const Icon = badge.icon;
                 const isExpanded = expandedLogId === log.id;
 
@@ -157,15 +158,16 @@ export const AuditModal: React.FC<AuditModalProps> = ({
                               {log.action}
                             </span>
                             <span className="text-[10px] text-slate-500 capitalize">
-                              ({log.resource_type})
+                              ({log.resource_type || 'project'})
                             </span>
                           </div>
                           <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-0.5">
                             <span className="flex items-center gap-1">
-                              <User size={11} /> {log.actor_email}
+                              <User size={11} /> {log.actor_email || log.user_email || 'local@stepsheet.app'}
                             </span>
                             <span className="flex items-center gap-1">
-                              <Clock size={11} /> {new Date(log.timestamp).toLocaleString()}
+                              <Clock size={11} />{' '}
+                              {new Date(log.timestamp || log.created_at || Date.now()).toLocaleString()}
                             </span>
                           </div>
                         </div>

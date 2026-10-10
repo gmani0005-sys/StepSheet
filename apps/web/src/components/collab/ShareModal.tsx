@@ -67,8 +67,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleCopyLink = (token: string) => {
-    const fullUrl = `${window.location.origin}/share/${token}`;
-    navigator.clipboard.writeText(fullUrl);
+    const base =
+      window.location.origin && window.location.origin !== 'null'
+        ? window.location.origin
+        : window.location.href.split('#')[0];
+    const fullUrl = `${base}#share=${token}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(fullUrl).catch(() => {});
+    }
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2500);
   };
@@ -183,7 +189,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             ) : (
               <div className="space-y-2.5">
                 {shares.map((s) => {
-                  const isCopied = copiedToken === s.token;
+                  const tokenVal = String(s.token || s.share_token || s.id || '');
+                  const isCopied = copiedToken === tokenVal;
                   return (
                     <div
                       key={s.id}
@@ -201,7 +208,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                             {s.role}
                           </span>
                           <span className="font-mono text-xs text-slate-300 truncate">
-                            /share/{s.token.slice(0, 16)}...
+                            /share/{tokenVal.slice(0, 16)}...
                           </span>
                         </div>
                         <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-1">
@@ -216,7 +223,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
-                          onClick={() => handleCopyLink(s.token)}
+                          onClick={() => handleCopyLink(tokenVal)}
                           className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 transition-all ${
                             isCopied
                               ? 'bg-emerald-600 text-white border-emerald-500'

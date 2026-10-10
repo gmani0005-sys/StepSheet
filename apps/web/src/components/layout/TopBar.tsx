@@ -83,7 +83,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   }, [isProjectMenuOpen]);
 
   return (
-    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between select-none z-20 gap-4 min-w-0">
+    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between select-none z-40 relative gap-4 min-w-0">
       {/* Left Section: Brand & Active Dataset Metadata */}
       <div className="flex items-center gap-3 min-w-0 shrink-0">
         <button
@@ -230,6 +230,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {isProjectMenuOpen && (
             <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 flex flex-col gap-0.5">
               <button
+                type="button"
                 onClick={() => {
                   setIsProjectMenuOpen(false);
                   onOpenTemplates?.();
@@ -240,6 +241,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <span>Templates</span>
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setIsProjectMenuOpen(false);
                   onOpenVersions?.();
@@ -250,6 +252,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <span>Versions</span>
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setIsProjectMenuOpen(false);
                   onOpenShare?.();
@@ -260,6 +263,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <span>Share</span>
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setIsProjectMenuOpen(false);
                   onOpenAudit?.();

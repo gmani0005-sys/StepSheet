@@ -12,10 +12,10 @@ import {
 import { GeneratedCode, StepDefinition, StepSummary } from '../types/steps';
 
 const LOCAL_DATASETS_KEY = 'stepsheet_local_datasets_v1';
-const LOCAL_TEMPLATES_KEY = 'stepsheet_local_templates_v1';
-const LOCAL_VERSIONS_KEY = 'stepsheet_local_versions_v1';
-const LOCAL_SHARES_KEY = 'stepsheet_local_shares_v1';
-const LOCAL_AUDIT_KEY = 'stepsheet_local_audit_v1';
+const LOCAL_TEMPLATES_KEY = 'stepsheet_local_templates_v2';
+const LOCAL_VERSIONS_KEY = 'stepsheet_local_versions_v2';
+const LOCAL_SHARES_KEY = 'stepsheet_local_shares_v2';
+const LOCAL_AUDIT_KEY = 'stepsheet_local_audit_v2';
 
 interface StoredLocalDataset {
   meta: Dataset;
@@ -211,17 +211,86 @@ function saveStoredDatasets(datasets: StoredLocalDataset[]) {
   } catch {}
 }
 
-function logAudit(action: string, details: Record<string, any> = {}) {
+function getStoredAuditLogs(): any[] {
   try {
     const raw = localStorage.getItem(LOCAL_AUDIT_KEY);
-    const logs = raw ? JSON.parse(raw) : [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  const now = new Date();
+  const t1 = new Date(now.getTime() - 180000).toISOString();
+  const t2 = new Date(now.getTime() - 120000).toISOString();
+  const t3 = new Date(now.getTime() - 60000).toISOString();
+  const initialLogs = [
+    {
+      id: 'audit-seed-3',
+      project_id: 'default-project',
+      action: 'version_created',
+      resource_type: 'version',
+      actor_email: 'local@stepsheet.app',
+      user_email: 'local@stepsheet.app',
+      timestamp: t3,
+      created_at: t3,
+      details: { version_number: 1, message: 'Initial baseline pipeline snapshot' },
+    },
+    {
+      id: 'audit-seed-2',
+      project_id: 'default-project',
+      action: 'template_catalog_initialized',
+      resource_type: 'template',
+      actor_email: 'local@stepsheet.app',
+      user_email: 'local@stepsheet.app',
+      timestamp: t2,
+      created_at: t2,
+      details: { templates_loaded: 4, builtin: true },
+    },
+    {
+      id: 'audit-seed-1',
+      project_id: 'default-project',
+      action: 'dataset_load_samples',
+      resource_type: 'dataset',
+      actor_email: 'local@stepsheet.app',
+      user_email: 'local@stepsheet.app',
+      timestamp: t1,
+      created_at: t1,
+      details: { datasets: ['Orders (Sample XLSX)', 'Customers (Sample CSV)'] },
+    },
+  ];
+  try {
+    localStorage.setItem(LOCAL_AUDIT_KEY, JSON.stringify(initialLogs));
+  } catch {}
+  return initialLogs;
+}
+
+function logAudit(action: string, details: Record<string, any> = {}, resourceType?: string) {
+  try {
+    const logs = getStoredAuditLogs();
+    const inferredResource =
+      resourceType ||
+      (action.includes('version')
+        ? 'version'
+        : action.includes('template')
+        ? 'template'
+        : action.includes('share')
+        ? 'share'
+        : action.includes('export')
+        ? 'export'
+        : action.includes('quality')
+        ? 'quality'
+        : 'dataset');
+    const now = new Date().toISOString();
     logs.unshift({
       id: crypto.randomUUID(),
       project_id: 'default-project',
-      user_email: 'local@stepsheet.app',
       action,
+      resource_type: inferredResource,
+      actor_email: 'local@stepsheet.app',
+      user_email: 'local@stepsheet.app',
+      timestamp: now,
+      created_at: now,
       details,
-      created_at: new Date().toISOString(),
     });
     localStorage.setItem(LOCAL_AUDIT_KEY, JSON.stringify(logs.slice(0, 100)));
   } catch {}
@@ -1372,17 +1441,18 @@ export const localEngine = {
   },
 
   async listTemplates(): Promise<any[]> {
-    try {
-      const raw = localStorage.getItem(LOCAL_TEMPLATES_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {}
     const builtins = [
       {
         id: 'tpl-sales-clean',
         name: 'Sales Revenue Cleanup & Net Calculation',
-        description: 'Filters valid orders, computes net revenue (amount - discount), and sorts by highest value.',
-        category: 'Finance & Sales',
-        required_columns: ['amount', 'discount'],
+        description:
+          'Filters valid orders, computes net revenue (amount - discount), and sorts by highest value.',
+        category: 'Finance',
+        is_builtin: true,
+        required_columns: [
+          { name: 'amount', data_type: 'float', description: 'Gross order amount' },
+          { name: 'discount', data_type: 'float', description: 'Discount amount applied' },
+        ],
         steps: [
           {
             id: 'tpl-s1',
@@ -1394,7 +1464,7 @@ export const localEngine = {
           {
             id: 'tpl-s2',
             type: 'math_transform',
-            label: 'Compute net_amount = amount - discount',
+            label: 'Calculate net_amount = amount - discount',
             enabled: true,
             params: {
               column: 'amount',
@@ -1403,25 +1473,150 @@ export const localEngine = {
               target_column: 'net_amount',
             },
           },
+          {
+            id: 'tpl-s3',
+            type: 'sort_rows',
+            label: 'Sort by net_amount DESC',
+            enabled: true,
+            params: { column: 'net_amount', direction: 'desc' },
+          },
+        ],
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 'tpl-regional-summary',
+        name: 'Regional Sales Aggregation & KPI Rollup',
+        description:
+          'Groups transactions by region and calculates total revenue sum for executive reporting.',
+        category: 'Marketing',
+        is_builtin: true,
+        required_columns: [
+          { name: 'region', data_type: 'text', description: 'Geographic sales region' },
+          { name: 'amount', data_type: 'float', description: 'Transaction revenue amount' },
+        ],
+        steps: [
+          {
+            id: 'tpl-r1',
+            type: 'group_by',
+            label: 'Group by region (sum amount)',
+            enabled: true,
+            params: {
+              group_columns: ['region'],
+              aggregations: [{ column: 'amount', function: 'sum', alias: 'total_revenue' }],
+            },
+          },
+          {
+            id: 'tpl-r2',
+            type: 'sort_rows',
+            label: 'Sort by total_revenue DESC',
+            enabled: true,
+            params: { column: 'total_revenue', direction: 'desc' },
+          },
+        ],
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 'tpl-data-cleansing',
+        name: 'Customer Directory Deduplication & Standardization',
+        description:
+          'Removes duplicate customer records and standardizes text casing for clean CRM imports.',
+        category: 'Data Cleansing',
+        is_builtin: true,
+        required_columns: [
+          { name: 'customer_id', data_type: 'text', description: 'Unique customer identifier' },
+          { name: 'region', data_type: 'text', description: 'Region or segment column' },
+        ],
+        steps: [
+          {
+            id: 'tpl-c1',
+            type: 'remove_duplicates',
+            label: 'Deduplicate on customer_id',
+            enabled: true,
+            params: { columns: ['customer_id'], keep: 'first' },
+          },
+          {
+            id: 'tpl-c2',
+            type: 'text_transform',
+            label: 'Uppercase region',
+            enabled: true,
+            params: { column: 'region', operation: 'upper', target_column: 'region' },
+          },
+        ],
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 'tpl-time-intel',
+        name: 'Running Revenue Cumulative Window Trend',
+        description:
+          'Sorts orders chronologically and computes a cumulative running total across transactions.',
+        category: 'Time Intelligence',
+        is_builtin: true,
+        required_columns: [
+          { name: 'order_date', data_type: 'date', description: 'Transaction date column' },
+          { name: 'amount', data_type: 'float', description: 'Metric column to accumulate' },
+        ],
+        steps: [
+          {
+            id: 'tpl-t1',
+            type: 'sort_rows',
+            label: 'Sort by order_date ASC',
+            enabled: true,
+            params: { column: 'order_date', direction: 'asc' },
+          },
+          {
+            id: 'tpl-t2',
+            type: 'window_calc',
+            label: 'Running sum of amount',
+            enabled: true,
+            params: {
+              function: 'running_sum',
+              value_column: 'amount',
+              target_column: 'cumulative_revenue',
+            },
+          },
         ],
         created_at: new Date().toISOString(),
       },
     ];
+
+    try {
+      const raw = localStorage.getItem(LOCAL_TEMPLATES_KEY);
+      if (raw) {
+        const custom = JSON.parse(raw);
+        if (Array.isArray(custom)) {
+          return [...custom, ...builtins];
+        }
+      }
+    } catch {}
     return builtins;
   },
 
   async createTemplate(templateData: any): Promise<any> {
-    const existing = await this.listTemplates();
+    let custom: any[] = [];
+    try {
+      const raw = localStorage.getItem(LOCAL_TEMPLATES_KEY);
+      if (raw) custom = JSON.parse(raw) || [];
+    } catch {}
+
+    const normalizedReqCols = (templateData.required_columns || []).map((c: any) =>
+      typeof c === 'string'
+        ? { name: c, data_type: 'text', description: `Required input column ${c}` }
+        : c
+    );
+
     const created = {
       ...templateData,
       id: `tpl-${crypto.randomUUID().slice(0, 8)}`,
+      is_builtin: false,
+      required_columns: normalizedReqCols,
+      steps: templateData.steps || [],
       created_at: new Date().toISOString(),
     };
-    const next = [created, ...existing];
+    const next = [created, ...custom];
     try {
       localStorage.setItem(LOCAL_TEMPLATES_KEY, JSON.stringify(next));
     } catch {}
-    logAudit('template.create', { name: created.name });
+    logAudit('template_created', { template_id: created.id, name: created.name }, 'template');
     return created;
   },
 
@@ -1429,93 +1624,315 @@ export const localEngine = {
     const templates = await this.listTemplates();
     const tpl = templates.find((t) => t.id === templateId) || templates[0];
     const ds = getStoredDatasets().find((d) => d.meta.id === datasetId) || getStoredDatasets()[0];
-    const dsCols = ds ? ds.meta.schema_metadata.map((c) => c.name) : [];
+    const dsCols = ds ? ds.meta.schema_metadata : [];
+    const dsColNames = dsCols.map((c) => c.name);
+
+    const reqCols = (tpl?.required_columns || []).map((c: any) =>
+      typeof c === 'string' ? { name: c, data_type: 'text' } : c
+    );
+
     const mapping: Record<string, string> = {};
-    (tpl?.required_columns || []).forEach((reqCol: string) => {
-      mapping[reqCol] = dsCols.includes(reqCol) ? reqCol : dsCols[0] || reqCol;
+    const suggestions = reqCols.map((rc: any) => {
+      const reqName = rc.name;
+      const exact = dsColNames.find((n) => n.toLowerCase() === reqName.toLowerCase());
+      const partial = dsColNames.find(
+        (n) =>
+          n.toLowerCase().includes(reqName.toLowerCase()) ||
+          reqName.toLowerCase().includes(n.toLowerCase())
+      );
+      const sameType = dsCols.find((c) => c.data_type === rc.data_type)?.name;
+      const chosen = exact || partial || sameType || dsColNames[0] || reqName;
+      mapping[reqName] = chosen;
+
+      return {
+        template_column: reqName,
+        suggested_column: chosen,
+        confidence: exact ? 0.99 : partial ? 0.85 : 0.7,
+        match_reason: exact
+          ? 'Exact column name match'
+          : partial
+          ? 'Similar column name match'
+          : 'Compatible data type fallback',
+      };
     });
-    return { mapping, confidence: 1.0 };
+
+    return {
+      template_id: templateId,
+      dataset_id: datasetId,
+      suggestions,
+      mapping,
+      confidence: 0.95,
+    };
   },
 
-  async applyTemplate(templateId: string, _datasetId: string, _columnMapping: Record<string, string>): Promise<any> {
+  async applyTemplate(
+    templateId: string,
+    datasetId: string,
+    columnMapping: Record<string, string>
+  ): Promise<any> {
     const templates = await this.listTemplates();
     const tpl = templates.find((t) => t.id === templateId) || templates[0];
-    return { steps: tpl?.steps || [] };
+    const mapCol = (colName?: string) =>
+      colName && columnMapping && columnMapping[colName] ? columnMapping[colName] : colName;
+
+    const rewrittenSteps = (tpl?.steps || []).map((st: any) => {
+      const p = { ...(st.params || {}) };
+      if (p.column) p.column = mapCol(p.column);
+      if (p.value_column) p.value_column = mapCol(p.value_column);
+      if (Array.isArray(p.columns)) p.columns = p.columns.map((c: string) => mapCol(c));
+      if (Array.isArray(p.group_columns)) {
+        p.group_columns = p.group_columns.map((c: string) => mapCol(c));
+      }
+      if (Array.isArray(p.aggregations)) {
+        p.aggregations = p.aggregations.map((agg: any) => ({
+          ...agg,
+          column: mapCol(agg.column),
+        }));
+      }
+      if (typeof p.expression === 'string' && columnMapping) {
+        let expr = p.expression;
+        Object.entries(columnMapping).forEach(([fromCol, toCol]) => {
+          if (fromCol && toCol && fromCol !== toCol) {
+            const escaped = fromCol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            expr = expr.replace(new RegExp(`\\b${escaped}\\b`, 'g'), toCol);
+          }
+        });
+        p.expression = expr;
+      }
+      return {
+        ...st,
+        id: crypto.randomUUID(),
+        params: p,
+      };
+    });
+
+    logAudit(
+      'template_applied',
+      { template_id: templateId, dataset_id: datasetId, steps_count: rewrittenSteps.length },
+      'template'
+    );
+
+    return {
+      template_id: templateId,
+      dataset_id: datasetId,
+      rewritten_steps: rewrittenSteps,
+      steps: rewrittenSteps,
+    };
   },
 
-  async listVersions(_projectId: string): Promise<any[]> {
+  async listVersions(projectId: string): Promise<any[]> {
     try {
       const raw = localStorage.getItem(LOCAL_VERSIONS_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((v: any) => ({
+            ...v,
+            author_email: v.author_email || v.created_by || 'local@stepsheet.app',
+            steps_snapshot: Array.isArray(v.steps_snapshot)
+              ? v.steps_snapshot
+              : Array.isArray(v.steps)
+              ? v.steps
+              : [],
+          }));
+        }
+      }
     } catch {}
-    return [];
+
+    const initialVersion = {
+      id: 'ver-seed-1',
+      project_id: projectId || 'default-project',
+      version_number: 1,
+      message: 'Initial baseline pipeline snapshot',
+      author_email: 'local@stepsheet.app',
+      created_by: 'local@stepsheet.app',
+      steps_snapshot: [
+        {
+          id: 'seed-step-1',
+          type: 'filter_rows',
+          label: 'Filter amount > 0',
+          enabled: true,
+          params: { column: 'amount', operator: 'gt', value: '0' },
+        },
+      ],
+      steps: [
+        {
+          id: 'seed-step-1',
+          type: 'filter_rows',
+          label: 'Filter amount > 0',
+          enabled: true,
+          params: { column: 'amount', operator: 'gt', value: '0' },
+        },
+      ],
+      created_at: new Date(Date.now() - 60000).toISOString(),
+    };
+    try {
+      localStorage.setItem(LOCAL_VERSIONS_KEY, JSON.stringify([initialVersion]));
+    } catch {}
+    return [initialVersion];
   },
 
-  async createVersion(projectId: string, message: string, steps: any[], datasetId?: string): Promise<any> {
+  async createVersion(
+    projectId: string,
+    message: string,
+    steps: any[],
+    datasetId?: string
+  ): Promise<any> {
     const versions = await this.listVersions(projectId);
+    const maxVer = versions.reduce((max, v) => Math.max(max, v.version_number || 0), 0);
+    const safeSteps = Array.isArray(steps) ? steps : [];
     const created = {
       id: crypto.randomUUID(),
       project_id: projectId,
-      version_number: versions.length + 1,
+      version_number: maxVer + 1,
       message,
-      steps: steps || [],
-      dataset_id: datasetId,
+      author_email: 'local@stepsheet.app',
       created_by: 'local@stepsheet.app',
+      steps_snapshot: safeSteps,
+      steps: safeSteps,
+      dataset_id: datasetId,
       created_at: new Date().toISOString(),
     };
     const next = [created, ...versions];
     try {
       localStorage.setItem(LOCAL_VERSIONS_KEY, JSON.stringify(next));
     } catch {}
-    logAudit('version.create', { version_number: created.version_number, message });
+    logAudit(
+      'version_created',
+      { version_number: created.version_number, message, steps_count: safeSteps.length },
+      'version'
+    );
     return created;
   },
 
   async diffVersions(projectId: string, fromVersion: number, toVersion: number): Promise<any> {
     const versions = await this.listVersions(projectId);
-    const vFrom = versions.find((v) => v.version_number === fromVersion);
-    const vTo = versions.find((v) => v.version_number === toVersion);
-    const fromSteps = vFrom?.steps || [];
-    const toSteps = vTo?.steps || [];
+    const vFrom = versions.find((v) => v.version_number === Number(fromVersion));
+    const vTo = versions.find((v) => v.version_number === Number(toVersion));
+    const fromSteps: any[] = vFrom?.steps_snapshot || vFrom?.steps || [];
+    const toSteps: any[] = vTo?.steps_snapshot || vTo?.steps || [];
+
+    const fromMap = new Map(fromSteps.map((s) => [s.id || s.label, s]));
+    const toMap = new Map(toSteps.map((s) => [s.id || s.label, s]));
+
+    const diffSteps: any[] = [];
+    let addedCount = 0;
+    let removedCount = 0;
+    let modifiedCount = 0;
+
+    toSteps.forEach((st) => {
+      const key = st.id || st.label;
+      const oldSt = fromMap.get(key);
+      if (!oldSt) {
+        addedCount++;
+        diffSteps.push({
+          step_id: st.id || key,
+          label: st.label,
+          step_type: st.type,
+          change_type: 'added',
+          param_diffs: [],
+        });
+      } else if (JSON.stringify(oldSt.params) !== JSON.stringify(st.params) || oldSt.label !== st.label) {
+        modifiedCount++;
+        const paramDiffs: any[] = [];
+        const allKeys = new Set([
+          ...Object.keys(oldSt.params || {}),
+          ...Object.keys(st.params || {}),
+        ]);
+        allKeys.forEach((pk) => {
+          const ov = oldSt.params?.[pk];
+          const nv = st.params?.[pk];
+          if (JSON.stringify(ov) !== JSON.stringify(nv)) {
+            paramDiffs.push({ param_key: pk, old_value: ov, new_value: nv });
+          }
+        });
+        diffSteps.push({
+          step_id: st.id || key,
+          label: st.label,
+          step_type: st.type,
+          change_type: 'modified',
+          param_diffs: paramDiffs,
+        });
+      }
+    });
+
+    fromSteps.forEach((st) => {
+      const key = st.id || st.label;
+      if (!toMap.has(key)) {
+        removedCount++;
+        diffSteps.push({
+          step_id: st.id || key,
+          label: st.label,
+          step_type: st.type,
+          change_type: 'removed',
+          param_diffs: [],
+        });
+      }
+    });
+
     return {
       from_version: fromVersion,
       to_version: toVersion,
-      added_steps: toSteps.slice(fromSteps.length),
-      removed_steps: fromSteps.slice(toSteps.length),
-      modified_steps: [],
+      added_count: addedCount,
+      removed_count: removedCount,
+      modified_count: modifiedCount,
+      diff_steps: diffSteps,
     };
   },
 
   async restoreVersion(projectId: string, versionId: string): Promise<any> {
     const versions = await this.listVersions(projectId);
     const found = versions.find((v) => v.id === versionId);
-    logAudit('version.restore', { version_id: versionId });
-    return found || { steps: [] };
+    logAudit(
+      'version_restored',
+      { version_id: versionId, version_number: found?.version_number },
+      'version'
+    );
+    return found || { steps_snapshot: [], steps: [] };
   },
 
-  async createShare(projectId: string, role: string = 'viewer', expiresInDays?: number): Promise<any> {
+  async createShare(
+    projectId: string,
+    role: string = 'viewer',
+    expiresInDays?: number
+  ): Promise<any> {
     const shares = await this.listShares(projectId);
+    const token = `stpsht_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    const expiresAt = expiresInDays
+      ? new Date(Date.now() + expiresInDays * 86400000).toISOString()
+      : null;
+
     const created = {
       id: crypto.randomUUID(),
       project_id: projectId,
       role,
-      share_token: `local-share-${crypto.randomUUID().slice(0, 12)}`,
+      token,
+      share_token: token,
       is_active: true,
       expires_in_days: expiresInDays,
+      expires_at: expiresAt,
       created_at: new Date().toISOString(),
     };
     const next = [created, ...shares];
     try {
       localStorage.setItem(LOCAL_SHARES_KEY, JSON.stringify(next));
     } catch {}
-    logAudit('share.create', { role });
+    logAudit('share_created', { role, expires_in_days: expiresInDays || 'never' }, 'share');
     return created;
   },
 
   async listShares(_projectId: string): Promise<any[]> {
     try {
       const raw = localStorage.getItem(LOCAL_SHARES_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.map((s: any) => ({
+            ...s,
+            token: s.token || s.share_token || s.id,
+          }));
+        }
+      }
     } catch {}
     return [];
   },
@@ -1526,23 +1943,27 @@ export const localEngine = {
     try {
       localStorage.setItem(LOCAL_SHARES_KEY, JSON.stringify(next));
     } catch {}
-    logAudit('share.revoke', { share_id: shareId });
+    logAudit('share_revoked', { share_id: shareId }, 'share');
   },
 
   async getShareAccess(token: string): Promise<any> {
-    return { valid: true, share_token: token, role: 'viewer' };
+    return { valid: true, token, share_token: token, role: 'viewer' };
   },
 
   async listAuditLogs(_projectId: string, action?: string): Promise<any> {
     try {
-      const raw = localStorage.getItem(LOCAL_AUDIT_KEY);
-      let logs = raw ? JSON.parse(raw) : [];
-      if (action) {
-        logs = logs.filter((l: any) => l.action?.startsWith(action));
+      let logs = getStoredAuditLogs();
+      if (action && action !== 'all') {
+        const q = action.toLowerCase();
+        logs = logs.filter(
+          (l: any) =>
+            l.action?.toLowerCase().includes(q) || l.resource_type?.toLowerCase().includes(q)
+        );
       }
-      return { total: logs.length, logs };
+      return { total: logs.length, items: logs, logs };
     } catch {
-      return { total: 0, logs: [] };
+      return { total: 0, items: [], logs: [] };
     }
   },
 };
+

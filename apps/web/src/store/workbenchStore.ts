@@ -39,7 +39,15 @@ const STORAGE_KEY_PIPELINES = 'stepsheet_dataset_pipelines_v1';
 const loadStoredQueries = (): QueryConnection[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_QUERIES);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((q: any) => ({
+      ...q,
+      steps: Array.isArray(q.steps) ? q.steps : [],
+      undoStack: Array.isArray(q.undoStack) ? q.undoStack : [],
+      redoStack: Array.isArray(q.redoStack) ? q.redoStack : [],
+      stepSummaries: Array.isArray(q.stepSummaries) ? q.stepSummaries : [],
+    }));
   } catch {
     return [];
   }
@@ -48,7 +56,21 @@ const loadStoredQueries = (): QueryConnection[] => {
 const loadStoredPipelines = (): Record<string, DatasetPipelineState> => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PIPELINES);
-    return raw ? JSON.parse(raw) : {};
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== 'object') return {};
+    const sanitized: Record<string, DatasetPipelineState> = {};
+    Object.entries(parsed).forEach(([k, v]: [string, any]) => {
+      if (v && typeof v === 'object') {
+        sanitized[k] = {
+          ...v,
+          steps: Array.isArray(v.steps) ? v.steps : [],
+          undoStack: Array.isArray(v.undoStack) ? v.undoStack : [],
+          redoStack: Array.isArray(v.redoStack) ? v.redoStack : [],
+          stepSummaries: Array.isArray(v.stepSummaries) ? v.stepSummaries : [],
+        };
+      }
+    });
+    return sanitized;
   } catch {
     return {};
   }
@@ -623,16 +645,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     },
 
     setPipelineSteps: async (newSteps: StepDefinition[]) => {
-      const currentSteps = get().steps;
+      const safeSteps = Array.isArray(newSteps) ? newSteps : [];
+      const currentSteps = get().steps || [];
       set((state) => ({
         undoStack: [...state.undoStack, currentSteps],
         redoStack: [],
-        steps: newSteps,
+        steps: safeSteps,
         activeStepIndex: null,
         activeTab: 'applied',
       }));
       saveCurrentPipelineContext(true);
-      if (newSteps.length === 0) {
+      if (safeSteps.length === 0) {
         await get().fetchRows(0);
       } else {
         await get().runPipelinePreview();

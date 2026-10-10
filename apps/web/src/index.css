@@ -55,3 +55,35 @@
   background: #64748b;
 }
 
+/* Prominent table preview scroller (horizontal & vertical) */
+.grid-scrollbar {
+  scrollbar-width: auto;
+  scrollbar-color: #475569 #090d16;
+}
+
+.grid-scrollbar::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.grid-scrollbar::-webkit-scrollbar-track {
+  background: #090d16;
+  border-top: 1px solid #1e293b;
+  border-left: 1px solid #1e293b;
+}
+
+.grid-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border: 2px solid #090d16;
+  border-radius: 9999px;
+}
+
+.grid-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #10b981;
+}
+
+.grid-scrollbar::-webkit-scrollbar-corner {
+  background: #090d16;
+}
+
+

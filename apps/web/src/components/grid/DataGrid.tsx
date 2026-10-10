@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo, useState, useEffect, useCallback } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -9,7 +9,6 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Type,
   Hash,
-  Percent,
   Calendar,
   Clock,
   ToggleLeft,
@@ -19,9 +18,9 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  Filter,
   RefreshCw,
   FileSpreadsheet,
+  Columns,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { DataType } from '../../types';
@@ -47,6 +46,48 @@ export const DataGrid: React.FC = () => {
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
+  // Horizontal scroll sync state for bottom scroller bar
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [maxScrollLeft, setMaxScrollLeft] = useState(0);
+
+  const updateScrollMetrics = useCallback(() => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    setScrollLeft(el.scrollLeft);
+    setMaxScrollLeft(Math.max(0, el.scrollWidth - el.clientWidth));
+  }, []);
+
+  useEffect(() => {
+    updateScrollMetrics();
+    const el = tableContainerRef.current;
+    if (!el) return;
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => updateScrollMetrics());
+      ro.observe(el);
+    }
+    window.addEventListener('resize', updateScrollMetrics);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', updateScrollMetrics);
+    };
+  }, [schemaColumns, rows, updateScrollMetrics]);
+
+  const handleHorizontalSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value);
+    setScrollLeft(val);
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollLeft = val;
+    }
+  };
+
+  const scrollColumnsBy = (delta: number) => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: delta, behavior: 'smooth' });
+  };
+
   // Column helper
   const columnHelper = createColumnHelper<Record<string, any>>();
 
@@ -55,16 +96,16 @@ export const DataGrid: React.FC = () => {
       columnHelper.accessor(col.name, {
         id: col.name,
         header: () => (
-          <div className="flex items-center justify-between w-full group select-none">
+          <div className="flex items-center justify-between gap-4 w-full group select-none whitespace-nowrap">
             <div
               className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors"
               onClick={() => toggleSort(col.name)}
               title={`Click to sort by ${col.name}`}
             >
-              <span className="text-slate-400">
+              <span className="text-slate-400 shrink-0">
                 {getTypeIcon(col.data_type)}
               </span>
-              <span className="font-semibold text-xs text-slate-200 group-hover:text-white">
+              <span className="font-semibold text-xs text-slate-200 group-hover:text-white whitespace-nowrap">
                 {col.name}
               </span>
               {getSortIcon(col.name, sortConditions)}
@@ -76,7 +117,7 @@ export const DataGrid: React.FC = () => {
                 openColumnProfile(col.name);
               }}
               title={`View ${col.name} column profile & histogram`}
-              className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-700/60 rounded transition-all"
+              className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-700/60 rounded transition-all shrink-0"
             >
               <BarChart3 size={13} />
             </button>
@@ -98,7 +139,11 @@ export const DataGrid: React.FC = () => {
               </span>
             );
           }
-          return <span className="truncate block font-mono text-xs">{String(val)}</span>;
+          return (
+            <span className="block font-mono text-xs whitespace-nowrap" title={String(val)}>
+              {String(val)}
+            </span>
+          );
         },
       })
     );
@@ -116,7 +161,7 @@ export const DataGrid: React.FC = () => {
   const rowVirtualizer = useVirtualizer({
     count: tableRows.length,
     getScrollElement: () => tableContainerRef.current,
-    estimateSize: () => 32,
+    estimateSize: () => 34,
     overscan: 10,
   });
 
@@ -127,7 +172,7 @@ export const DataGrid: React.FC = () => {
 
   if (!selectedDataset) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-slate-950 p-8 text-center">
+      <div className="flex-1 flex flex-col items-center justify-center bg-slate-950 p-8 text-center min-h-0">
         <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-4">
           <FileSpreadsheet size={32} />
         </div>
@@ -143,7 +188,7 @@ export const DataGrid: React.FC = () => {
   const endRow = Math.min(offset + limit, filteredRows);
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden h-[calc(100vh-3.5rem)]">
+    <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden min-h-0 min-w-0">
       {/* Grid Toolbar: Search, Filter, Pagination */}
       <div className="h-11 border-b border-slate-800/80 bg-slate-900/60 px-4 flex items-center justify-between gap-4 shrink-0">
         <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 max-w-sm w-full">
@@ -167,14 +212,14 @@ export const DataGrid: React.FC = () => {
           )}
         </form>
 
-        <div className="flex items-center gap-3 text-xs text-slate-400">
+        <div className="flex items-center gap-3 text-xs text-slate-400 shrink-0">
           {isLoadingRows ? (
             <span className="flex items-center gap-1.5 text-emerald-400">
               <RefreshCw size={12} className="animate-spin" />
               <span>Querying DuckDB...</span>
             </span>
           ) : (
-            <span>
+            <span className="whitespace-nowrap">
               Showing <span className="font-semibold text-slate-200">{startRow}</span> -{' '}
               <span className="font-semibold text-slate-200">{endRow}</span> of{' '}
               <span className="font-semibold text-slate-200">{filteredRows.toLocaleString()}</span> rows
@@ -204,22 +249,26 @@ export const DataGrid: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Virtualized Table Body */}
-      <div ref={tableContainerRef} className="flex-1 overflow-auto relative">
-        <table className="w-full text-left border-collapse table-fixed">
+      {/* Main Virtualized Table Body with Uncongested Columns & Horizontal Scroll */}
+      <div
+        ref={tableContainerRef}
+        onScroll={updateScrollMetrics}
+        className="flex-1 overflow-x-auto overflow-y-auto relative min-h-0 grid-scrollbar"
+      >
+        <table className="min-w-full w-max text-left border-collapse table-auto">
           {/* Sticky Header */}
-          <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 z-10 shadow-sm">
+          <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 z-20 shadow-sm">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
-                {/* Row Number Header */}
-                <th className="w-12 px-2 py-2 text-center text-[10px] font-mono font-medium text-slate-500 bg-slate-900/90 border-r border-slate-800">
+                {/* Sticky Row Number Header */}
+                <th className="sticky left-0 z-30 w-12 min-w-[48px] px-2 py-2.5 text-center text-[10px] font-mono font-medium text-slate-500 bg-slate-900 border-r border-slate-800">
                   #
                 </th>
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2 border-r border-slate-800 text-xs font-semibold text-slate-300 truncate"
-                    style={{ minWidth: 150 }}
+                    className="px-4 py-2.5 border-r border-slate-800 text-xs font-semibold text-slate-300 whitespace-nowrap bg-slate-900"
+                    style={{ minWidth: 190 }}
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
@@ -258,14 +307,15 @@ export const DataGrid: React.FC = () => {
                       className="border-b border-slate-900/60 hover:bg-slate-900/50 transition-colors"
                       style={{ height: `${virtualRow.size}px` }}
                     >
-                      {/* Row Index */}
-                      <td className="w-12 px-2 py-1.5 text-center text-[10px] font-mono text-slate-600 bg-slate-950/40 border-r border-slate-800/80 select-none">
+                      {/* Sticky Row Index */}
+                      <td className="sticky left-0 z-10 w-12 min-w-[48px] px-2 py-1.5 text-center text-[10px] font-mono text-slate-500 bg-slate-950 border-r border-slate-800/80 select-none">
                         {rowIndex}
                       </td>
                       {row.getVisibleCells().map((cell) => (
                         <td
                           key={cell.id}
-                          className="px-3 py-1.5 border-r border-slate-800/60 text-xs text-slate-300 truncate"
+                          className="px-4 py-1.5 border-r border-slate-800/60 text-xs text-slate-300 whitespace-nowrap"
+                          style={{ minWidth: 190 }}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
@@ -277,6 +327,57 @@ export const DataGrid: React.FC = () => {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Bottom Horizontal Column Scroller Bar */}
+      <div className="h-8 border-t border-slate-800/90 bg-slate-900/90 px-3 flex items-center justify-between gap-4 shrink-0 select-none">
+        <div className="flex items-center gap-2 text-[11px] text-slate-400 shrink-0">
+          <Columns size={12} className="text-emerald-400" />
+          <span>
+            <strong className="text-slate-200 font-mono">{schemaColumns.length}</strong> columns
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-1 max-w-xl">
+          <button
+            type="button"
+            onClick={() => scrollColumnsBy(-240)}
+            disabled={scrollLeft <= 0}
+            className="px-1.5 py-0.5 text-[11px] font-medium bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 rounded flex items-center gap-0.5 transition-colors shrink-0"
+            title="Scroll columns left"
+          >
+            <ChevronLeft size={13} />
+            <span>Left</span>
+          </button>
+
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, maxScrollLeft)}
+            value={Math.min(scrollLeft, Math.max(1, maxScrollLeft))}
+            disabled={maxScrollLeft <= 0}
+            onChange={handleHorizontalSliderChange}
+            aria-label="Horizontal column scroller"
+            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-40 disabled:cursor-default"
+          />
+
+          <button
+            type="button"
+            onClick={() => scrollColumnsBy(240)}
+            disabled={scrollLeft >= maxScrollLeft - 1}
+            className="px-1.5 py-0.5 text-[11px] font-medium bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 rounded flex items-center gap-0.5 transition-colors shrink-0"
+            title="Scroll columns right"
+          >
+            <span>Right</span>
+            <ChevronRight size={13} />
+          </button>
+        </div>
+
+        <div className="text-[10px] font-mono text-slate-500 hidden sm:block shrink-0">
+          {maxScrollLeft > 0
+            ? `Horizontal Scroll: ${Math.round((scrollLeft / maxScrollLeft) * 100)}%`
+            : 'All columns visible'}
+        </div>
       </div>
     </div>
   );

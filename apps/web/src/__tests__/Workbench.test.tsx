@@ -17,6 +17,7 @@ import { AuditModal } from '../components/audit/AuditModal';
 import { EditStepModal } from '../components/steps/EditStepModal';
 import { RightPanel } from '../components/layout/RightPanel';
 import { LeftPanel } from '../components/layout/LeftPanel';
+import { DataGrid } from '../components/grid/DataGrid';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { localEngine } from '../api/localEngine';
 
@@ -350,6 +351,14 @@ describe('StepSheet Workbench', () => {
     expect(preview.rows.length).toBeGreaterThan(0);
     expect(preview.rows[0].discounted).toBeDefined();
   });
+
+  it('renders DataGrid with bottom horizontal column scroller bar', () => {
+    render(<DataGrid />);
+    expect(screen.getByLabelText('Horizontal column scroller')).toBeDefined();
+    expect(screen.getByTitle('Scroll columns left')).toBeDefined();
+    expect(screen.getByTitle('Scroll columns right')).toBeDefined();
+  });
 });
+
 
 

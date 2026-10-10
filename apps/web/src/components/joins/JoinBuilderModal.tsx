@@ -22,9 +22,16 @@ import { api } from '../../api/client';
 interface JoinBuilderModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialRightDatasetId?: string;
+  initialKeyPair?: { left_col: string; right_col: string } | null;
 }
 
-export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onClose }) => {
+export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({
+  isOpen,
+  onClose,
+  initialRightDatasetId,
+  initialKeyPair,
+}) => {
   const { datasets, selectedDataset, columns: leftColumns, addStep } = useWorkbenchStore();
 
   const [rightDatasetId, setRightDatasetId] = useState('');
@@ -51,10 +58,14 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onCl
   // Initialize right dataset and key pairs
   useEffect(() => {
     if (isOpen && datasets.length > 0) {
-      const other = datasets.find((d) => d.id !== selectedDataset?.id) || datasets[0];
-      setRightDatasetId(other.id);
+      if (initialRightDatasetId && datasets.some((d) => d.id === initialRightDatasetId)) {
+        setRightDatasetId(initialRightDatasetId);
+      } else {
+        const other = datasets.find((d) => d.id !== selectedDataset?.id) || datasets[0];
+        setRightDatasetId(other.id);
+      }
     }
-  }, [isOpen, datasets, selectedDataset]);
+  }, [isOpen, datasets, selectedDataset, initialRightDatasetId]);
 
   // Auto-suggest keys and initialize columns when right dataset changes
   useEffect(() => {
@@ -63,9 +74,21 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onCl
     const rDs = datasets.find((d) => d.id === rightDatasetId);
     if (!rDs) return;
 
-    // Pick non-key columns by default
-    const rCols = rDs.schema_metadata.map((c) => c.name);
+    // Pick columns by default
+    const rCols = (rDs.schema_metadata || []).map((c) => c.name);
     setSelectedRightColumns(rCols);
+
+    if (initialKeyPair && initialKeyPair.left_col && initialKeyPair.right_col) {
+      setKeyPairs([
+        {
+          left_col: initialKeyPair.left_col,
+          right_col: initialKeyPair.right_col,
+          trim_whitespace: true,
+          case_insensitive: false,
+        },
+      ]);
+      return;
+    }
 
     // Call auto-suggest
     api
@@ -73,6 +96,13 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onCl
       .then((res) => {
         if (res.suggested_keys && res.suggested_keys.length > 0) {
           setKeyPairs(res.suggested_keys);
+        } else if (res.suggestions && res.suggestions.length > 0) {
+          setKeyPairs(
+            res.suggestions.map((s: any) => ({
+              left_col: s.left_col || s.left_key,
+              right_col: s.right_col || s.right_key,
+            }))
+          );
         } else if (leftColumns.length > 0 && rDs.schema_metadata.length > 0) {
           setKeyPairs([
             { left_col: leftColumns[0].name, right_col: rDs.schema_metadata[0].name },
@@ -86,7 +116,7 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onCl
           ]);
         }
       });
-  }, [selectedDataset, rightDatasetId, datasets]);
+  }, [selectedDataset, rightDatasetId, datasets, initialKeyPair]);
 
   // Run automatic health check whenever keys, right table, or join type change
   useEffect(() => {
@@ -541,14 +571,15 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onCl
                     <span className="text-[11px] text-slate-400">Cardinality Verdict</span>
                     <span
                       className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded-full border ${getCardinalityBadgeClass(
-                        healthReport.cardinality
+                        healthReport.cardinality || (healthReport as any).relationship
                       )}`}
                     >
-                      {healthReport.cardinality}
+                      {healthReport.cardinality || (healthReport as any).relationship || 'many-to-one'}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-300 leading-snug">
-                    {healthReport.cardinality_description}
+                    {healthReport.cardinality_description ||
+                      'Key relationship analyzed across left and right tables.'}
                   </p>
                 </div>
 
@@ -557,13 +588,17 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onCl
                   <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
                     <span className="text-[10px] text-slate-500 block">Estimated Matches</span>
                     <span className="text-sm font-bold text-emerald-400 font-mono">
-                      {healthReport.estimated_match_rate}%
+                      {healthReport.estimated_match_rate ?? (healthReport as any).match_rate_pct ?? 100}%
                     </span>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
                     <span className="text-[10px] text-slate-500 block">Output Rows</span>
                     <span className="text-sm font-bold text-slate-200 font-mono">
-                      ~{healthReport.estimated_result_rows.toLocaleString()}
+                      ~{(
+                        healthReport.estimated_result_rows ??
+                        (healthReport as any).matched_rows ??
+                        selectedDataset.row_count
+                      ).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -591,21 +626,24 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({ isOpen, onCl
                 )}
 
                 {/* Type Mismatch Warning */}
-                {healthReport.type_mismatches.length > 0 && (
-                  <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">
-                    <p className="font-semibold mb-1">Key Data-Type Mismatch:</p>
-                    {healthReport.type_mismatches.map((tm, i) => (
-                      <p key={i}>
-                        '{tm.left_col}' ({tm.left_type}) ↔ '{tm.right_col}' ({tm.right_type})
-                      </p>
-                    ))}
-                  </div>
-                )}
+                {Array.isArray(healthReport.type_mismatches) &&
+                  healthReport.type_mismatches.length > 0 && (
+                    <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">
+                      <p className="font-semibold mb-1">Key Data-Type Mismatch:</p>
+                      {healthReport.type_mismatches.map((tm, i) => (
+                        <p key={i}>
+                          '{tm.left_col}' ({tm.left_type}) ↔ '{tm.right_col}' ({tm.right_type})
+                        </p>
+                      ))}
+                    </div>
+                  )}
 
                 {/* Key Nulls / Blanks */}
-                {(healthReport.left_key_nulls > 0 || healthReport.right_key_nulls > 0) && (
+                {((healthReport.left_key_nulls ?? 0) > 0 ||
+                  (healthReport.right_key_nulls ?? 0) > 0) && (
                   <div className="text-[11px] text-slate-400">
-                    Null keys detected: {healthReport.left_key_nulls} in left table, {healthReport.right_key_nulls} in right table.
+                    Null keys detected: {healthReport.left_key_nulls ?? 0} in left table,{' '}
+                    {healthReport.right_key_nulls ?? 0} in right table.
                   </div>
                 )}
               </div>

@@ -15,7 +15,7 @@ import { useWorkbenchStore } from '../../store/workbenchStore';
 interface RelationshipsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onOpenJoinBuilder: (leftId?: string, rightId?: string) => void;
+  onOpenJoinBuilder: (rightDatasetId?: string, leftCol?: string, rightCol?: string) => void;
 }
 
 export const RelationshipsModal: React.FC<RelationshipsModalProps> = ({
@@ -23,17 +23,19 @@ export const RelationshipsModal: React.FC<RelationshipsModalProps> = ({
   onClose,
   onOpenJoinBuilder,
 }) => {
-  const { datasets, selectedDataset, steps } = useWorkbenchStore();
+  const { datasets, selectedDataset, steps, addStep } = useWorkbenchStore();
 
   if (!isOpen) return null;
 
   // Extract join relationships from pipeline steps
   const joinSteps = steps.filter((s) => s.type === 'join' || s.type === 'xlookup');
 
-  // Detect likely key matches across datasets
+  // Detect likely key matches across datasets (orienting active dataset as left when possible)
   const detectedKeys: Array<{
+    leftId: string;
     leftTable: string;
     leftCol: string;
+    rightId: string;
     rightTable: string;
     rightCol: string;
     type: string;
@@ -41,8 +43,10 @@ export const RelationshipsModal: React.FC<RelationshipsModalProps> = ({
 
   for (let i = 0; i < datasets.length; i++) {
     for (let j = i + 1; j < datasets.length; j++) {
-      const d1 = datasets[i];
-      const d2 = datasets[j];
+      const rawA = datasets[i];
+      const rawB = datasets[j];
+      const d1 = rawB.id === selectedDataset?.id ? rawB : rawA;
+      const d2 = rawB.id === selectedDataset?.id ? rawA : rawB;
       const cols1 = d1.schema_metadata || [];
       const cols2 = d2.schema_metadata || [];
 
@@ -56,8 +60,10 @@ export const RelationshipsModal: React.FC<RelationshipsModalProps> = ({
 
           if (isMatch) {
             detectedKeys.push({
+              leftId: d1.id,
               leftTable: d1.name,
               leftCol: c1.name,
+              rightId: d2.id,
               rightTable: d2.name,
               rightCol: c2.name,
               type: 'auto-detected',
@@ -67,6 +73,42 @@ export const RelationshipsModal: React.FC<RelationshipsModalProps> = ({
       }
     }
   }
+
+  const handleQuickApplyJoin = async (rel: {
+    leftId: string;
+    leftTable: string;
+    leftCol: string;
+    rightId: string;
+    rightTable: string;
+    rightCol: string;
+  }) => {
+    const rightDs = datasets.find((d) => d.id === rel.rightId);
+    if (!rightDs) return;
+    const rightCols = (rightDs.schema_metadata || []).map((c) => c.name);
+    await addStep({
+      id: crypto.randomUUID(),
+      type: 'join',
+      label: `LEFT JOIN with ${rightDs.name}`,
+      enabled: true,
+      params: {
+        right_dataset_id: rightDs.id,
+        join_type: 'left',
+        key_pairs: [
+          {
+            left_col: rel.leftCol,
+            right_col: rel.rightCol,
+            trim_whitespace: true,
+            case_insensitive: false,
+          },
+        ],
+        selected_right_columns: rightCols,
+        suffix_left: '_left',
+        suffix_right: '_right',
+        dedupe_right_first: false,
+      },
+    });
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -256,15 +298,25 @@ export const RelationshipsModal: React.FC<RelationshipsModalProps> = ({
                       <span className="text-sky-400 font-semibold">{rel.rightTable}</span>.
                       <span>{rel.rightCol}</span>
                     </div>
-                    <button
-                      onClick={() => {
-                        onClose();
-                        onOpenJoinBuilder();
-                      }}
-                      className="px-2.5 py-1 rounded bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[11px] font-medium transition-all"
-                    >
-                      Build Join
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickApplyJoin(rel)}
+                        className="px-2.5 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] font-medium transition-all"
+                      >
+                        Quick Apply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenJoinBuilder(rel.rightId, rel.leftCol, rel.rightCol);
+                        }}
+                        className="px-2.5 py-1 rounded bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[11px] font-medium transition-all"
+                      >
+                        Build Join
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

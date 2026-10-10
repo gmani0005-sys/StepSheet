@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { AppendModal } from '../components/joins/AppendModal';
+import { JoinBuilderModal } from '../components/joins/JoinBuilderModal';
 import { RelationshipsModal } from '../components/joins/RelationshipsModal';
 import { ConditionalModal } from '../components/transforms/ConditionalModal';
 import { GroupByModal } from '../components/transforms/GroupByModal';
@@ -22,11 +23,13 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 import { localEngine } from '../api/localEngine';
 
 describe('StepSheet Workbench', () => {
-  it('renders brand name and actions in TopBar', () => {
+  it('renders brand name and Share action directly in TopBar', () => {
     render(<TopBar />);
     expect(screen.getByText('StepSheet')).toBeDefined();
     expect(screen.getByText('Workbench')).toBeDefined();
     expect(screen.getByText('Canvas / ER')).toBeDefined();
+    expect(screen.getByText('Share')).toBeDefined();
+    expect(screen.queryByText('Project')).toBeNull();
   });
 
   it('renders AppendModal when open', () => {
@@ -84,7 +87,7 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Match by Column Name')).toBeDefined();
   });
 
-  it('renders RelationshipsModal with ER Canvas', () => {
+  it('renders RelationshipsModal with ER Canvas and JoinBuilderModal with health check', async () => {
     render(
       <RelationshipsModal
         isOpen={true}
@@ -94,6 +97,26 @@ describe('StepSheet Workbench', () => {
     );
     expect(screen.getByText('Multi-Table Relationships & ER Canvas')).toBeDefined();
     expect(screen.getByText('Project Datasets (2)')).toBeDefined();
+
+    render(
+      <JoinBuilderModal
+        isOpen={true}
+        onClose={() => {}}
+        initialRightDatasetId="d2"
+        initialKeyPair={{ left_col: 'id', right_col: 'id' }}
+      />
+    );
+    expect(screen.getByText('Join Builder')).toBeDefined();
+    expect(screen.getByText('Apply Join Step')).toBeDefined();
+
+    const health = await localEngine.checkJoinHealth({
+      left_dataset_id: 'local-sample-orders',
+      right_dataset_id: 'local-sample-customers',
+      key_pairs: [{ left_col: 'customer_id', right_col: 'customer_id' }],
+      join_type: 'left',
+    });
+    expect(health.estimated_result_rows).toBeGreaterThan(0);
+    expect(Array.isArray(health.type_mismatches)).toBe(true);
   });
 
   it('renders ConditionalModal with IF / IFS builder', () => {

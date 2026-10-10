@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import {
   Table2,
   Play,
@@ -13,12 +13,7 @@ import {
   ShieldCheck,
   LogOut,
   User as UserIcon,
-  LayoutTemplate,
-  History,
   Share2,
-  Activity,
-  ChevronDown,
-  FolderGit2,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { useAuthStore } from '../../store/authStore';
@@ -41,10 +36,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenQuality,
   onOpenExport,
   onOpenRunFull,
-  onOpenTemplates,
-  onOpenVersions,
   onOpenShare,
-  onOpenAudit,
 }) => {
   const {
     selectedDataset,
@@ -58,29 +50,9 @@ export const TopBar: React.FC<TopBarProps> = ({
     redo,
     undoStack,
     redoStack,
-    steps,
   } = useWorkbenchStore();
 
   const { user, isAuthenticated, logout } = useAuthStore();
-  const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
-  const projectMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        projectMenuRef.current &&
-        !projectMenuRef.current.contains(event.target as Node)
-      ) {
-        setIsProjectMenuOpen(false);
-      }
-    };
-    if (isProjectMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isProjectMenuOpen]);
 
   return (
     <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between select-none z-40 relative gap-4 min-w-0">
@@ -179,103 +151,15 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <div className="w-px h-4 bg-slate-800 mx-1 shrink-0" />
 
-        {/* Desktop Visible Governance Tools on wide screens (2xl and above) */}
-        <div className="hidden 2xl:flex items-center gap-1">
-          <button
-            onClick={onOpenTemplates}
-            title="Pipeline templates with column mapping"
-            className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-slate-300 hover:text-slate-100 hover:bg-slate-800/80 rounded-lg whitespace-nowrap shrink-0 transition-colors"
-          >
-            <LayoutTemplate size={13} className="text-purple-400 shrink-0" />
-            <span>Templates</span>
-          </button>
-          <button
-            onClick={onOpenVersions}
-            title="Project version history and step diff"
-            className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-slate-300 hover:text-slate-100 hover:bg-slate-800/80 rounded-lg whitespace-nowrap shrink-0 transition-colors"
-          >
-            <History size={13} className="text-violet-400 shrink-0" />
-            <span>Versions</span>
-          </button>
-          <button
-            onClick={onOpenShare}
-            title="Share project with role-based links"
-            className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-slate-300 hover:text-slate-100 hover:bg-slate-800/80 rounded-lg whitespace-nowrap shrink-0 transition-colors"
-          >
-            <Share2 size={13} className="text-sky-400 shrink-0" />
-            <span>Share</span>
-          </button>
-          <button
-            onClick={onOpenAudit}
-            title="Audit log and governance trail"
-            className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-slate-300 hover:text-slate-100 hover:bg-slate-800/80 rounded-lg whitespace-nowrap shrink-0 transition-colors"
-          >
-            <Activity size={13} className="text-amber-400 shrink-0" />
-            <span>Audit</span>
-          </button>
-        </div>
-
-        {/* Dropdown Menu on compact/laptop screens (< 2xl) */}
-        <div className="relative 2xl:hidden" ref={projectMenuRef}>
-          <button
-            type="button"
-            onClick={() => setIsProjectMenuOpen(!isProjectMenuOpen)}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-slate-100 hover:bg-slate-800/80 rounded-lg whitespace-nowrap shrink-0 transition-colors"
-          >
-            <FolderGit2 size={13} className="text-purple-400 shrink-0" />
-            <span>Project</span>
-            <ChevronDown size={11} className={`transition-transform ${isProjectMenuOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {isProjectMenuOpen && (
-            <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 flex flex-col gap-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsProjectMenuOpen(false);
-                  onOpenTemplates?.();
-                }}
-                className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg text-left transition-colors whitespace-nowrap"
-              >
-                <LayoutTemplate size={13} className="text-purple-400 shrink-0" />
-                <span>Templates</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsProjectMenuOpen(false);
-                  onOpenVersions?.();
-                }}
-                className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg text-left transition-colors whitespace-nowrap"
-              >
-                <History size={13} className="text-violet-400 shrink-0" />
-                <span>Versions</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsProjectMenuOpen(false);
-                  onOpenShare?.();
-                }}
-                className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg text-left transition-colors whitespace-nowrap"
-              >
-                <Share2 size={13} className="text-sky-400 shrink-0" />
-                <span>Share</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsProjectMenuOpen(false);
-                  onOpenAudit?.();
-                }}
-                className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg text-left transition-colors whitespace-nowrap"
-              >
-                <Activity size={13} className="text-amber-400 shrink-0" />
-                <span>Audit</span>
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={onOpenShare}
+          title="Share project with role-based links"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-200 hover:text-white hover:bg-slate-800/80 rounded-lg whitespace-nowrap shrink-0 transition-colors"
+        >
+          <Share2 size={13} className="text-sky-400 shrink-0" />
+          <span>Share</span>
+        </button>
       </div>
 
       {/* Right Section: User profile & Step Panel toggle */}

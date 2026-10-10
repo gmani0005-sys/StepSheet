@@ -38,6 +38,11 @@ export const WorkbenchPage: React.FC = () => {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [exportInitialTab, setExportInitialTab] = useState<'files' | 'code' | 'run'>('files');
+  const [joinInitialRightId, setJoinInitialRightId] = useState<string | undefined>(undefined);
+  const [joinInitialKeyPair, setJoinInitialKeyPair] = useState<{
+    left_col: string;
+    right_col: string;
+  } | null>(null);
   const {
     loadDatasets,
     isStepWizardOpen,
@@ -100,7 +105,13 @@ export const WorkbenchPage: React.FC = () => {
       {/* Phase 3: Lookup & Join Suite Modals */}
       <JoinBuilderModal
         isOpen={isStepWizardOpen && activeWizardStepType === 'join'}
-        onClose={closeStepWizard}
+        onClose={() => {
+          setJoinInitialRightId(undefined);
+          setJoinInitialKeyPair(null);
+          closeStepWizard();
+        }}
+        initialRightDatasetId={joinInitialRightId}
+        initialKeyPair={joinInitialKeyPair}
       />
       <XLookupModal
         isOpen={isStepWizardOpen && activeWizardStepType === 'xlookup'}
@@ -113,7 +124,13 @@ export const WorkbenchPage: React.FC = () => {
       <RelationshipsModal
         isOpen={isRelationshipsOpen}
         onClose={() => setIsRelationshipsOpen(false)}
-        onOpenJoinBuilder={() => openStepWizard('join')}
+        onOpenJoinBuilder={(rightId, leftCol, rightCol) => {
+          setJoinInitialRightId(rightId);
+          setJoinInitialKeyPair(
+            leftCol && rightCol ? { left_col: leftCol, right_col: rightCol } : null
+          );
+          openStepWizard('join');
+        }}
       />
 
       {/* Phase 4: Transformation Suite Modals */}

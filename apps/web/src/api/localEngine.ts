@@ -512,6 +512,32 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
         excel_formula: `=SUMIFS(Table1[amount], Table1[${groups}], [@[${groups}]])`,
       };
     }
+    case 'join': {
+      const jt = (p.join_type || 'left').toUpperCase().replace('_', ' ');
+      const kp = p.key_pairs?.[0] || {};
+      const lk = kp.left_col || kp.left_key || p.left_key || 'customer_id';
+      const rk = kp.right_col || kp.right_key || p.right_key || lk;
+      const rightTbl = p.right_dataset_id || 'right_table';
+      return {
+        sql: `SELECT l.*, r.* FROM prev_step l ${jt} JOIN "${rightTbl}" r ON l."${lk}" = r."${rk}"`,
+        polars: `df = df.join(right_df, left_on="${lk}", right_on="${rk}", how="${p.join_type || 'left'}")`,
+        power_query_m: `Table.NestedJoin(PrevStep, {"${lk}"}, RightTable, {"${rk}"}, "Joined", JoinKind.${p.join_type || 'LeftOuter'})`,
+        excel_formula: `=XLOOKUP([@[${lk}]], RightTable[${rk}], RightTable[Column], "")`,
+      };
+    }
+    case 'xlookup': {
+      const lk = p.left_key_col || p.left_key || p.lookup_key || 'customer_id';
+      const rk = p.right_key_col || p.right_key || p.match_key || lk;
+      const retCols = Array.isArray(p.return_columns)
+        ? p.return_columns.join(', ')
+        : p.return_column || 'value';
+      return {
+        sql: `SELECT l.*, r."${retCols}" FROM prev_step l LEFT JOIN lookup_table r ON l."${lk}" = r."${rk}"`,
+        polars: `df = df.join(lookup_df.select(["${rk}", "${retCols}"]), left_on="${lk}", right_on="${rk}", how="left")`,
+        power_query_m: `Table.NestedJoin(PrevStep, {"${lk}"}, LookupTable, {"${rk}"}, "Lookup", JoinKind.LeftOuter)`,
+        excel_formula: `=XLOOKUP([@[${lk}]], LookupTable[${rk}], LookupTable[${retCols}], "${p.if_not_found ?? 'Not found'}")`,
+      };
+    }
     default:
       return {
         sql: `-- Step: ${step.label} (${step.type})\nSELECT * FROM prev_step`,
@@ -846,32 +872,189 @@ function executePipelineSteps(
         break;
       }
 
-      case 'xlookup':
-      case 'join': {
-        const rightId = p.right_dataset_id || p.lookup_dataset_id;
-        const rightDs = allDatasets.find((d) => d.meta.id === rightId);
+      case 'xlookup': {
+        const rightId = p.lookup_dataset_id || p.right_dataset_id;
+        const rightDs = allDatasets.find((d) => d.meta.id === rightId) || allDatasets[1] || allDatasets[0];
         if (rightDs) {
-          const leftKey = p.left_key || p.lookup_key || p.key_pairs?.[0]?.left_key || 'customer_id';
-          const rightKey = p.right_key || p.match_key || p.key_pairs?.[0]?.right_key || leftKey;
+          const leftKey = p.left_key_col || p.left_key || p.lookup_key || 'customer_id';
+          const rightKey = p.right_key_col || p.right_key || p.match_key || leftKey;
+          const returnCols: string[] = Array.isArray(p.return_columns)
+            ? p.return_columns
+            : p.return_column
+            ? [p.return_column]
+            : [];
+          const fallback = p.if_not_found !== undefined ? p.if_not_found : null;
+
           const lookupMap = new Map<string, Record<string, any>>();
           rightDs.rows.forEach((rr) => {
-            lookupMap.set(String(rr[rightKey] ?? ''), rr);
-          });
-          rows = rows.map((lr) => {
-            const match = lookupMap.get(String(lr[leftKey] ?? ''));
-            if (!match) return { ...lr };
-            if (step.type === 'xlookup' && p.return_column) {
-              const target = p.target_column || p.return_column;
-              return { ...lr, [target]: match[p.return_column] ?? p.if_not_found ?? null };
+            const k = String(rr[rightKey] ?? '').trim();
+            if (!lookupMap.has(k)) {
+              lookupMap.set(k, rr);
             }
+          });
+
+          rows = rows.map((lr) => {
+            const match = lookupMap.get(String(lr[leftKey] ?? '').trim());
             const merged = { ...lr };
-            Object.keys(match).forEach((k) => {
-              if (k !== rightKey) {
-                merged[k in merged ? `right_${k}` : k] = match[k];
-              }
-            });
+            if (returnCols.length > 0) {
+              returnCols.forEach((col) => {
+                const targetName =
+                  p.target_column && returnCols.length === 1
+                    ? p.target_column
+                    : col in merged && col !== rightKey
+                    ? `lookup_${col}`
+                    : col;
+                merged[targetName] = match ? (match[col] ?? fallback) : fallback;
+              });
+            } else if (match) {
+              Object.keys(match).forEach((k) => {
+                if (k !== rightKey) {
+                  merged[k in merged ? `lookup_${k}` : k] = match[k];
+                }
+              });
+            }
             return merged;
           });
+        }
+        break;
+      }
+
+      case 'join': {
+        const rightId = p.right_dataset_id || p.lookup_dataset_id;
+        const rightDs = allDatasets.find((d) => d.meta.id === rightId) || allDatasets[1] || allDatasets[0];
+        if (rightDs) {
+          const joinType = (p.join_type || 'left').toLowerCase();
+          const rawPairs: any[] =
+            Array.isArray(p.key_pairs) && p.key_pairs.length > 0
+              ? p.key_pairs
+              : [
+                  {
+                    left_col: p.left_key || p.lookup_key || 'customer_id',
+                    right_col: p.right_key || p.match_key || p.left_key || 'customer_id',
+                  },
+                ];
+
+          const normalizeJoinKey = (row: Record<string, any>, isLeft: boolean): string => {
+            return rawPairs
+              .map((kp) => {
+                const col = isLeft
+                  ? kp.left_col || kp.left_key || 'customer_id'
+                  : kp.right_col || kp.right_key || 'customer_id';
+                const val = row[col];
+                if (val === null || val === undefined) return '__NULL__';
+                let s = String(val);
+                if (kp.trim_whitespace !== false) s = s.trim();
+                if (kp.case_insensitive) s = s.toLowerCase();
+                return s;
+              })
+              .join('||');
+          };
+
+          const rightKeySet = new Set(
+            rawPairs.map((kp) => kp.right_col || kp.right_key || 'customer_id')
+          );
+          const allRightColNames = rightDs.meta.schema_metadata.map((c) => c.name);
+          const selectedRightCols: string[] =
+            Array.isArray(p.selected_right_columns) && p.selected_right_columns.length > 0
+              ? p.selected_right_columns
+              : allRightColNames.filter((c) => !rightKeySet.has(c));
+          const suffixRight = p.suffix_right || '_right';
+
+          let sourceRightRows = rightDs.rows;
+          if (p.dedupe_right_first) {
+            const seen = new Set<string>();
+            sourceRightRows = sourceRightRows.filter((rr) => {
+              const k = normalizeJoinKey(rr, false);
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            });
+          }
+
+          if (joinType === 'cross') {
+            const crossed: Record<string, any>[] = [];
+            rows.forEach((lr) => {
+              sourceRightRows.slice(0, 50).forEach((rr) => {
+                const merged = { ...lr };
+                selectedRightCols.forEach((col) => {
+                  const outCol = col in merged ? `${col}${suffixRight}` : col;
+                  merged[outCol] = rr[col] ?? null;
+                });
+                crossed.push(merged);
+              });
+            });
+            rows = crossed;
+            break;
+          }
+
+          // Build multimap for right rows
+          const rightMap = new Map<string, Record<string, any>[]>();
+          sourceRightRows.forEach((rr) => {
+            const k = normalizeJoinKey(rr, false);
+            if (!rightMap.has(k)) rightMap.set(k, []);
+            rightMap.get(k)!.push(rr);
+          });
+
+          if (joinType === 'left_semi') {
+            rows = rows.filter((lr) => rightMap.has(normalizeJoinKey(lr, true)));
+            break;
+          }
+
+          if (joinType === 'left_anti') {
+            rows = rows.filter((lr) => !rightMap.has(normalizeJoinKey(lr, true)));
+            break;
+          }
+
+          const mergePair = (
+            lr: Record<string, any> | null,
+            rr: Record<string, any> | null,
+            leftTemplateCols: string[]
+          ): Record<string, any> => {
+            const merged: Record<string, any> = {};
+            if (lr) {
+              Object.assign(merged, lr);
+            } else {
+              leftTemplateCols.forEach((c) => {
+                merged[c] = null;
+              });
+            }
+            selectedRightCols.forEach((col) => {
+              if (rightKeySet.has(col) && col in merged && lr) {
+                return;
+              }
+              const outCol = col in merged ? `${col}${suffixRight}` : col;
+              merged[outCol] = rr ? (rr[col] ?? null) : null;
+            });
+            return merged;
+          };
+
+          const leftTemplateCols = rows[0] ? Object.keys(rows[0]) : [];
+          const joinedRows: Record<string, any>[] = [];
+          const matchedRightKeys = new Set<string>();
+
+          rows.forEach((lr) => {
+            const k = normalizeJoinKey(lr, true);
+            const matches = rightMap.get(k);
+            if (matches && matches.length > 0) {
+              matchedRightKeys.add(k);
+              matches.forEach((rr) => {
+                joinedRows.push(mergePair(lr, rr, leftTemplateCols));
+              });
+            } else if (joinType === 'left' || joinType === 'full') {
+              joinedRows.push(mergePair(lr, null, leftTemplateCols));
+            }
+          });
+
+          if (joinType === 'right' || joinType === 'full') {
+            sourceRightRows.forEach((rr) => {
+              const k = normalizeJoinKey(rr, false);
+              if (!matchedRightKeys.has(k)) {
+                joinedRows.push(mergePair(null, rr, leftTemplateCols));
+              }
+            });
+          }
+
+          rows = joinedRows;
         }
         break;
       }
@@ -1207,39 +1390,129 @@ export const localEngine = {
     const all = getStoredDatasets();
     const left = all.find((d) => d.meta.id === data.left_dataset_id) || all[0];
     const right = all.find((d) => d.meta.id === data.right_dataset_id) || all[1] || all[0];
-    const lk = data.key_pairs?.[0]?.left_key || 'customer_id';
-    const rk = data.key_pairs?.[0]?.right_key || 'customer_id';
+    const kp = data.key_pairs?.[0] || {};
+    const lk = kp.left_col || kp.left_key || 'customer_id';
+    const rk = kp.right_col || kp.right_key || lk;
 
-    const rightKeys = new Set((right?.rows || []).map((r) => String(r[rk] ?? '')));
     const leftRows = left?.rows || [];
-    const matched = leftRows.filter((r) => rightKeys.has(String(r[lk] ?? ''))).length;
+    const rightRows = right?.rows || [];
+
+    const leftKeyVals = leftRows.map((r) => r[lk]);
+    const rightKeyVals = rightRows.map((r) => r[rk]);
+
+    const leftKeyNulls = leftKeyVals.filter((v) => v === null || v === undefined || v === '').length;
+    const rightKeyNulls = rightKeyVals.filter((v) => v === null || v === undefined || v === '').length;
+
+    const leftDistinct = new Set(
+      leftKeyVals.filter((v) => v !== null && v !== undefined && v !== '').map((v) => String(v).trim())
+    );
+    const rightDistinct = new Set(
+      rightKeyVals.filter((v) => v !== null && v !== undefined && v !== '').map((v) => String(v).trim())
+    );
+
+    const leftDups = Math.max(0, leftRows.length - leftKeyNulls - leftDistinct.size);
+    const rightDups = Math.max(0, rightRows.length - rightKeyNulls - rightDistinct.size);
+
+    const matched = leftRows.filter((r) => {
+      const v = r[lk];
+      if (v === null || v === undefined || v === '') return false;
+      return rightDistinct.has(String(v).trim());
+    }).length;
+
+    const matchRate = leftRows.length ? Number(((matched / leftRows.length) * 100).toFixed(1)) : 100;
+
+    let cardinality: 'one-to-one' | 'one-to-many' | 'many-to-one' | 'many-to-many' = 'many-to-one';
+    let cardinalityDesc = 'Multiple rows in left table match unique keys in right table (safe lookup/join).';
+    let fanoutWarning: string | null = null;
+
+    if (leftDups === 0 && rightDups === 0) {
+      cardinality = 'one-to-one';
+      cardinalityDesc = 'Keys are unique in both tables (1:1 relationship).';
+    } else if (leftDups === 0 && rightDups > 0) {
+      cardinality = 'one-to-many';
+      cardinalityDesc = 'Each left key matches multiple rows in the right table (1:N).';
+      fanoutWarning = `Right table contains ${rightDups} duplicate key(s), which may multiply output rows.`;
+    } else if (leftDups > 0 && rightDups > 0) {
+      cardinality = 'many-to-many';
+      cardinalityDesc = 'Both tables contain duplicate keys (N:M relationship).';
+      fanoutWarning = `Both tables have duplicate keys (${rightDups} in right table). Joining without deduplicating may cause row fan-out.`;
+    }
+
+    // Check type mismatches
+    const typeMismatches: any[] = [];
+    (data.key_pairs || []).forEach((pair: any) => {
+      const lColName = pair.left_col || pair.left_key;
+      const rColName = pair.right_col || pair.right_key;
+      const lCol = left?.meta.schema_metadata.find((c) => c.name === lColName);
+      const rCol = right?.meta.schema_metadata.find((c) => c.name === rColName);
+      if (lCol && rCol && lCol.data_type !== rCol.data_type) {
+        typeMismatches.push({
+          left_col: lColName,
+          left_type: lCol.data_type,
+          right_col: rColName,
+          right_type: rCol.data_type,
+          suggested_cast: 'text',
+        });
+      }
+    });
+
+    const jt = (data.join_type || 'left').toLowerCase();
+    const estimatedResultRows =
+      jt === 'inner' || jt === 'left_semi'
+        ? matched
+        : jt === 'left_anti'
+        ? leftRows.length - matched
+        : jt === 'right'
+        ? rightRows.length
+        : leftRows.length;
 
     return {
+      left_row_count: leftRows.length,
+      right_row_count: rightRows.length,
       left_total: leftRows.length,
-      right_total: right?.rows.length || 0,
+      right_total: rightRows.length,
       matched_rows: matched,
       unmatched_left: leftRows.length - matched,
-      match_rate_pct: leftRows.length ? Number(((matched / leftRows.length) * 100).toFixed(1)) : 100,
-      relationship: 'many_to_one',
-      explosion_risk: false,
-      warnings: [],
+      match_rate_pct: matchRate,
+      estimated_match_rate: matchRate,
+      estimated_result_rows: estimatedResultRows,
+      left_key_nulls: leftKeyNulls,
+      right_key_nulls: rightKeyNulls,
+      left_key_duplicates: leftDups,
+      right_key_duplicates: rightDups,
+      cardinality,
+      relationship: cardinality.replace(/-/g, '_'),
+      cardinality_description: cardinalityDesc,
+      fanout_warning: fanoutWarning,
+      type_mismatches: typeMismatches,
+      explosion_risk: rightDups > 0,
+      suggested_fixes: fanoutWarning ? ['Enable Deduplicate right table first'] : [],
+      warnings: fanoutWarning ? [fanoutWarning] : [],
     };
   },
 
   async suggestJoinKeys(leftId: string, rightId: string): Promise<any> {
     const all = getStoredDatasets();
-    const left = all.find((d) => d.meta.id === leftId);
-    const right = all.find((d) => d.meta.id === rightId);
+    const left = all.find((d) => d.meta.id === leftId) || all[0];
+    const right = all.find((d) => d.meta.id === rightId) || all[1] || all[0];
+    const suggested_keys: any[] = [];
     const suggestions: any[] = [];
     if (left && right) {
-      const rightNames = new Set(right.meta.schema_metadata.map((c) => c.name));
-      left.meta.schema_metadata.forEach((c) => {
-        if (rightNames.has(c.name)) {
-          suggestions.push({ left_key: c.name, right_key: c.name, confidence: 0.98 });
+      const rightCols = right.meta.schema_metadata || [];
+      (left.meta.schema_metadata || []).forEach((lc) => {
+        const exact = rightCols.find((rc) => rc.name.toLowerCase() === lc.name.toLowerCase());
+        if (exact) {
+          suggested_keys.push({
+            left_col: lc.name,
+            right_col: exact.name,
+            trim_whitespace: true,
+            case_insensitive: false,
+          });
+          suggestions.push({ left_key: lc.name, right_key: exact.name, confidence: 0.98 });
         }
       });
     }
-    return { suggestions };
+    return { suggested_keys, suggestions };
   },
 
   async generateAiStep(datasetId: string, prompt: string): Promise<any> {

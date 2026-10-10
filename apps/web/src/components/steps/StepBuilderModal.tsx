@@ -23,6 +23,7 @@ export const StepBuilderModal: React.FC = () => {
     editingStep,
     columns,
     addStep,
+    updateStep,
     closeStepWizard,
   } = useWorkbenchStore();
 
@@ -47,10 +48,29 @@ export const StepBuilderModal: React.FC = () => {
   const [keepOriginal, setKeepOriginal] = useState(false);
 
   useEffect(() => {
-    if (columns.length > 0 && !selectedColumn) {
+    if (editingStep && editingStep.params) {
+      const p = editingStep.params;
+      if (p.column) setSelectedColumn(p.column);
+      if (p.target_type) setTargetType(p.target_type);
+      if (p.new_name) setNewName(p.new_name);
+      if (p.operator) setFilterOp(p.operator);
+      if (p.value !== undefined) setFilterValue(String(p.value));
+      if (p.direction) {
+        if (activeWizardStepType === 'sort_rows') setSortDir(p.direction);
+        if (activeWizardStepType === 'fill_down') setFillDir(p.direction);
+      }
+      if (p.columns) setDedupCols(p.columns);
+      if (p.keep) setDedupKeep(p.keep);
+      if (p.search_value !== undefined) setSearchVal(p.search_value);
+      if (p.replace_value !== undefined) setReplaceVal(p.replace_value);
+      if (p.match_type) setReplaceMatchType(p.match_type);
+      if (p.delimiter) setDelimiter(p.delimiter);
+      if (p.new_column_names) setSplitColNames(p.new_column_names.join(', '));
+      if (p.keep_original !== undefined) setKeepOriginal(p.keep_original);
+    } else if (columns.length > 0 && !selectedColumn) {
       setSelectedColumn(columns[0].name);
     }
-  }, [columns]);
+  }, [editingStep, columns, activeWizardStepType]);
 
   if (
     !isStepWizardOpen ||
@@ -125,15 +145,21 @@ export const StepBuilderModal: React.FC = () => {
         break;
     }
 
-    const newStep: StepDefinition = {
-      id: crypto.randomUUID(),
-      type: activeWizardStepType,
-      label,
-      enabled: true,
-      params,
-    };
-
-    await addStep(newStep);
+    if (editingStep) {
+      await updateStep(editingStep.id, {
+        label,
+        params,
+      });
+    } else {
+      const newStep: StepDefinition = {
+        id: crypto.randomUUID(),
+        type: activeWizardStepType,
+        label,
+        enabled: true,
+        params,
+      };
+      await addStep(newStep);
+    }
     closeStepWizard();
   };
 
@@ -179,7 +205,9 @@ export const StepBuilderModal: React.FC = () => {
             <Sliders size={20} />
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-100">{getStepTitle()}</h3>
+            <h3 className="text-base font-bold text-slate-100">
+              {editingStep ? `Edit: ${getStepTitle()}` : getStepTitle()}
+            </h3>
             <p className="text-xs text-slate-400">Configure parameters through guided UI controls</p>
           </div>
         </div>
@@ -482,7 +510,7 @@ export const StepBuilderModal: React.FC = () => {
               type="submit"
               className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-xs font-medium text-white rounded-lg transition-colors shadow-sm shadow-emerald-600/30"
             >
-              Apply Step
+              {editingStep ? 'Update Step' : 'Apply Step'}
             </button>
           </div>
         </form>

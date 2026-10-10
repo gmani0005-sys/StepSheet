@@ -6,6 +6,7 @@ import { DataGrid } from '../components/grid/DataGrid';
 import { ColumnProfilePopover } from '../components/profile/ColumnProfilePopover';
 import { AuthModal } from '../components/auth/AuthModal';
 import { StepBuilderModal } from '../components/steps/StepBuilderModal';
+import { EditStepModal } from '../components/steps/EditStepModal';
 import { JoinBuilderModal } from '../components/joins/JoinBuilderModal';
 import { XLookupModal } from '../components/joins/XLookupModal';
 import { AppendModal } from '../components/joins/AppendModal';
@@ -94,6 +95,7 @@ export const WorkbenchPage: React.FC = () => {
       {/* Overlays */}
       <ColumnProfilePopover />
       <StepBuilderModal />
+      <EditStepModal />
 
       {/* Phase 3: Lookup & Join Suite Modals */}
       <JoinBuilderModal

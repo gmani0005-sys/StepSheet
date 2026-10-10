@@ -62,6 +62,7 @@ interface WorkbenchState {
 
   // Step Engine Actions
   addStep: (step: StepDefinition) => Promise<void>;
+  updateStep: (stepId: string, updatedStep: Partial<StepDefinition>) => Promise<void>;
   removeStep: (stepId: string) => Promise<void>;
   toggleStep: (stepId: string) => Promise<void>;
   duplicateStep: (stepId: string) => Promise<void>;
@@ -73,6 +74,9 @@ interface WorkbenchState {
   setPipelineSteps: (newSteps: StepDefinition[]) => Promise<void>;
   openStepWizard: (type: StepType, step?: StepDefinition) => void;
   closeStepWizard: () => void;
+  isEditStepModalOpen: boolean;
+  openEditStepModal: (step: StepDefinition) => void;
+  closeEditStepModal: () => void;
 }
 
 export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
@@ -104,6 +108,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   stepSummaries: [],
   isStepWizardOpen: false,
   activeWizardStepType: null,
+  isEditStepModalOpen: false,
   editingStep: null,
 
   activeTab: 'applied',
@@ -430,5 +435,35 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       activeWizardStepType: null,
       editingStep: null,
     });
+  },
+
+  openEditStepModal: (step: StepDefinition) => {
+    set({
+      isEditStepModalOpen: true,
+      editingStep: step,
+    });
+  },
+
+  closeEditStepModal: () => {
+    set({
+      isEditStepModalOpen: false,
+      editingStep: null,
+    });
+  },
+
+  updateStep: async (stepId: string, updatedStep: Partial<StepDefinition>) => {
+    const currentSteps = get().steps;
+    const nextSteps = currentSteps.map((s) =>
+      s.id === stepId ? { ...s, ...updatedStep, id: stepId } : s
+    );
+    set((state) => ({
+      undoStack: [...state.undoStack, currentSteps],
+      redoStack: [],
+      steps: nextSteps,
+      isEditStepModalOpen: false,
+      isStepWizardOpen: false,
+      editingStep: null,
+    }));
+    await get().runPipelinePreview();
   },
 }));

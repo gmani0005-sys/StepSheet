@@ -25,6 +25,7 @@ import {
   Calendar,
   TrendingUp,
   TableProperties,
+  Pencil,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { StepType } from '../../types/steps';
@@ -39,6 +40,7 @@ export const RightPanel: React.FC = () => {
     activeStepIndex,
     stepSummaries,
     openStepWizard,
+    openEditStepModal,
     removeStep,
     toggleStep,
     duplicateStep,
@@ -254,6 +256,13 @@ export const RightPanel: React.FC = () => {
                         <ChevronDown size={12} />
                       </button>
                       <button
+                        onClick={() => openEditStepModal(step)}
+                        title="Edit Step Parameters"
+                        className="p-1 hover:text-amber-400 text-slate-400"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <button
                         onClick={() => duplicateStep(step.id)}
                         title="Duplicate Step"
                         className="p-1 hover:text-sky-400 text-slate-400"
@@ -366,9 +375,19 @@ export const RightPanel: React.FC = () => {
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-xs font-bold text-slate-100">{currentInspectedStep.label}</h4>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
-                    {currentInspectedStep.type}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => openEditStepModal(currentInspectedStep)}
+                      className="px-2 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 flex items-center gap-1 transition-colors"
+                      title="Edit this step's configuration"
+                    >
+                      <Pencil size={10} />
+                      <span>Edit</span>
+                    </button>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                      {currentInspectedStep.type}
+                    </span>
+                  </div>
                 </div>
                 <div className="text-[11px] text-slate-400 space-y-1 font-mono">
                   {Object.entries(currentInspectedStep.params).map(([k, v]) => (

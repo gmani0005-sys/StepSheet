@@ -14,6 +14,8 @@ import { TemplatesModal } from '../components/templates/TemplatesModal';
 import { VersionHistoryModal } from '../components/versioning/VersionHistoryModal';
 import { ShareModal } from '../components/collab/ShareModal';
 import { AuditModal } from '../components/audit/AuditModal';
+import { EditStepModal } from '../components/steps/EditStepModal';
+import { RightPanel } from '../components/layout/RightPanel';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 describe('StepSheet Workbench', () => {
@@ -220,6 +222,46 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Audit Trail & Governance')).toBeDefined();
     expect(screen.getByText('All Actions')).toBeDefined();
     expect(screen.getByText('Versions')).toBeDefined();
+  });
+
+  it('renders EditStepModal with parameter inputs and step label', () => {
+    useWorkbenchStore.setState({
+      isEditStepModalOpen: true,
+      editingStep: {
+        id: 'step-edit-1',
+        type: 'change_type',
+        label: 'Change amount to float',
+        enabled: true,
+        params: { column: 'amount', target_type: 'float' },
+      },
+      columns: [
+        { name: 'amount', data_type: 'text', physical_type: 'VARCHAR', nullable: true },
+      ],
+    });
+
+    render(<EditStepModal />);
+    expect(screen.getByText('Edit Applied Step')).toBeDefined();
+    expect(screen.getByDisplayValue('Change amount to float')).toBeDefined();
+    expect(screen.getByText('Save Changes')).toBeDefined();
+  });
+
+  it('renders RightPanel with edit button in applied steps list', () => {
+    useWorkbenchStore.setState({
+      activeTab: 'applied',
+      steps: [
+        {
+          id: 'step-filter-1',
+          type: 'filter_rows',
+          label: 'Filter rows where amount > 100',
+          enabled: true,
+          params: { column: 'amount', operator: 'gt', value: '100' },
+        },
+      ],
+    });
+
+    render(<RightPanel />);
+    expect(screen.getByText('Filter rows where amount > 100')).toBeDefined();
+    expect(screen.getByTitle('Edit Step Parameters')).toBeDefined();
   });
 });
 

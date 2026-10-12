@@ -655,8 +655,8 @@ describe('StepSheet Workbench', () => {
       },
     });
     render(<EditStepModal />);
-    expect(screen.getByText(/1\. Table Array \(Lookup Reference Table\)/i)).toBeDefined();
-    expect(screen.getByText(/FALSE \(0\) — Exact Match/i)).toBeDefined();
+    expect(screen.getAllByText(/1\. Table Array \(Lookup Reference Table\)/i).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/FALSE \(0\) — Exact Match/i).length).toBeGreaterThanOrEqual(2);
   });
 });
 

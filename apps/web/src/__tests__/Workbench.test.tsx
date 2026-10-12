@@ -693,11 +693,12 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Visualizations Pane')).toBeDefined();
     expect(screen.getByText(/Slicers \(Multi-Select\):/i)).toBeDefined();
     expect(screen.getAllByText(/Add KPI Card/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Slicer').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('KPI Card').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Add Slicer/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText('KPI Card')).toBeNull();
     expect(screen.getAllByText('Clustered Bar').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Histogram').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Donut').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Pie').length).toBeGreaterThan(0);
   });
 });
+

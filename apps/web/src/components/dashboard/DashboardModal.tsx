@@ -153,18 +153,6 @@ const VISUAL_TYPES: Array<{
     shortLabel: 'Treemap',
     desc: 'Proportional area blocks sized by metric weight',
   },
-  {
-    type: 'slicer',
-    label: 'Interactive Slicer',
-    shortLabel: 'Slicer',
-    desc: 'Multi-select filter visual that slices all charts & KPIs',
-  },
-  {
-    type: 'kpi_card',
-    label: 'KPI Summary Card',
-    shortLabel: 'KPI Card',
-    desc: 'Dynamic metric card with aggregation and category breakdown',
-  },
 ];
 
 const STORAGE_KEY_DASHBOARDS = 'stepsheet_dashboards_v2';
@@ -1450,7 +1438,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
 
             <button
               type="button"
-              onClick={() => handleAddVisual('slicer')}
+              onClick={handleAddTopSlicer}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#217346] border border-[#217346]/40"
             >
               <Filter className="w-3.5 h-3.5" /> Add Slicer

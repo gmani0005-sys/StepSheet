@@ -264,7 +264,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             label: 'Dashboard',
             icon: BarChart3,
             onClick: () => onOpenDashboard?.(),
-            title: 'Power BI Visual Dashboard: Bar, Clustered Bar, Column, Histogram, Donut, Pie & Treemap',
+            title: 'Visual Dashboard: Bar, Clustered Bar, Column, Histogram, Donut, Pie, Slicer & KPI Cards',
             accent: true,
           },
           {
@@ -533,10 +533,10 @@ export const TopBar: React.FC<TopBarProps> = ({
         items: [
           {
             id: 'v-dashboard',
-            label: 'Power BI Dashboard',
+            label: 'Visual Dashboard',
             icon: BarChart3,
             onClick: () => onOpenDashboard?.(),
-            title: 'Open interactive Power BI Visual Dashboard (Bar, Clustered Bar, Column, Histogram, Donut, Pie)',
+            title: 'Open interactive Visual Dashboard (Bar, Clustered Bar, Column, Histogram, Donut, Pie, Slicer & KPI Cards)',
             accent: true,
           },
         ],
@@ -728,7 +728,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             type="button"
             onClick={onOpenDashboard}
-            title="Open Power BI Visual Dashboard (Bar, Clustered Bar, Column, Histogram, Donut, Pie)"
+            title="Open Visual Dashboard (Bar, Clustered Bar, Column, Histogram, Donut, Pie, Slicer & KPI Cards)"
             className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-[#185C37] hover:bg-[#124629] text-white border border-white/30 rounded-[2px] whitespace-nowrap shrink-0 transition-colors"
           >
             <BarChart3 size={14} className="shrink-0" />

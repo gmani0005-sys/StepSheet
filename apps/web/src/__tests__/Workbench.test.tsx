@@ -687,14 +687,17 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Live PivotTable Preview')).toBeDefined();
     expect(screen.getByText('Apply PivotTable to Sheet')).toBeDefined();
 
-    // 9. Power BI Visual Dashboard & Custom Visuals Studio
+    // 9. Visual Dashboard & Custom Visuals Studio (with Multi-Select Slicers & Dynamic KPI Cards)
     render(<DashboardModal isOpen={true} onClose={() => {}} />);
-    expect(screen.getByText(/Power BI Visual Dashboard/i)).toBeDefined();
+    expect(screen.getByText(/Visual Dashboard & Custom Visuals Studio/i)).toBeDefined();
     expect(screen.getByText('Visualizations Pane')).toBeDefined();
+    expect(screen.getByText(/Slicers \(Multi-Select\):/i)).toBeDefined();
+    expect(screen.getAllByText(/Add KPI Card/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Slicer').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('KPI Card').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Clustered Bar').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Histogram').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Donut').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Pie').length).toBeGreaterThan(0);
   });
 });
-

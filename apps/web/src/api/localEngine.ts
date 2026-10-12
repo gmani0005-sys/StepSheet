@@ -81,13 +81,15 @@ function physicalTypeFor(dt: DataType): string {
 function inferSchema(rows: Record<string, any>[]): ColumnSchema[] {
   if (!rows || rows.length === 0) return [];
   const colSet = new Set<string>();
-  rows.slice(0, 50).forEach((r) => {
-    Object.keys(r).forEach((k) => colSet.add(k));
+  rows.forEach((r) => {
+    if (r && typeof r === 'object') {
+      Object.keys(r).forEach((k) => colSet.add(k));
+    }
   });
   const colNames = Array.from(colSet);
 
   return colNames.map((name) => {
-    const colVals = rows.map((r) => r[name]);
+    const colVals = rows.map((r) => r?.[name]);
     const dt = inferDataType(colVals);
     const nullable = colVals.some((v) => v === null || v === undefined || v === '');
     return {
@@ -484,13 +486,23 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
       };
     }
     case 'math_transform': {
-      const target = p.target_column || p.column || 'calc_col';
-      const expr = p.expression || `${p.column || 'col'} ${p.operation || '+'} ${p.operand ?? 1}`;
+      const col1 = p.column1 || p.column || 'amount';
+      const col2 = p.column2 || p.operand || 1;
+      const target = p.output_column || p.target_column || col1 || 'calc_col';
+      const mathOp = p.math_operator || '+';
+      const expr =
+        p.expression ||
+        (p.operation === 'arithmetic'
+          ? `"${col1}" ${mathOp} "${col2}"`
+          : `${col1} ${p.operation || '+'} ${p.operand ?? 1}`);
       return {
         sql: `SELECT *, (${expr}) AS "${target}" FROM prev_step`,
         polars: `df = df.with_columns((${expr}).alias("${target}"))`,
         power_query_m: `Table.AddColumn(PrevStep, "${target}", each ${expr})`,
-        excel_formula: `=[@[${p.column || 'amount'}]]`,
+        excel_formula:
+          p.operation === 'arithmetic'
+            ? `=[@[${col1}]] ${mathOp} [@[${col2}]]`
+            : `=[@[${col1}]]`,
       };
     }
     case 'sort_rows': {
@@ -504,12 +516,19 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
       };
     }
     case 'group_by': {
-      const groups = (p.group_columns || [p.group_by || 'region']).join('", "');
+      const rawGroups: string[] = Array.isArray(p.group_by_columns)
+        ? p.group_by_columns
+        : Array.isArray(p.group_columns)
+        ? p.group_columns
+        : p.group_by
+        ? [p.group_by]
+        : ['region'];
+      const groups = rawGroups.length > 0 ? rawGroups.join('", "') : '1';
       return {
         sql: `SELECT "${groups}", COUNT(*) AS count FROM prev_step GROUP BY "${groups}"`,
-        polars: `df = df.group_by(["${groups}"]).agg(pl.all().sum())`,
-        power_query_m: `Table.Group(PrevStep, {"${groups}"}, {{"Total", each List.Sum([amount]), type number}})`,
-        excel_formula: `=SUMIFS(Table1[amount], Table1[${groups}], [@[${groups}]])`,
+        polars: `df = df.group_by(${JSON.stringify(rawGroups)}).agg(pl.all().sum())`,
+        power_query_m: `Table.Group(PrevStep, {${rawGroups.map((g) => `"${g}"`).join(', ')}}, {{"Total", each List.Sum([amount]), type number}})`,
+        excel_formula: `=SUMIFS(Table1[amount], Table1[${rawGroups[0] || 'region'}], [@[${rawGroups[0] || 'region'}]])`,
       };
     }
     case 'join': {
@@ -538,12 +557,36 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
         excel_formula: `=XLOOKUP([@[${lk}]], LookupTable[${rk}], LookupTable[${retCols}], "${p.if_not_found ?? 'Not found'}")`,
       };
     }
+    case 'conditional': {
+      const outCol = p.new_column || p.target_column || 'conditional_col';
+      const firstRule = (p.rules || p.clauses || [])[0] || {};
+      const cCol = firstRule.column || p.column || 'amount';
+      const cVal = firstRule.value ?? p.value ?? '100';
+      const cRes = firstRule.result ?? firstRule.then_value ?? p.then_value ?? 'High';
+      return {
+        sql: `SELECT *, CASE WHEN "${cCol}" >= '${cVal}' THEN '${cRes}' ELSE '${p.else_value ?? 'Standard'}' END AS "${outCol}" FROM prev_step`,
+        polars: `df = df.with_columns(pl.when(pl.col("${cCol}") >= "${cVal}").then(pl.lit("${cRes}")).otherwise(pl.lit("${p.else_value ?? 'Standard'}")).alias("${outCol}"))`,
+        power_query_m: `Table.AddColumn(PrevStep, "${outCol}", each if [${cCol}] >= "${cVal}" then "${cRes}" else "${p.else_value ?? 'Standard'}")`,
+        excel_formula: `=IF([@[${cCol}]] >= "${cVal}", "${cRes}", "${p.else_value ?? 'Standard'}")`,
+      };
+    }
+    case 'window_calc': {
+      const fn = (p.calc_type || p.function || p.window_type || 'running_total').toUpperCase();
+      const valCol = p.value_column || (p.output_column ? p.target_column : p.column) || 'amount';
+      const outCol = p.output_column || (p.value_column ? p.target_column : undefined) || `${fn.toLowerCase()}_${valCol}`;
+      return {
+        sql: `SELECT *, SUM("${valCol}") OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "${outCol}" FROM prev_step`,
+        polars: `df = df.with_columns(pl.col("${valCol}").cum_sum().alias("${outCol}"))`,
+        power_query_m: `// Window ${fn} on ${valCol} as ${outCol}\nPrevStep`,
+        excel_formula: `=SUM($C$2:C2)`,
+      };
+    }
     default:
       return {
         sql: `-- Step: ${step.label} (${step.type})\nSELECT * FROM prev_step`,
         polars: `# ${step.label}\ndf = df`,
         power_query_m: `// ${step.label}\nPrevStep`,
-        excel_formula: null,
+        excel_formula: `=STEP("${step.label}")`,
       };
   }
 }
@@ -558,12 +601,13 @@ function executePipelineSteps(
   compiledSql: string;
   stepSummaries: StepSummary[];
 } {
-  let rows = initialRows.map((r) => ({ ...r }));
+  let rows = (initialRows || []).map((r) => ({ ...r }));
   const stepSummaries: StepSummary[] = [];
   const sqlParts: string[] = ['WITH source_data AS (\n  SELECT * FROM dataset\n)'];
   let prevCte = 'source_data';
 
-  steps.forEach((step, idx) => {
+  (steps || []).forEach((step, idx) => {
+    if (!step) return;
     const code = generateStepCode(step);
     stepSummaries.push({
       step_id: step.id,
@@ -590,10 +634,17 @@ function executePipelineSteps(
             const val = r[col];
             if (val === null || val === undefined || val === '') return { ...r, [col]: null };
             let nextVal: any = val;
-            if (targetType === 'integer') nextVal = Number.isNaN( parseInt(String(val), 10) ) ? null : parseInt(String(val), 10);
-            else if (targetType === 'float') nextVal = Number.isNaN(Number(val)) ? null : Number(val);
-            else if (targetType === 'boolean') nextVal = String(val).toLowerCase() === 'true' || val === 1 || val === '1';
-            else nextVal = String(val);
+            if (targetType === 'integer') {
+              const parsed = parseInt(String(val), 10);
+              nextVal = Number.isNaN(parsed) ? null : parsed;
+            } else if (targetType === 'float') {
+              const parsed = Number(val);
+              nextVal = Number.isNaN(parsed) ? null : parsed;
+            } else if (targetType === 'boolean') {
+              nextVal = String(val).toLowerCase() === 'true' || val === 1 || val === '1';
+            } else {
+              nextVal = String(val);
+            }
             return { ...r, [col]: nextVal };
           });
         }
@@ -662,13 +713,27 @@ function executePipelineSteps(
             : rows[0]
             ? Object.keys(rows[0])
             : [];
+        const keep = p.keep || 'first';
         const seen = new Set<string>();
-        rows = rows.filter((r) => {
-          const key = cols.map((c) => String(r[c] ?? '')).join('||');
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        if (keep === 'last') {
+          const reversed: Record<string, any>[] = [];
+          for (let i = rows.length - 1; i >= 0; i--) {
+            const r = rows[i];
+            const key = cols.map((c) => String(r[c] ?? '')).join('||');
+            if (!seen.has(key)) {
+              seen.add(key);
+              reversed.push(r);
+            }
+          }
+          rows = reversed.reverse();
+        } else {
+          rows = rows.filter((r) => {
+            const key = cols.map((c) => String(r[c] ?? '')).join('||');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        }
         break;
       }
 
@@ -679,28 +744,59 @@ function executePipelineSteps(
             : p.column
             ? [p.column]
             : [];
+        const direction = p.direction || 'down';
         const lastVal: Record<string, any> = {};
-        rows = rows.map((r) => {
-          const copy = { ...r };
-          cols.forEach((c) => {
-            if (copy[c] === null || copy[c] === undefined || copy[c] === '') {
-              if (lastVal[c] !== undefined) copy[c] = lastVal[c];
-            } else {
-              lastVal[c] = copy[c];
-            }
+        if (direction === 'up') {
+          const cloned = rows.map((r) => ({ ...r }));
+          for (let i = cloned.length - 1; i >= 0; i--) {
+            const copy = cloned[i];
+            cols.forEach((c) => {
+              if (copy[c] === null || copy[c] === undefined || copy[c] === '') {
+                if (lastVal[c] !== undefined) copy[c] = lastVal[c];
+              } else {
+                lastVal[c] = copy[c];
+              }
+            });
+          }
+          rows = cloned;
+        } else {
+          rows = rows.map((r) => {
+            const copy = { ...r };
+            cols.forEach((c) => {
+              if (copy[c] === null || copy[c] === undefined || copy[c] === '') {
+                if (lastVal[c] !== undefined) copy[c] = lastVal[c];
+              } else {
+                lastVal[c] = copy[c];
+              }
+            });
+            return copy;
           });
-          return copy;
-        });
+        }
         break;
       }
 
       case 'replace_values': {
         const col = p.column;
-        const findVal = p.find_value ?? p.old_value ?? '';
+        const findVal = p.search_value ?? p.find_value ?? p.old_value ?? '';
         const replaceVal = p.replace_value ?? p.new_value ?? '';
+        const matchType = p.match_type || 'exact';
         if (col) {
           rows = rows.map((r) => {
             const cur = r[col];
+            if (matchType === 'is_null') {
+              if (cur === null || cur === undefined || cur === '') {
+                return { ...r, [col]: replaceVal };
+              }
+              return r;
+            }
+            if (matchType === 'contains') {
+              const curStr = String(cur ?? '');
+              if (findVal !== '' && curStr.toLowerCase().includes(String(findVal).toLowerCase())) {
+                const reg = new RegExp(String(findVal).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                return { ...r, [col]: curStr.replace(reg, String(replaceVal)) };
+              }
+              return r;
+            }
             if (String(cur ?? '') === String(findVal)) {
               return { ...r, [col]: replaceVal };
             }
@@ -713,37 +809,88 @@ function executePipelineSteps(
       case 'split_column': {
         const col = p.column;
         const delim = p.delimiter || ',';
+        const customNames: string[] =
+          Array.isArray(p.new_column_names) && p.new_column_names.length > 0
+            ? p.new_column_names
+            : [`${col}_1`, `${col}_2`];
+        const keepOrig = p.keep_original !== false;
         if (col) {
           rows = rows.map((r) => {
             const parts = String(r[col] ?? '').split(delim);
-            return {
-              ...r,
-              [`${col}_1`]: parts[0]?.trim() ?? null,
-              [`${col}_2`]: parts.slice(1).join(delim).trim() || null,
-            };
+            const next: Record<string, any> = { ...r };
+            if (!keepOrig) {
+              delete next[col];
+            }
+            customNames.forEach((name, idx) => {
+              if (idx === customNames.length - 1 && parts.length > customNames.length) {
+                next[name] = parts.slice(idx).join(delim).trim() || null;
+              } else {
+                next[name] = parts[idx]?.trim() ?? null;
+              }
+            });
+            return next;
           });
         }
         break;
       }
 
       case 'math_transform': {
-        const col = p.column;
+        const col1 = p.column1 || p.column;
+        const col2 = p.column2;
         const op = p.operation || 'add';
+        const mathOp = p.math_operator || '+';
         const operand = Number(p.operand ?? 0);
-        const targetCol = p.target_column || col || 'calculated';
+        const decimals = p.decimals !== undefined ? Number(p.decimals) : 2;
+        const targetCol = p.output_column || p.target_column || col1 || 'calculated';
+
         rows = rows.map((r) => {
           if (op === 'formula' && p.expression) {
             return { ...r, [targetCol]: evaluateFormulaForRow(p.expression, r) };
           }
-          const v = Number(r[col] ?? 0);
-          let res = v;
-          if (op === 'add' || op === '+') res = v + operand;
-          else if (op === 'subtract' || op === '-') res = v - operand;
-          else if (op === 'multiply' || op === '*') res = v * operand;
-          else if (op === 'divide' || op === '/') res = operand !== 0 ? v / operand : 0;
-          else if (op === 'round') res = Number(v.toFixed(operand || 0));
-          else if (op === 'abs') res = Math.abs(v);
-          return { ...r, [targetCol]: Number(res.toFixed(4)) };
+          const v1 = Number(r[col1] ?? 0) || 0;
+
+          if (op === 'bin') {
+            const bins: Array<{ max: number; label: string }> = Array.isArray(p.bins) ? p.bins : [];
+            const sortedBins = [...bins].sort((a, b) => Number(a.max) - Number(b.max));
+            for (const b of sortedBins) {
+              if (v1 <= Number(b.max)) {
+                return { ...r, [targetCol]: b.label };
+              }
+            }
+            return { ...r, [targetCol]: p.bin_other || 'High' };
+          }
+
+          let res = v1;
+          if (op === 'arithmetic') {
+            const v2 = col2 && col2 in r ? Number(r[col2] ?? 0) || 0 : Number(col2 ?? operand) || 0;
+            if (mathOp === '+') res = v1 + v2;
+            else if (mathOp === '-') res = v1 - v2;
+            else if (mathOp === '*') res = v1 * v2;
+            else if (mathOp === '/') res = v2 !== 0 ? v1 / v2 : 0;
+          } else if (op === 'percent_change') {
+            const v2 = col2 && col2 in r ? Number(r[col2] ?? 0) || 0 : operand;
+            res = v1 !== 0 ? ((v2 - v1) / Math.abs(v1)) * 100 : 0;
+          } else if (op === 'add' || op === '+') {
+            res = v1 + operand;
+          } else if (op === 'subtract' || op === '-') {
+            res = v1 - operand;
+          } else if (op === 'multiply' || op === '*') {
+            res = v1 * operand;
+          } else if (op === 'divide' || op === '/') {
+            res = operand !== 0 ? v1 / operand : 0;
+          } else if (op === 'round') {
+            const d = p.decimals !== undefined ? decimals : operand || 0;
+            return { ...r, [targetCol]: Number(v1.toFixed(Math.max(0, Math.min(10, d)))) };
+          } else if (op === 'roundup') {
+            return { ...r, [targetCol]: Math.ceil(v1) };
+          } else if (op === 'rounddown') {
+            return { ...r, [targetCol]: Math.floor(v1) };
+          } else if (op === 'abs') {
+            return { ...r, [targetCol]: Math.abs(v1) };
+          }
+
+          const d = Number.isFinite(decimals) ? Math.max(0, Math.min(10, decimals)) : 4;
+          return { ...r, [targetCol]: Number.isFinite(res) ? Number(res.toFixed(d)) : null };
         });
         break;
       }
@@ -751,18 +898,38 @@ function executePipelineSteps(
       case 'text_transform': {
         const col = p.column;
         const op = p.operation || 'upper';
-        const targetCol = p.target_column || col;
+        const targetCol = p.output_column || p.target_column || col;
         if (col && targetCol) {
           rows = rows.map((r) => {
             const s = String(r[col] ?? '');
-            let out = s;
+            let out: any = s;
             if (op === 'upper' || op === 'uppercase') out = s.toUpperCase();
             else if (op === 'lower' || op === 'lowercase') out = s.toLowerCase();
             else if (op === 'trim') out = s.trim();
+            else if (op === 'clean') out = s.replace(/[\x00-\x1F\x7F]/g, '').trim();
             else if (op === 'title' || op === 'proper') {
               out = s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+            } else if (op === 'left') {
+              const len = Math.max(0, Number(p.length ?? 5));
+              out = s.slice(0, len);
+            } else if (op === 'right') {
+              const len = Math.max(0, Number(p.length ?? 5));
+              out = len === 0 ? '' : s.slice(-len);
+            } else if (op === 'mid') {
+              const start = Math.max(0, Number(p.start ?? 1) - 1);
+              const len = Math.max(0, Number(p.length ?? 5));
+              out = s.slice(start, start + len);
             } else if (op === 'length') {
-              return { ...r, [targetCol]: s.length };
+              out = s.length;
+            } else if (op === 'concat') {
+              const extraCols: string[] = Array.isArray(p.concat_columns) ? p.concat_columns : [];
+              const sep = p.concat_separator ?? ' ';
+              out = [s, ...extraCols.map((c) => String(r[c] ?? ''))].join(sep);
+            } else if (op === 'extract_delimiter') {
+              const delim = p.delimiter ?? ' ';
+              const pos = p.position || 'before';
+              const parts = s.split(delim);
+              out = pos === 'after' ? parts.slice(1).join(delim) : parts[0] ?? '';
             }
             return { ...r, [targetCol]: out };
           });
@@ -772,18 +939,61 @@ function executePipelineSteps(
 
       case 'date_transform': {
         const col = p.column;
-        const op = p.operation || p.part || 'year';
-        const targetCol = p.target_column || `${col}_${op}`;
+        const op = p.operation || p.part || 'extract_part';
+        const datePart = p.date_part || p.part || (op !== 'extract_part' ? op : 'year');
+        const targetCol = p.output_column || p.target_column || `${col}_${datePart}`;
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
         if (col) {
           rows = rows.map((r) => {
             const d = new Date(String(r[col] ?? ''));
             if (Number.isNaN(d.getTime())) return { ...r, [targetCol]: null };
             let out: any = null;
-            if (op === 'year') out = d.getFullYear();
-            else if (op === 'month') out = d.getMonth() + 1;
-            else if (op === 'day') out = d.getDate();
-            else if (op === 'quarter') out = Math.floor(d.getMonth() / 3) + 1;
-            else out = d.toISOString().slice(0, 10);
+
+            if (op === 'eomonth') {
+              const eom = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+              out = eom.toISOString().slice(0, 10);
+            } else if (op === 'datedif') {
+              const secCol = p.second_column;
+              const d2 = secCol && r[secCol] ? new Date(String(r[secCol])) : new Date();
+              if (Number.isNaN(d2.getTime())) {
+                out = null;
+              } else {
+                const diffDays = Math.round((d2.getTime() - d.getTime()) / 86400000);
+                const unit = p.unit || 'day';
+                if (unit === 'year') out = Number((diffDays / 365.25).toFixed(1));
+                else if (unit === 'month') out = Number((diffDays / 30.4375).toFixed(1));
+                else out = diffDays;
+              }
+            } else if (op === 'add_time') {
+              const amt = Number(p.amount ?? 0);
+              const unit = p.unit || 'day';
+              const copy = new Date(d.getTime());
+              if (unit === 'year') copy.setUTCFullYear(copy.getUTCFullYear() + amt);
+              else if (unit === 'month') copy.setUTCMonth(copy.getUTCMonth() + amt);
+              else copy.setUTCDate(copy.getUTCDate() + amt);
+              out = copy.toISOString().slice(0, 10);
+            } else if (op === 'fiscal_year') {
+              const startMonth = Number(p.fiscal_start_month ?? 4);
+              const m = d.getUTCMonth() + 1;
+              const y = d.getUTCFullYear();
+              const fy = m >= startMonth && startMonth > 1 ? y + 1 : y;
+              out = `FY${fy}`;
+            } else {
+              // extract_part or legacy year/month/day/quarter
+              if (datePart === 'year') out = d.getUTCFullYear();
+              else if (datePart === 'month') out = d.getUTCMonth() + 1;
+              else if (datePart === 'day') out = d.getUTCDate();
+              else if (datePart === 'quarter') out = Math.floor(d.getUTCMonth() / 3) + 1;
+              else if (datePart === 'week') {
+                const startOfYear = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+                const days = Math.floor((d.getTime() - startOfYear.getTime()) / 86400000);
+                out = Math.ceil((days + startOfYear.getUTCDay() + 1) / 7);
+              } else if (datePart === 'day_name') out = dayNames[d.getUTCDay()];
+              else if (datePart === 'weekday') out = d.getUTCDay();
+              else out = d.toISOString().slice(0, 10);
+            }
+
             return { ...r, [targetCol]: out };
           });
         }
@@ -791,8 +1001,8 @@ function executePipelineSteps(
       }
 
       case 'conditional': {
-        const targetCol = p.target_column || p.new_column || 'conditional_col';
-        const clauses = p.clauses || [
+        const targetCol = p.new_column || p.output_column || p.target_column || 'conditional_col';
+        const clauses = p.rules || p.clauses || [
           {
             column: p.column,
             operator: p.operator || 'eq',
@@ -803,8 +1013,8 @@ function executePipelineSteps(
         const elseVal = p.else_value ?? 'Other';
         rows = rows.map((r) => {
           for (const c of clauses) {
-            if (c.column && evaluateRowCondition(r[c.column], c.operator || 'eq', c.value)) {
-              return { ...r, [targetCol]: c.then_value };
+            if (c && c.column && evaluateRowCondition(r[c.column], c.operator || 'eq', c.value)) {
+              return { ...r, [targetCol]: c.result ?? c.then_value ?? 'True' };
             }
           }
           return { ...r, [targetCol]: elseVal };
@@ -813,23 +1023,34 @@ function executePipelineSteps(
       }
 
       case 'group_by': {
-        const groupCols: string[] = Array.isArray(p.group_columns)
-          ? p.group_columns
+        const groupCols: string[] = Array.isArray(p.group_by_columns)
+          ? p.group_by_columns.filter(Boolean)
+          : Array.isArray(p.group_columns)
+          ? p.group_columns.filter(Boolean)
           : p.group_by
           ? [p.group_by]
           : [];
-        const aggs: Array<{ column: string; function: string; alias?: string }> =
-          p.aggregations || [
-            {
-              column: p.agg_column || 'amount',
-              function: p.agg_func || 'sum',
-              alias: p.alias || `${p.agg_func || 'sum'}_${p.agg_column || 'amount'}`,
-            },
-          ];
+        const aggs: Array<{
+          column: string;
+          function?: string;
+          agg_func?: string;
+          alias?: string;
+          output_column?: string;
+          output_name?: string;
+        }> =
+          Array.isArray(p.aggregations) && p.aggregations.length > 0
+            ? p.aggregations
+            : [
+                {
+                  column: p.agg_column || 'amount',
+                  function: p.agg_func || 'sum',
+                  alias: p.alias || `${p.agg_func || 'sum'}_${p.agg_column || 'amount'}`,
+                },
+              ];
 
         const groups = new Map<string, Record<string, any>[]>();
         rows.forEach((r) => {
-          const key = groupCols.map((c) => String(r[c] ?? '')).join('||');
+          const key = groupCols.length > 0 ? groupCols.map((c) => String(r[c] ?? '')).join('||') : '__ALL__';
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key)!.push(r);
         });
@@ -838,18 +1059,20 @@ function executePipelineSteps(
         groups.forEach((gRows) => {
           const base: Record<string, any> = {};
           groupCols.forEach((c) => {
-            base[c] = gRows[0][c];
+            base[c] = gRows[0]?.[c] ?? null;
           });
           aggs.forEach((agg) => {
-            const fn = (agg.function || 'sum').toLowerCase();
-            const alias = agg.alias || `${fn}_${agg.column}`;
-            const nums = gRows.map((x) => Number(x[agg.column])).filter((n) => !Number.isNaN(n));
+            const fn = (agg.agg_func || agg.function || 'sum').toLowerCase();
+            const alias = agg.output_column || agg.output_name || agg.alias || `${fn}_${agg.column}`;
+            const rawVals = gRows.map((x) => x[agg.column]).filter((v) => v !== null && v !== undefined && v !== '');
+            const nums = rawVals.map((x) => Number(x)).filter((n) => !Number.isNaN(n));
             if (fn === 'count') base[alias] = gRows.length;
+            else if (fn === 'distinct_count') base[alias] = new Set(rawVals.map((v) => String(v))).size;
             else if (fn === 'sum') base[alias] = Number(nums.reduce((a, b) => a + b, 0).toFixed(2));
             else if (fn === 'avg' || fn === 'mean')
               base[alias] = nums.length ? Number((nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2)) : 0;
-            else if (fn === 'min') base[alias] = nums.length ? Math.min(...nums) : null;
-            else if (fn === 'max') base[alias] = nums.length ? Math.max(...nums) : null;
+            else if (fn === 'min') base[alias] = nums.length ? Math.min(...nums) : (rawVals[0] ?? null);
+            else if (fn === 'max') base[alias] = nums.length ? Math.max(...nums) : (rawVals[rawVals.length - 1] ?? null);
           });
           groupedRows.push(base);
         });
@@ -858,17 +1081,153 @@ function executePipelineSteps(
       }
 
       case 'window_calc': {
-        const fn = (p.function || p.window_type || 'running_sum').toLowerCase();
-        const valCol = p.value_column || p.column || 'amount';
-        const targetCol = p.target_column || `${fn}_${valCol}`;
-        let running = 0;
-        rows = rows.map((r, i) => {
-          const v = Number(r[valCol] ?? 0) || 0;
-          running += v;
-          if (fn === 'row_number' || fn === 'rank') return { ...r, [targetCol]: i + 1 };
-          if (fn === 'running_avg') return { ...r, [targetCol]: Number((running / (i + 1)).toFixed(2)) };
-          return { ...r, [targetCol]: Number(running.toFixed(2)) };
+        const fn = (p.calc_type || p.function || p.window_type || 'running_total').toLowerCase();
+        const valCol = p.value_column || (p.output_column ? p.target_column : p.column) || 'amount';
+        const outCol =
+          p.output_column || (p.value_column ? p.target_column : undefined) || `${fn}_${valCol}`;
+        const partitionCols: string[] = Array.isArray(p.partition_by) ? p.partition_by.filter(Boolean) : [];
+        const orderCol: string | undefined = p.order_by;
+        const orderDir = (p.order_direction || 'asc').toLowerCase();
+        const winSize = Math.max(1, Number(p.window_size ?? 3));
+        const offsetCount = Math.max(1, Number(p.offset ?? 1));
+
+        // Optional sort by order_by before window calculation
+        if (orderCol) {
+          rows.sort((a, b) => {
+            const va = a[orderCol];
+            const vb = b[orderCol];
+            if (va === vb) return 0;
+            if (va === null || va === undefined) return 1;
+            if (vb === null || vb === undefined) return -1;
+            const cmp =
+              typeof va === 'number' && typeof vb === 'number'
+                ? va - vb
+                : String(va).localeCompare(String(vb), undefined, { numeric: true });
+            return orderDir === 'desc' ? -cmp : cmp;
+          });
+        }
+
+        // Partition rows into groups while preserving original index
+        const partitions = new Map<string, number[]>();
+        rows.forEach((r, idx) => {
+          const key =
+            partitionCols.length > 0
+              ? partitionCols.map((c) => String(r[c] ?? '')).join('||')
+              : '__ALL__';
+          if (!partitions.has(key)) partitions.set(key, []);
+          partitions.get(key)!.push(idx);
         });
+
+        const nextRows = rows.map((r) => ({ ...r }));
+        partitions.forEach((indices) => {
+          const groupTotal = indices.reduce(
+            (acc, rIdx) => acc + (Number(nextRows[rIdx][valCol] ?? 0) || 0),
+            0
+          );
+          let running = 0;
+          indices.forEach((rIdx, pos) => {
+            const v = Number(nextRows[rIdx][valCol] ?? 0) || 0;
+            running += v;
+            if (fn === 'row_number' || fn === 'rank') {
+              nextRows[rIdx][outCol] = pos + 1;
+            } else if (fn === 'percent_of_total') {
+              nextRows[rIdx][outCol] =
+                groupTotal !== 0 ? Number(((v / groupTotal) * 100).toFixed(2)) : 0;
+            } else if (fn === 'moving_avg' || fn === 'running_avg') {
+              const startPos = fn === 'moving_avg' ? Math.max(0, pos - winSize + 1) : 0;
+              const sliceIdx = indices.slice(startPos, pos + 1);
+              const sliceSum = sliceIdx.reduce(
+                (acc, sIdx) => acc + (Number(nextRows[sIdx][valCol] ?? 0) || 0),
+                0
+              );
+              nextRows[rIdx][outCol] = Number((sliceSum / sliceIdx.length).toFixed(2));
+            } else if (fn === 'lag') {
+              const prevIdx = pos - offsetCount >= 0 ? indices[pos - offsetCount] : -1;
+              nextRows[rIdx][outCol] = prevIdx >= 0 ? (nextRows[prevIdx][valCol] ?? null) : null;
+            } else if (fn === 'lead') {
+              const nextIdx =
+                pos + offsetCount < indices.length ? indices[pos + offsetCount] : -1;
+              nextRows[rIdx][outCol] = nextIdx >= 0 ? (nextRows[nextIdx][valCol] ?? null) : null;
+            } else {
+              // running_total / running_sum
+              nextRows[rIdx][outCol] = Number(running.toFixed(2));
+            }
+          });
+        });
+
+        rows = nextRows;
+        break;
+      }
+
+      case 'pivot': {
+        const idxCols: string[] = Array.isArray(p.index_columns) ? p.index_columns.filter(Boolean) : [];
+        const pivotCol: string = p.pivot_column;
+        const valCol: string = p.value_column;
+        const aggFn: string = (p.agg_func || 'sum').toLowerCase();
+
+        if (pivotCol && valCol) {
+          const pivotValues = Array.from(
+            new Set(rows.map((r) => String(r[pivotCol] ?? 'Null')))
+          ).slice(0, 25);
+
+          const groups = new Map<string, Record<string, any>[]>();
+          rows.forEach((r) => {
+            const k = idxCols.length > 0 ? idxCols.map((c) => String(r[c] ?? '')).join('||') : '__ALL__';
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k)!.push(r);
+          });
+
+          const pivoted: Record<string, any>[] = [];
+          groups.forEach((gRows) => {
+            const outRow: Record<string, any> = {};
+            idxCols.forEach((c) => {
+              outRow[c] = gRows[0]?.[c] ?? null;
+            });
+            pivotValues.forEach((pv) => {
+              const matching = gRows.filter((r) => String(r[pivotCol] ?? 'Null') === pv);
+              const nums = matching.map((m) => Number(m[valCol])).filter((n) => !Number.isNaN(n));
+              if (aggFn === 'count') outRow[pv] = matching.length;
+              else if (aggFn === 'avg')
+                outRow[pv] = nums.length
+                  ? Number((nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2))
+                  : 0;
+              else if (aggFn === 'min') outRow[pv] = nums.length ? Math.min(...nums) : 0;
+              else if (aggFn === 'max') outRow[pv] = nums.length ? Math.max(...nums) : 0;
+              else outRow[pv] = Number(nums.reduce((a, b) => a + b, 0).toFixed(2));
+            });
+            pivoted.push(outRow);
+          });
+          rows = pivoted;
+        }
+        break;
+      }
+
+      case 'unpivot': {
+        const valCols: string[] = Array.isArray(p.value_columns) ? p.value_columns.filter(Boolean) : [];
+        const idCols: string[] =
+          Array.isArray(p.id_columns) && p.id_columns.length > 0
+            ? p.id_columns
+            : rows[0]
+            ? Object.keys(rows[0]).filter((k) => !valCols.includes(k))
+            : [];
+        const nameCol = p.name_column || 'attribute';
+        const valOutCol = p.value_column || 'value';
+
+        if (valCols.length > 0) {
+          const melted: Record<string, any>[] = [];
+          rows.forEach((r) => {
+            valCols.forEach((vc) => {
+              const item: Record<string, any> = {};
+              idCols.forEach((ic) => {
+                item[ic] = r[ic];
+              });
+              item[nameCol] = vc;
+              item[valOutCol] = r[vc] ?? null;
+              melted.push(item);
+            });
+          });
+          rows = melted;
+        }
         break;
       }
 
@@ -1060,13 +1419,45 @@ function executePipelineSteps(
       }
 
       case 'append': {
-        const otherIds: string[] = p.dataset_ids || (p.right_dataset_id ? [p.right_dataset_id] : []);
+        const otherIds: string[] =
+          p.dataset_ids ||
+          (p.append_dataset_id
+            ? [p.append_dataset_id]
+            : p.right_dataset_id
+            ? [p.right_dataset_id]
+            : []);
+        const leftCols = rows[0] ? Object.keys(rows[0]) : [];
+        const alignByPos = p.alignment_mode === 'by_position';
+
         otherIds.forEach((id) => {
           const other = allDatasets.find((d) => d.meta.id === id);
           if (other) {
-            rows = [...rows, ...other.rows.map((r) => ({ ...r }))];
+            const otherCols = other.meta.schema_metadata.map((c) => c.name);
+            const mappedOtherRows = other.rows.map((r) => {
+              if (alignByPos && leftCols.length > 0) {
+                const posRow: Record<string, any> = {};
+                leftCols.forEach((lc, idx) => {
+                  const rc = otherCols[idx];
+                  posRow[lc] = rc ? (r[rc] ?? null) : null;
+                });
+                return posRow;
+              }
+              return { ...r };
+            });
+            rows = [...rows, ...mappedOtherRows];
           }
         });
+
+        if (p.union_type === 'distinct') {
+          const allCols = inferSchema(rows).map((c) => c.name);
+          const seen = new Set<string>();
+          rows = rows.filter((r) => {
+            const k = allCols.map((c) => String(r[c] ?? '')).join('||');
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+        }
         break;
       }
 
@@ -1272,11 +1663,50 @@ export const localEngine = {
         percentage: total > 0 ? Number(((item.count / total) * 100).toFixed(1)) : 0,
       }));
 
-    const nums = nonNull.map((v) => Number(v)).filter((n) => !Number.isNaN(n));
-    const minVal = nums.length > 0 ? Math.min(...nums) : nonNull[0] ?? null;
-    const maxVal = nums.length > 0 ? Math.max(...nums) : nonNull[nonNull.length - 1] ?? null;
+    const nums = nonNull
+      .map((v) => Number(v))
+      .filter((n) => !Number.isNaN(n))
+      .sort((a, b) => a - b);
+    const minVal = nums.length > 0 ? nums[0] : nonNull[0] ?? null;
+    const maxVal = nums.length > 0 ? nums[nums.length - 1] : nonNull[nonNull.length - 1] ?? null;
     const meanVal =
       nums.length > 0 ? Number((nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2)) : undefined;
+    let medianVal: number | undefined = undefined;
+    if (nums.length > 0) {
+      const mid = Math.floor(nums.length / 2);
+      medianVal =
+        nums.length % 2 === 0
+          ? Number(((nums[mid - 1] + nums[mid]) / 2).toFixed(2))
+          : Number(nums[mid].toFixed(2));
+    }
+
+    let histogram: Array<{ label: string; bin_start: number; bin_end: number; count: number }> | undefined =
+      undefined;
+    if ((dt === 'integer' || dt === 'float') && nums.length > 0) {
+      const nMin = nums[0];
+      const nMax = nums[nums.length - 1];
+      if (nMin === nMax) {
+        histogram = [{ label: `${nMin}`, bin_start: nMin, bin_end: nMax, count: nums.length }];
+      } else {
+        const binCount = Math.min(8, Math.max(4, freq.size));
+        const stepSize = (nMax - nMin) / binCount;
+        const bins = Array.from({ length: binCount }, (_, idx) => {
+          const low = nMin + idx * stepSize;
+          const high = idx === binCount - 1 ? nMax : nMin + (idx + 1) * stepSize;
+          return {
+            label: `${Number(low.toFixed(1))}–${Number(high.toFixed(1))}`,
+            bin_start: Number(low.toFixed(2)),
+            bin_end: Number(high.toFixed(2)),
+            count: 0,
+          };
+        });
+        nums.forEach((n) => {
+          const idx = Math.min(binCount - 1, Math.floor((n - nMin) / stepSize));
+          if (bins[idx]) bins[idx].count++;
+        });
+        histogram = bins;
+      }
+    }
 
     return {
       column_name: columnName,
@@ -1290,7 +1720,9 @@ export const localEngine = {
       min_value: minVal,
       max_value: maxVal,
       mean_value: meanVal,
+      median_value: medianVal,
       top_values: sortedTop,
+      histogram,
     };
   },
 
@@ -1642,6 +2074,7 @@ export const localEngine = {
     const results = (rules || []).map((rule, idx) => {
       const col = rule.column;
       const rtype = rule.rule_type || 'not_null';
+      const rparams = rule.params || {};
       let failing: Record<string, any>[] = [];
 
       if (rtype === 'not_null') {
@@ -1654,38 +2087,76 @@ export const localEngine = {
         });
         failing = rows.filter((r) => (counts.get(String(r[col] ?? '')) || 0) > 1);
       } else if (rtype === 'range') {
-        const min = rule.min_value !== undefined ? Number(rule.min_value) : -Infinity;
-        const max = rule.max_value !== undefined ? Number(rule.max_value) : Infinity;
+        const rawMin = rparams.min !== undefined ? rparams.min : rule.min_value;
+        const rawMax = rparams.max !== undefined ? rparams.max : rule.max_value;
+        const min = rawMin !== undefined && rawMin !== null && rawMin !== '' ? Number(rawMin) : -Infinity;
+        const max = rawMax !== undefined && rawMax !== null && rawMax !== '' ? Number(rawMax) : Infinity;
         failing = rows.filter((r) => {
           const v = Number(r[col]);
           return Number.isNaN(v) || v < min || v > max;
         });
+      } else if (rtype === 'allowed_values') {
+        const rawAllowed = rparams.allowed_values || rule.allowed_values || [];
+        const allowedSet = new Set(
+          (Array.isArray(rawAllowed) ? rawAllowed : String(rawAllowed).split(','))
+            .map((v: any) => String(v).trim().toLowerCase())
+            .filter(Boolean)
+        );
+        if (allowedSet.size > 0) {
+          failing = rows.filter((r) => !allowedSet.has(String(r[col] ?? '').trim().toLowerCase()));
+        }
+      } else if (rtype === 'regex') {
+        const pattern = rparams.pattern || rule.pattern || '.*';
+        try {
+          const rx = new RegExp(pattern);
+          failing = rows.filter((r) => !rx.test(String(r[col] ?? '')));
+        } catch {
+          failing = [];
+        }
       }
 
       const failedCount = failing.length;
+      const passed = failedCount === 0;
       const passRate = total > 0 ? Number((((total - failedCount) / total) * 100).toFixed(1)) : 100;
+      const label = rule.label || rule.name || `${rtype.replace('_', ' ')} on ${col}`;
+      const message = passed
+        ? `All ${total} rows passed ${rtype.replace('_', ' ')} validation on "${col}".`
+        : `${failedCount} of ${total} rows failed ${rtype.replace('_', ' ')} check on "${col}" (${passRate}% pass rate).`;
+
       return {
         rule_id: rule.id || `rule-${idx + 1}`,
-        name: rule.name || `${rtype} on ${col}`,
+        label,
+        name: label,
         rule_type: rtype,
         column: col,
         severity: rule.severity || 'warning',
-        passed: failedCount === 0,
+        status: passed ? 'pass' : 'fail',
+        passed,
+        message,
         total_rows: total,
         failed_rows: failedCount,
+        failed_rows_count: failedCount,
         pass_rate_pct: passRate,
         sample_failures: failing.slice(0, 5),
+        sample_failing_rows: failing.slice(0, 5),
       };
     });
 
     const passedRules = results.filter((r) => r.passed).length;
+    const failedRules = results.length - passedRules;
+    const score = results.length ? Number(((passedRules / results.length) * 100).toFixed(1)) : 100;
+
     return {
       dataset_id: datasetId,
       total_rows: total,
-      overall_score: results.length ? Number(((passedRules / results.length) * 100).toFixed(1)) : 98.5,
+      health_score: score,
+      overall_score: score,
+      total_rules: results.length,
       rules_evaluated: results.length,
+      passed_count: passedRules,
       rules_passed: passedRules,
-      rules_failed: results.length - passedRules,
+      failed_count: failedRules,
+      rules_failed: failedRules,
       results,
     };
   },
@@ -1695,15 +2166,37 @@ export const localEngine = {
     const cols = ds?.meta.schema_metadata || [];
     const autoRules = cols.slice(0, 4).map((c, idx) => ({
       id: `auto-${idx + 1}`,
-      name: `${c.name} Not Null Check`,
+      label: idx === 0 ? `${c.name} Unique Primary Key` : `${c.name} Not Null Check`,
+      name: idx === 0 ? `${c.name} Unique Primary Key` : `${c.name} Not Null Check`,
       rule_type: idx === 0 ? 'unique' : 'not_null',
       column: c.name,
       severity: idx === 0 ? 'error' : 'warning',
+      params: {},
     }));
     return this.runQualityCheck(datasetId, autoRules, []);
   },
 
-  async downloadFailingRows(datasetId: string, _rule: any, steps: any[] = []): Promise<Blob> {
+  async downloadFailingRows(datasetId: string, rule: any, steps: any[] = []): Promise<Blob> {
+    if (rule && rule.column) {
+      const report = await this.runQualityCheck(datasetId, [rule], steps);
+      const r0 = report.results?.[0];
+      if (r0 && Array.isArray(r0.sample_failing_rows) && r0.sample_failing_rows.length > 0) {
+        const rows = r0.sample_failing_rows;
+        const cols = Object.keys(rows[0]);
+        const escapeCsv = (val: any) => {
+          if (val === null || val === undefined) return '';
+          const s = String(val);
+          return s.includes(',') || s.includes('"') || s.includes('\n')
+            ? `"${s.replace(/"/g, '""')}"`
+            : s;
+        };
+        const csvLines = [
+          cols.join(','),
+          ...rows.map((r: any) => cols.map((c) => escapeCsv(r[c])).join(',')),
+        ];
+        return new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      }
+    }
     return this.exportCsv(datasetId, steps);
   },
 

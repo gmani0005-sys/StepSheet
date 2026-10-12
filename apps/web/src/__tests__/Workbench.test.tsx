@@ -441,7 +441,166 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('North')).toBeDefined();
     expect(screen.getByText('South')).toBeDefined();
   });
+
+  it('verifies all modals, quality checks, column profiles, full dataset runs, code exports, and wizard step types never return undefined fields', async () => {
+    const datasets = await localEngine.listDatasets();
+    const ordersId = datasets[0].id;
+    const custId = datasets[1].id;
+
+    // 1. Column Profile (including median_value and histogram)
+    const profile = await localEngine.getColumnProfile(ordersId, 'amount');
+    expect(typeof profile.total_count).toBe('number');
+    expect(typeof profile.distinct_count).toBe('number');
+    expect(typeof profile.median_value).toBe('number');
+    expect(Array.isArray(profile.histogram)).toBe(true);
+
+    // 2. Quick Audit & Custom Quality Rules
+    const audit = await localEngine.runQuickAudit(ordersId);
+    expect(typeof audit.health_score).toBe('number');
+    expect(typeof audit.total_rules).toBe('number');
+    expect(typeof audit.passed_count).toBe('number');
+    expect(typeof audit.failed_count).toBe('number');
+    expect(audit.results[0].status).toMatch(/^(pass|fail)$/);
+    expect(typeof audit.results[0].label).toBe('string');
+    expect(typeof audit.results[0].message).toBe('string');
+
+    const customCheck = await localEngine.runQualityCheck(ordersId, [
+      {
+        id: 'r1',
+        rule_type: 'range',
+        column: 'amount',
+        label: 'Positive Amount',
+        params: { min: 100, max: 500 },
+      },
+      {
+        id: 'r2',
+        rule_type: 'allowed_values',
+        column: 'region',
+        label: 'Allowed Region',
+        params: { allowed_values: ['North', 'East'] },
+      },
+    ]);
+    expect(customCheck.total_rules).toBe(2);
+    expect(typeof customCheck.results[0].failed_rows_count).toBe('number');
+
+    // 3. UI Wizard Steps (matching exact parameter names emitted by UI Modals)
+    const uiSteps: any[] = [
+      {
+        id: 'w-math',
+        type: 'math_transform',
+        label: 'Math two_col',
+        enabled: true,
+        params: {
+          mode: 'two_col',
+          column1: 'amount',
+          column2: 'discount',
+          math_operator: 'subtract',
+          output_column: 'net_amt',
+          round_digits: 2,
+        },
+      },
+      {
+        id: 'w-cond',
+        type: 'conditional',
+        label: 'IF tier',
+        enabled: true,
+        params: {
+          output_column: 'deal_size',
+          rules: [{ column: 'amount', operator: 'gte', value: 1000, then_value: 'Large' }],
+          else_value: 'Standard',
+        },
+      },
+      {
+        id: 'w-text',
+        type: 'text_transform',
+        label: 'Upper region',
+        enabled: true,
+        params: {
+          column: 'region',
+          operation: 'upper',
+          output_column: 'region_upper',
+        },
+      },
+      {
+        id: 'w-date',
+        type: 'date_transform',
+        label: 'Extract year',
+        enabled: true,
+        params: {
+          column: 'order_date',
+          operation: 'extract_part',
+          date_part: 'year',
+          output_column: 'order_year',
+        },
+      },
+      {
+        id: 'w-win',
+        type: 'window_calc',
+        label: 'Running sum',
+        enabled: true,
+        params: {
+          calc_type: 'running_sum',
+          value_column: 'amount',
+          partition_by: ['region'],
+          order_by: 'order_date',
+          output_column: 'running_amt',
+        },
+      },
+      {
+        id: 'w-xlookup',
+        type: 'xlookup',
+        label: 'Lookup customer name',
+        enabled: true,
+        params: {
+          lookup_column: 'customer_id',
+          right_dataset_id: custId,
+          right_Lookup_column: 'customer_id',
+          return_columns: ['customer_name'],
+        },
+      },
+    ];
+
+    const preview = await localEngine.previewPipeline(ordersId, uiSteps);
+    expect(preview.rows.length).toBeGreaterThan(0);
+    expect(preview.rows[0].net_amt).toBeDefined();
+    expect(preview.rows[0].deal_size).toBeDefined();
+    expect(preview.rows[0].region_upper).toBeDefined();
+    expect(preview.rows[0].order_year).toBeDefined();
+    expect(preview.rows[0].running_amt).toBeDefined();
+    expect(preview.rows[0].customer_name).toBeDefined();
+
+    // 4. GroupBy UI Step
+    const groupPreview = await localEngine.previewPipeline(ordersId, [
+      {
+        id: 'w-group',
+        type: 'group_by',
+        label: 'Group by region',
+        enabled: true,
+        params: {
+          group_by_columns: ['region'],
+          aggregations: [{ column: 'amount', function: 'sum', output_name: 'region_total' }],
+        },
+      },
+    ]);
+    expect(groupPreview.rows.length).toBeGreaterThan(0);
+    expect(groupPreview.rows[0].region_total).toBeDefined();
+
+    // 5. Run Full Pipeline & Export Code
+    const fullRun = await localEngine.runFullPipeline(ordersId, uiSteps);
+    expect(fullRun.status).toBe('completed');
+    expect(typeof fullRun.total_rows).toBe('number');
+    expect(typeof fullRun.column_count).toBe('number');
+    expect(typeof fullRun.execution_time_ms).toBe('number');
+
+    const exportedCode = await localEngine.exportCode(ordersId, uiSteps);
+    expect(typeof exportedCode.sql).toBe('string');
+    expect(Array.isArray(exportedCode.excel_formulas)).toBe(true);
+    expect(exportedCode.excel_formulas.length).toBeGreaterThan(0);
+    expect(typeof exportedCode.excel_formulas[0].step).toBe('string');
+    expect(typeof exportedCode.excel_formulas[0].formula).toBe('string');
+  });
 });
+
 
 
 

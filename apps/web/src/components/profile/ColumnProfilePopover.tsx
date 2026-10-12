@@ -60,7 +60,7 @@ export const ColumnProfilePopover: React.FC = () => {
               <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
                 <span className="text-[11px] text-slate-400 block">Total Rows</span>
                 <span className="text-sm font-bold text-slate-100 font-mono">
-                  {selectedColumnProfile.total_count.toLocaleString()}
+                  {(selectedColumnProfile.total_count ?? 0).toLocaleString()}
                 </span>
               </div>
 
@@ -69,13 +69,13 @@ export const ColumnProfilePopover: React.FC = () => {
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <span
                     className={`text-sm font-bold font-mono ${
-                      selectedColumnProfile.null_count > 0 ? 'text-amber-400' : 'text-emerald-400'
+                      (selectedColumnProfile.null_count ?? 0) > 0 ? 'text-amber-400' : 'text-emerald-400'
                     }`}
                   >
-                    {selectedColumnProfile.null_percentage}%
+                    {selectedColumnProfile.null_percentage ?? 0}%
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    ({selectedColumnProfile.null_count})
+                    ({selectedColumnProfile.null_count ?? 0})
                   </span>
                 </div>
               </div>
@@ -84,10 +84,10 @@ export const ColumnProfilePopover: React.FC = () => {
                 <span className="text-[11px] text-slate-400 block">Distinct Values</span>
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <span className="text-sm font-bold text-slate-100 font-mono">
-                    {selectedColumnProfile.distinct_count.toLocaleString()}
+                    {(selectedColumnProfile.distinct_count ?? 0).toLocaleString()}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    ({selectedColumnProfile.distinct_percentage}%)
+                    ({selectedColumnProfile.distinct_percentage ?? 0}%)
                   </span>
                 </div>
               </div>
@@ -159,11 +159,11 @@ export const ColumnProfilePopover: React.FC = () => {
                 <div className="h-28 flex items-end gap-1.5 pt-4 pb-2 border-b border-slate-800">
                   {(() => {
                     const maxCount = Math.max(
-                      ...selectedColumnProfile.histogram.map((b) => b.count),
+                      ...selectedColumnProfile.histogram.map((b) => b.count ?? 0),
                       1
                     );
                     return selectedColumnProfile.histogram.map((bin, i) => {
-                      const heightPercent = Math.max((bin.count / maxCount) * 100, 4);
+                      const heightPercent = Math.max(((bin.count ?? 0) / maxCount) * 100, 4);
                       return (
                         <div
                           key={i}
@@ -171,7 +171,7 @@ export const ColumnProfilePopover: React.FC = () => {
                         >
                           {/* Tooltip */}
                           <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-slate-200 px-1.5 py-0.5 rounded shadow pointer-events-none whitespace-nowrap z-10 font-mono">
-                            {bin.label}: {bin.count}
+                            {bin.label}: {bin.count ?? 0}
                           </div>
                           {/* Bar */}
                           <div
@@ -208,7 +208,7 @@ export const ColumnProfilePopover: React.FC = () => {
                           )}
                         </span>
                         <span className="text-[11px] font-mono text-slate-400">
-                          {item.count.toLocaleString()} ({item.percentage}%)
+                          {(item.count ?? 0).toLocaleString()} ({item.percentage ?? 0}%)
                         </span>
                       </div>
                       <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">

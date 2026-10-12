@@ -147,52 +147,216 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({
   const joinTypesConfig: Array<{
     type: JoinType;
     label: string;
+    badge: string;
     desc: string;
     example: string;
   }> = [
     {
       type: 'inner',
       label: 'Inner Join',
+      badge: 'Only Matching (L ∩ R)',
       desc: 'Only keep rows that have matches in BOTH tables.',
       example: 'Orders with matching Customers only',
     },
     {
       type: 'left',
       label: 'Left Outer',
+      badge: 'All Left + Match Right',
       desc: 'Keep ALL rows from left table, plus matching right columns.',
       example: 'All Orders, fill blanks if Customer not found',
     },
     {
       type: 'right',
       label: 'Right Outer',
+      badge: 'All Right + Match Left',
       desc: 'Keep ALL rows from right table, plus matching left columns.',
       example: 'All Customers, with their Orders if any',
     },
     {
       type: 'full',
       label: 'Full Outer',
+      badge: 'Everything (L ∪ R)',
       desc: 'Keep EVERYTHING from both tables (matched and unmatched).',
       example: 'All Orders and all Customers combined',
     },
     {
       type: 'left_semi',
       label: 'Left Semi',
+      badge: 'Filter Left by Right',
       desc: 'Keep left rows that have a match, WITHOUT adding right columns.',
       example: 'Filter Orders to only active Customers',
     },
     {
       type: 'left_anti',
       label: 'Left Anti',
+      badge: 'Unmatched Left Only',
       desc: 'Find missing records: keep left rows that have NO match in right.',
       example: 'Orders placed with invalid/deleted Customer IDs',
     },
     {
       type: 'cross',
       label: 'Cross Join',
+      badge: 'Cartesian (L × R)',
       desc: 'Cartesian product: match every row with every row.',
       example: 'All Sizes × All Colors',
     },
   ];
+
+  const renderJoinVennSvg = (type: JoinType, isSelected: boolean) => {
+    const activeFill = isSelected ? '#217346' : '#2E8555';
+    const activeOverlapFill = isSelected ? '#155230' : '#1E633D';
+    const emptyFill = '#FFFFFF';
+    const strokeColor = isSelected ? '#185C37' : '#605E5C';
+
+    // Exact lens intersection path for two r=11 circles at (23,16) and (39,16)
+    // dx = 8, dy = sqrt(11^2 - 8^2) = sqrt(57) = 7.55 -> y1 = 8.45, y2 = 23.55
+    const lensPath = 'M 31 8.45 A 11 11 0 0 1 31 23.55 A 11 11 0 0 1 31 8.45 Z';
+    // Left crescent only (left circle minus lens)
+    const leftCrescentPath = 'M 31 8.45 A 11 11 0 1 0 31 23.55 A 11 11 0 0 1 31 8.45 Z';
+    // Right crescent only (right circle minus lens)
+    const rightCrescentPath = 'M 31 8.45 A 11 11 0 1 1 31 23.55 A 11 11 0 0 0 31 8.45 Z';
+
+    if (type === 'cross') {
+      return (
+        <svg width="62" height="32" viewBox="0 0 62 32" className="overflow-visible">
+          {/* Left node L */}
+          <rect
+            x="6"
+            y="6"
+            width="16"
+            height="20"
+            rx="2"
+            fill={activeFill}
+            stroke={strokeColor}
+            strokeWidth="1.4"
+          />
+          <text x="14" y="19" textAnchor="middle" fontSize="9" fontWeight="bold" fill="#FFFFFF">
+            L
+          </text>
+          {/* Cartesian multiplication lines */}
+          <line x1="22" y1="10" x2="40" y2="10" stroke={activeFill} strokeWidth="1.3" />
+          <line x1="22" y1="10" x2="40" y2="22" stroke={activeFill} strokeWidth="1.3" />
+          <line x1="22" y1="22" x2="40" y2="10" stroke={activeFill} strokeWidth="1.3" />
+          <line x1="22" y1="22" x2="40" y2="22" stroke={activeFill} strokeWidth="1.3" />
+          {/* Right node R */}
+          <rect
+            x="40"
+            y="6"
+            width="16"
+            height="20"
+            rx="2"
+            fill={activeFill}
+            stroke={strokeColor}
+            strokeWidth="1.4"
+          />
+          <text x="48" y="19" textAnchor="middle" fontSize="9" fontWeight="bold" fill="#FFFFFF">
+            R
+          </text>
+        </svg>
+      );
+    }
+
+    const fillLeftCrescent =
+      type === 'left' || type === 'full' || type === 'left_anti'
+        ? activeFill
+        : type === 'left_semi'
+        ? '#E6F2EB'
+        : emptyFill;
+
+    const fillLens =
+      type === 'inner' || type === 'left_semi'
+        ? activeFill
+        : type === 'left' || type === 'right' || type === 'full'
+        ? activeOverlapFill
+        : emptyFill;
+
+    const fillRightCrescent =
+      type === 'right' || type === 'full' ? activeFill : emptyFill;
+
+    const isLeftIncluded = ['left', 'full', 'left_anti'].includes(type);
+    const isRightIncluded = ['right', 'full'].includes(type);
+
+    return (
+      <svg width="62" height="32" viewBox="0 0 62 32" className="overflow-visible">
+        {/* Base white circles */}
+        <circle cx="23" cy="16" r="11" fill={emptyFill} />
+        <circle cx="39" cy="16" r="11" fill={emptyFill} />
+
+        {/* Region 1: Left-only crescent */}
+        <path d={leftCrescentPath} fill={fillLeftCrescent} />
+
+        {/* Region 2: Right-only crescent */}
+        <path d={rightCrescentPath} fill={fillRightCrescent} />
+
+        {/* Region 3: Center intersection lens */}
+        <path d={lensPath} fill={fillLens} />
+
+        {/* Circle Outlines */}
+        <circle
+          cx="23"
+          cy="16"
+          r="11"
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="1.5"
+          strokeDasharray={type === 'right' ? '2.5 2' : undefined}
+        />
+        <circle
+          cx="39"
+          cy="16"
+          r="11"
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="1.5"
+          strokeDasharray={
+            type === 'left' || type === 'left_semi' || type === 'left_anti' ? '2.5 2' : undefined
+          }
+        />
+
+        {/* Special visual cue for Left Semi (check mark in lens, no right cols) */}
+        {type === 'left_semi' && (
+          <path
+            d="M 28.5 16 L 30.5 18 L 34 14"
+            fill="none"
+            stroke="#FFFFFF"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+
+        {/* Special visual cue for Left Anti (X mark in excluded intersection) */}
+        {type === 'left_anti' && (
+          <g stroke="#C50F1F" strokeWidth="1.6" strokeLinecap="round">
+            <line x1="29" y1="14" x2="33" y2="18" />
+            <line x1="33" y1="14" x2="29" y2="18" />
+          </g>
+        )}
+
+        {/* L and R labels */}
+        <text
+          x="17.5"
+          y="19"
+          textAnchor="middle"
+          fontSize="8.5"
+          fontWeight="bold"
+          fill={isLeftIncluded ? '#FFFFFF' : '#444444'}
+        >
+          L
+        </text>
+        <text
+          x="44.5"
+          y="19"
+          textAnchor="middle"
+          fontSize="8.5"
+          fontWeight="bold"
+          fill={isRightIncluded ? '#FFFFFF' : '#444444'}
+        >
+          R
+        </text>
+      </svg>
+    );
+  };
 
   const handleAddKeyPair = () => {
     if (leftColumns.length > 0 && rightColumns.length > 0) {
@@ -347,51 +511,15 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({
                     <div
                       key={jt.type}
                       onClick={() => setJoinType(jt.type)}
-                      className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex flex-col items-center ${
                         isSelected
-                          ? 'bg-sky-500/15 border-sky-500/60 shadow-sm'
+                          ? 'bg-sky-500/15 border-sky-500/60 shadow-sm ring-1 ring-[#217346]'
                           : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
                       }`}
                     >
-                      {/* Mini Venn Diagram SVG */}
-                      <div className="h-8 flex items-center justify-center mb-1.5">
-                        <svg width="48" height="24" viewBox="0 0 48 24" className="overflow-visible">
-                          <circle
-                            cx="18"
-                            cy="12"
-                            r="10"
-                            className={`transition-colors ${
-                              isSelected
-                                ? ['inner', 'left', 'full', 'left_semi', 'left_anti', 'cross'].includes(jt.type)
-                                  ? 'fill-sky-500/80'
-                                  : 'fill-slate-800'
-                                : 'fill-slate-800'
-                            }`}
-                            stroke="#334155"
-                            strokeWidth="1.5"
-                          />
-                          <circle
-                            cx="30"
-                            cy="12"
-                            r="10"
-                            className={`transition-colors ${
-                              isSelected
-                                ? ['inner', 'right', 'full', 'cross'].includes(jt.type)
-                                  ? 'fill-sky-500/80'
-                                  : 'fill-slate-800'
-                                : 'fill-slate-800'
-                            }`}
-                            stroke="#334155"
-                            strokeWidth="1.5"
-                          />
-                          {/* Intersection highlight for inner */}
-                          {jt.type === 'inner' && isSelected && (
-                            <path
-                              d="M 24 3.8 A 10 10 0 0 1 24 20.2 A 10 10 0 0 1 24 3.8 Z"
-                              className="fill-sky-400"
-                            />
-                          )}
-                        </svg>
+                      {/* Distinct Venn / Set Diagram SVG */}
+                      <div className="h-9 flex items-center justify-center mb-1">
+                        {renderJoinVennSvg(jt.type, isSelected)}
                       </div>
 
                       <p
@@ -401,7 +529,10 @@ export const JoinBuilderModal: React.FC<JoinBuilderModalProps> = ({
                       >
                         {jt.label}
                       </p>
-                      <p className="text-[10px] text-slate-400 text-center mt-0.5 line-clamp-2 leading-tight">
+                      <span className="mt-0.5 mb-1 px-1.5 py-0.2 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                        {jt.badge}
+                      </span>
+                      <p className="text-[11px] text-slate-400 text-center leading-tight">
                         {jt.desc}
                       </p>
                     </div>

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Table2,
   Play,
   Download,
+  UploadCloud,
   RotateCcw,
   RotateCw,
   PanelLeftClose,
@@ -64,6 +65,7 @@ interface RibbonItem {
   disabled?: boolean;
   title?: string;
   accent?: boolean;
+  primarySolid?: boolean;
 }
 
 interface RibbonGroup {
@@ -97,11 +99,13 @@ export const TopBar: React.FC<TopBarProps> = ({
     openStepWizard,
     setActiveTab,
     loadSamples,
+    uploadDataset,
   } = useWorkbenchStore();
 
   const { user, isAuthenticated, logout } = useAuthStore();
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTabId>('Home');
   const [isRibbonCollapsed, setIsRibbonCollapsed] = useState(false);
+  const topFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleTabClick = (tab: RibbonTabId) => {
     if (activeRibbonTab === tab && isRibbonCollapsed) {
@@ -119,8 +123,33 @@ export const TopBar: React.FC<TopBarProps> = ({
     openStepWizard(type);
   };
 
+  const triggerFileImport = () => {
+    topFileInputRef.current?.click();
+  };
+
   const ribbonConfig: Record<RibbonTabId, RibbonGroup[]> = {
     Home: [
+      {
+        name: 'Import & Export',
+        items: [
+          {
+            id: 'home-import',
+            label: 'Import File',
+            icon: UploadCloud,
+            onClick: triggerFileImport,
+            title: 'Import / Upload Excel (.xlsx) or CSV dataset',
+            accent: true,
+          },
+          {
+            id: 'home-export',
+            label: 'Export / Download',
+            icon: Download,
+            onClick: () => onOpenExport?.(),
+            title: 'Download spreadsheet with live formulas, CSV, Parquet, or SQL/Polars code',
+            primarySolid: true,
+          },
+        ],
+      },
       {
         name: 'Pipeline',
         items: [
@@ -147,13 +176,6 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick: () => (onOpenRunFull ? onOpenRunFull() : onOpenExport?.()),
             title: 'Execute pipeline across 100% of rows',
             accent: true,
-          },
-          {
-            id: 'home-export',
-            label: 'Export',
-            icon: Download,
-            onClick: () => onOpenExport?.(),
-            title: 'Export spreadsheet with live formulas, code, or pipeline spec',
           },
         ],
       },
@@ -299,6 +321,25 @@ export const TopBar: React.FC<TopBarProps> = ({
     ],
     Data: [
       {
+        name: 'Get & Export Data',
+        items: [
+          {
+            id: 'd-import',
+            label: 'Import File',
+            icon: UploadCloud,
+            onClick: triggerFileImport,
+            accent: true,
+          },
+          {
+            id: 'd-export',
+            label: 'Download / Export',
+            icon: Download,
+            onClick: () => onOpenExport?.(),
+            primarySolid: true,
+          },
+        ],
+      },
+      {
         name: 'Sort & Filter',
         items: [
           {
@@ -376,18 +417,6 @@ export const TopBar: React.FC<TopBarProps> = ({
             label: 'Unpivot Columns',
             icon: ArrowDownUp,
             onClick: () => triggerStep('unpivot'),
-          },
-        ],
-      },
-      {
-        name: 'Export',
-        items: [
-          {
-            id: 'd-export',
-            label: 'Download / Export',
-            icon: Download,
-            onClick: () => onOpenExport?.(),
-            accent: true,
           },
         ],
       },
@@ -541,22 +570,36 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   return (
     <header className="flex flex-col select-none z-40 shrink-0 bg-[#F3F3F3] border-b border-[#D4D4D4]">
+      {/* Hidden File Input for Top-Level Import */}
+      <input
+        type="file"
+        ref={topFileInputRef}
+        className="hidden"
+        accept=".csv,.xlsx,.xls,.parquet"
+        onChange={(e) => {
+          if (e.target.files && e.target.files[0]) {
+            uploadDataset(e.target.files[0]);
+            e.target.value = '';
+          }
+        }}
+      />
+
       {/* 1. EXCEL TITLE BAR + QUICK ACCESS TOOLBAR */}
-      <div className="h-9 bg-[#217346] text-white px-3 flex items-center justify-between gap-3 min-w-0">
+      <div className="h-10 bg-[#217346] text-white px-3 flex items-center justify-between gap-3 min-w-0">
         {/* Left: Sidebar Toggle, Brand & Quick Access Toolbar */}
         <div className="flex items-center gap-2 min-w-0 shrink-0">
           <button
             onClick={toggleLeftPanel}
             title={isLeftPanelOpen ? 'Collapse Data & Connections pane' : 'Expand Data & Connections pane'}
-            className="p-1 text-white/90 hover:text-white hover:bg-[#185C37] rounded-[2px] transition-colors shrink-0"
+            className="p-1.5 text-white/90 hover:text-white hover:bg-[#185C37] rounded-[2px] transition-colors shrink-0"
           >
-            {isLeftPanelOpen ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
+            {isLeftPanelOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
           </button>
 
           {/* StepSheet Brand */}
           <div className="flex items-center gap-1.5 shrink-0">
             <div className="w-6 h-6 rounded-[2px] bg-white/15 border border-white/30 flex items-center justify-center shrink-0">
-              <Table2 className="text-white" size={14} />
+              <Table2 className="text-white" size={15} />
             </div>
             <span className="font-bold text-white tracking-tight text-sm whitespace-nowrap">
               StepSheet
@@ -566,30 +609,43 @@ export const TopBar: React.FC<TopBarProps> = ({
             </span>
           </div>
 
-          {/* Quick Access Toolbar (Undo / Redo / Save-Download) */}
-          <div className="hidden sm:flex items-center gap-0.5 ml-2 pl-2 border-l border-white/25 shrink-0">
+          {/* Quick Access Toolbar (Undo / Redo + High-Visibility Import & Download) */}
+          <div className="hidden sm:flex items-center gap-1.5 ml-2 pl-2.5 border-l border-white/25 shrink-0">
             <button
               onClick={undo}
               disabled={undoStack.length === 0}
               title="Undo (Ctrl+Z)"
-              className="p-1 text-white/90 hover:text-white hover:bg-[#185C37] disabled:opacity-40 disabled:cursor-not-allowed rounded-[2px] transition-colors"
+              className="p-1.5 text-white/90 hover:text-white hover:bg-[#185C37] disabled:opacity-40 disabled:cursor-not-allowed rounded-[2px] transition-colors"
             >
-              <RotateCcw size={13} />
+              <RotateCcw size={15} />
             </button>
             <button
               onClick={redo}
               disabled={redoStack.length === 0}
               title="Redo (Ctrl+Y)"
-              className="p-1 text-white/90 hover:text-white hover:bg-[#185C37] disabled:opacity-40 disabled:cursor-not-allowed rounded-[2px] transition-colors"
+              className="p-1.5 text-white/90 hover:text-white hover:bg-[#185C37] disabled:opacity-40 disabled:cursor-not-allowed rounded-[2px] transition-colors"
             >
-              <RotateCw size={13} />
+              <RotateCw size={15} />
             </button>
+
             <button
-              onClick={onOpenExport}
-              title="Save / Export Workbook"
-              className="p-1 text-white/90 hover:text-white hover:bg-[#185C37] rounded-[2px] transition-colors"
+              type="button"
+              onClick={triggerFileImport}
+              title="Import CSV or Excel (.xlsx) file"
+              className="ml-1 flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-[#185C37] hover:bg-[#124629] text-white border border-white/30 rounded-[2px] transition-colors shadow-sm"
             >
-              <Download size={13} />
+              <UploadCloud size={16} className="shrink-0" />
+              <span>Import</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onOpenExport}
+              title="Download / Export Workbook (.xlsx, .csv, .parquet, SQL)"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-white text-[#217346] hover:bg-[#E6F2EB] border border-white rounded-[2px] transition-colors shadow-sm"
+            >
+              <Download size={16} className="shrink-0 stroke-[2.2]" />
+              <span>Download</span>
             </button>
           </div>
         </div>
@@ -619,7 +675,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             title="Share project with role-based links"
             className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-[#185C37] hover:bg-[#124629] text-white border border-white/25 rounded-[2px] whitespace-nowrap shrink-0 transition-colors"
           >
-            <Share2 size={12} className="shrink-0" />
+            <Share2 size={14} className="shrink-0" />
             <span>Share</span>
           </button>
 
@@ -642,7 +698,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               onClick={onOpenAuthModal}
               className="flex items-center gap-1 text-xs font-medium bg-white text-[#217346] hover:bg-[#E6F2EB] px-2.5 py-1 rounded-[2px] transition-colors whitespace-nowrap shrink-0"
             >
-              <UserIcon size={12} className="shrink-0" />
+              <UserIcon size={13} className="shrink-0" />
               <span>Sign In / Join</span>
             </button>
           )}
@@ -650,9 +706,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={toggleRightPanel}
             title={isRightPanelOpen ? 'Collapse Task Pane' : 'Expand Task Pane'}
-            className="p-1 text-white/90 hover:text-white hover:bg-[#185C37] rounded-[2px] transition-colors shrink-0"
+            className="p-1.5 text-white/90 hover:text-white hover:bg-[#185C37] rounded-[2px] transition-colors shrink-0"
           >
-            {isRightPanelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+            {isRightPanelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
           </button>
         </div>
       </div>
@@ -698,7 +754,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* 3. EXCEL RIBBON COMMAND GROUPS PANEL */}
       {!isRibbonCollapsed && (
-        <div className="bg-white px-2 py-1.5 flex items-stretch gap-1 overflow-x-auto min-h-[68px]">
+        <div className="bg-white px-2 py-1.5 flex items-stretch gap-1 overflow-x-auto min-h-[76px]">
           {activeGroups.map((group, gIdx) => (
             <div
               key={group.name}
@@ -706,7 +762,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 gIdx < activeGroups.length - 1 ? 'border-r border-[#D4D4D4]' : ''
               }`}
             >
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   return (
@@ -716,23 +772,35 @@ export const TopBar: React.FC<TopBarProps> = ({
                       onClick={item.onClick}
                       disabled={item.disabled}
                       title={item.title || item.label}
-                      className={`group flex flex-col items-center justify-center px-2.5 py-1 min-w-[54px] rounded-[2px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                        item.accent
-                          ? 'bg-[#E6F2EB] hover:bg-[#cce5d6] active:bg-[#99cbad] text-[#217346] border border-[#217346]/30'
+                      className={`group flex flex-col items-center justify-center px-3 py-1.5 min-w-[62px] rounded-[2px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        item.primarySolid
+                          ? 'bg-[#217346] hover:bg-[#185C37] active:bg-[#124629] text-white border border-[#185C37] shadow-sm'
+                          : item.accent
+                          ? 'bg-[#E6F2EB] hover:bg-[#cce5d6] active:bg-[#99cbad] text-[#217346] border border-[#217346]/40'
                           : 'bg-transparent hover:bg-[#E6E6E6] active:bg-[#D2D2D2] text-[#212121] border border-transparent'
                       }`}
                     >
-                      <div className="w-6 h-6 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-7 flex items-center justify-center shrink-0">
                         <Icon
-                          size={18}
+                          size={item.primarySolid || item.accent ? 24 : 22}
                           className={
-                            item.accent
+                            item.primarySolid
+                              ? 'text-white'
+                              : item.accent
                               ? 'text-[#217346]'
                               : 'text-[#217346] group-hover:text-[#185C37]'
                           }
                         />
                       </div>
-                      <span className="text-[12px] leading-tight font-normal text-[#212121] whitespace-nowrap mt-0.5">
+                      <span
+                        className={`text-[12px] leading-tight whitespace-nowrap mt-0.5 ${
+                          item.primarySolid
+                            ? 'font-bold text-white'
+                            : item.accent
+                            ? 'font-semibold text-[#217346]'
+                            : 'font-normal text-[#212121]'
+                        }`}
+                      >
                         {item.label}
                       </span>
                     </button>

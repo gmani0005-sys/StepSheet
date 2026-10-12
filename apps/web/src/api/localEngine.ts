@@ -1740,20 +1740,27 @@ export const localEngine = {
 
   async exportCode(datasetId: string, steps: any[]): Promise<any> {
     const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: 10 });
+    const stepSummaries = preview.steps || [];
     return {
       sql: preview.compiled_sql,
       polars: [
         'import polars as pl',
         'df = pl.read_csv("dataset.csv")',
-        ...(preview.steps || []).map((s: any) => s.generated_code?.polars || '# step'),
+        ...stepSummaries.map((s: any) => s.generated_code?.polars || '# step'),
       ].join('\n'),
       power_query_m: [
         'let',
         '  Source = Csv.Document(File.Contents("dataset.csv")),',
-        ...(preview.steps || []).map((s: any, i: number) => `  Step${i + 1} = ${s.generated_code?.power_query_m || 'Source'}`),
+        ...stepSummaries.map((s: any, i: number) => `  Step${i + 1} = ${s.generated_code?.power_query_m || 'Source'}`),
         'in',
-        `  Step${(preview.steps || []).length || 1}`,
+        `  Step${stepSummaries.length || 1}`,
       ].join('\n'),
+      excel_formulas: stepSummaries
+        .filter((s: any) => s.generated_code?.excel_formula)
+        .map((s: any) => ({
+          step: s.label || s.step_id || 'Step',
+          formula: s.generated_code.excel_formula,
+        })),
     };
   },
 
@@ -1764,9 +1771,11 @@ export const localEngine = {
     return {
       status: 'completed',
       dataset_id: datasetId,
-      input_rows: preview.total_rows,
-      output_rows: preview.filtered_rows,
-      output_columns: preview.columns.length,
+      total_rows: preview.filtered_rows ?? preview.total_rows ?? 0,
+      column_count: Array.isArray(preview.columns) ? preview.columns.length : 0,
+      input_rows: preview.total_rows ?? 0,
+      output_rows: preview.filtered_rows ?? 0,
+      output_columns: Array.isArray(preview.columns) ? preview.columns.length : 0,
       steps_executed: (steps || []).filter((s) => s.enabled !== false).length,
       execution_time_ms: elapsed,
       compiled_sql: preview.compiled_sql,

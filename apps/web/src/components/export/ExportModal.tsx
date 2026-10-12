@@ -431,7 +431,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   {codeLang === 'excel' && (
                     <div className="space-y-2">
                       <span className="text-slate-400 block font-sans text-xs mb-2">Live row formulas mapped from transformation steps:</span>
-                      {codeBundle.excel_formulas.length === 0 ? (
+                      {!Array.isArray(codeBundle.excel_formulas) || codeBundle.excel_formulas.length === 0 ? (
                         <p className="text-slate-500 italic">No formula-generating steps currently in pipeline.</p>
                       ) : (
                         codeBundle.excel_formulas.map((item: any, idx: number) => (
@@ -473,19 +473,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <div className="mt-4 p-4 bg-slate-900 border border-slate-800 rounded-xl text-left space-y-2 text-xs">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="text-slate-400 font-medium">Status:</span>
-                    <span className="text-emerald-400 font-bold uppercase">{runFullResult.status}</span>
+                    <span className="text-emerald-400 font-bold uppercase">{runFullResult.status || 'completed'}</span>
                   </div>
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="text-slate-400 font-medium">Total Rows Processed:</span>
-                    <span className="text-slate-100 font-mono font-bold">{runFullResult.total_rows.toLocaleString()}</span>
+                    <span className="text-slate-100 font-mono font-bold">
+                      {(runFullResult.total_rows ?? runFullResult.output_rows ?? 0).toLocaleString()}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="text-slate-400 font-medium">Total Columns:</span>
-                    <span className="text-slate-100 font-mono">{runFullResult.column_count}</span>
+                    <span className="text-slate-100 font-mono">
+                      {runFullResult.column_count ?? runFullResult.output_columns ?? 0}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 font-medium">Execution Duration:</span>
-                    <span className="text-emerald-400 font-mono font-bold">{runFullResult.execution_time_ms} ms</span>
+                    <span className="text-emerald-400 font-mono font-bold">{runFullResult.execution_time_ms ?? 1} ms</span>
                   </div>
                 </div>
               )}

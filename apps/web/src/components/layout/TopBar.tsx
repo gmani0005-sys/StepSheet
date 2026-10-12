@@ -210,10 +210,17 @@ export const TopBar: React.FC<TopBarProps> = ({
         items: [
           {
             id: 'home-xlookup',
-            label: 'Lookup & Connect',
+            label: 'XLOOKUP',
             icon: GitMerge,
             onClick: () => triggerStep('xlookup'),
-            title: 'XLOOKUP / VLOOKUP across sheets',
+            title: 'XLOOKUP Wizard: Modern flexible lookup across sheets in any column direction',
+          },
+          {
+            id: 'home-vlookup',
+            label: 'VLOOKUP',
+            icon: TableProperties,
+            onClick: () => triggerStep('vlookup'),
+            title: 'VLOOKUP Wizard: Classic vertical lookup by column index number (col_index_num)',
           },
           {
             id: 'home-calc',
@@ -264,10 +271,19 @@ export const TopBar: React.FC<TopBarProps> = ({
         items: [
           {
             id: 'f-xlookup',
-            label: 'Lookup & Connect',
+            label: 'XLOOKUP',
             icon: GitMerge,
             onClick: () => triggerStep('xlookup'),
-            title: 'XLOOKUP / VLOOKUP from another sheet',
+            title: 'XLOOKUP Wizard: Modern flexible lookup in any direction with multi-column return',
+            accent: true,
+          },
+          {
+            id: 'f-vlookup',
+            label: 'VLOOKUP',
+            icon: TableProperties,
+            onClick: () => triggerStep('vlookup'),
+            title: 'VLOOKUP Wizard: Vertical table lookup by column index number (col_index_num)',
+            accent: true,
           },
           {
             id: 'f-join',
@@ -434,9 +450,15 @@ export const TopBar: React.FC<TopBarProps> = ({
           },
           {
             id: 'j-xlookup',
-            label: 'Lookup & Connect',
+            label: 'XLOOKUP',
             icon: Layers,
             onClick: () => triggerStep('xlookup'),
+          },
+          {
+            id: 'j-vlookup',
+            label: 'VLOOKUP',
+            icon: TableProperties,
+            onClick: () => triggerStep('vlookup'),
           },
           {
             id: 'j-append',

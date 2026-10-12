@@ -72,7 +72,16 @@ export const RightPanel: React.FC = () => {
       category: 'Lookup & Join',
       icon: GitBranch,
       items: [
-        { id: 'xlookup', name: 'XLOOKUP / VLOOKUP', desc: 'Bring columns from another table with exact match' },
+        {
+          id: 'xlookup',
+          name: 'XLOOKUP Wizard',
+          desc: 'Modern flexible lookup in any column direction with multi-column return & search modes',
+        },
+        {
+          id: 'vlookup',
+          name: 'VLOOKUP Wizard',
+          desc: 'Classic vertical lookup by column index number (col_index_num) & exact/approximate match',
+        },
         { id: 'join', name: 'Join Builder', desc: 'Combine datasets with Venn diagrams and health check' },
         { id: 'append', name: 'Append (Union)', desc: 'Stack tables with column name alignment' },
       ],

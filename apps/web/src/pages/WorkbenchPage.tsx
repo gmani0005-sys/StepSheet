@@ -9,6 +9,7 @@ import { StepBuilderModal } from '../components/steps/StepBuilderModal';
 import { EditStepModal } from '../components/steps/EditStepModal';
 import { JoinBuilderModal } from '../components/joins/JoinBuilderModal';
 import { XLookupModal } from '../components/joins/XLookupModal';
+import { VLookupModal } from '../components/joins/VLookupModal';
 import { AppendModal } from '../components/joins/AppendModal';
 import { RelationshipsModal } from '../components/joins/RelationshipsModal';
 import { ConditionalModal } from '../components/transforms/ConditionalModal';
@@ -115,6 +116,10 @@ export const WorkbenchPage: React.FC = () => {
       />
       <XLookupModal
         isOpen={isStepWizardOpen && activeWizardStepType === 'xlookup'}
+        onClose={closeStepWizard}
+      />
+      <VLookupModal
+        isOpen={isStepWizardOpen && activeWizardStepType === 'vlookup'}
         onClose={closeStepWizard}
       />
       <AppendModal

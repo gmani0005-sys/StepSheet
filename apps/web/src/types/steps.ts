@@ -8,6 +8,7 @@ export type StepType =
   | 'replace_values'
   | 'split_column'
   | 'xlookup'
+  | 'vlookup'
   | 'append'
   | 'join'
   | 'conditional'

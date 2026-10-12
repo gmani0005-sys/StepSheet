@@ -4,6 +4,8 @@ import React from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { AppendModal } from '../components/joins/AppendModal';
 import { JoinBuilderModal } from '../components/joins/JoinBuilderModal';
+import { XLookupModal } from '../components/joins/XLookupModal';
+import { VLookupModal } from '../components/joins/VLookupModal';
 import { RelationshipsModal } from '../components/joins/RelationshipsModal';
 import { ConditionalModal } from '../components/transforms/ConditionalModal';
 import { GroupByModal } from '../components/transforms/GroupByModal';
@@ -598,8 +600,40 @@ describe('StepSheet Workbench', () => {
     expect(exportedCode.excel_formulas.length).toBeGreaterThan(0);
     expect(typeof exportedCode.excel_formulas[0].step).toBe('string');
     expect(typeof exportedCode.excel_formulas[0].formula).toBe('string');
+
+    // 6. VLOOKUP Step Execution & Separate Wizards
+    const vlookupPreview = await localEngine.previewPipeline(ordersId, [
+      {
+        id: 'w-vlookup',
+        type: 'vlookup',
+        label: 'VLOOKUP Col #5 (account_tier)',
+        enabled: true,
+        params: {
+          lookup_dataset_id: custId,
+          left_key_col: 'customer_id',
+          right_key_col: 'customer_id',
+          col_index_num: 5,
+          return_column: 'account_tier',
+          output_column: 'vlookup_tier',
+          range_lookup: false,
+          if_not_found: 'Not found',
+        },
+      },
+    ]);
+    expect(vlookupPreview.rows.length).toBeGreaterThan(0);
+    expect(vlookupPreview.rows[0].vlookup_tier).toBeDefined();
+    expect(vlookupPreview.steps[0].generated_code.excel_formula).toContain('VLOOKUP');
+
+    render(<XLookupModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText('XLOOKUP Wizard')).toBeDefined();
+    expect(screen.getByText('Apply XLOOKUP Step')).toBeDefined();
+
+    render(<VLookupModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText('VLOOKUP Wizard')).toBeDefined();
+    expect(screen.getByText('Apply VLOOKUP Step')).toBeDefined();
   });
 });
+
 
 
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Search, Check, Layers, Code2 } from 'lucide-react';
+import { X, Search } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 
 interface XLookupModalProps {
@@ -15,14 +15,19 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
   const [rightKey, setRightKey] = useState('');
   const [selectedReturnCols, setSelectedReturnCols] = useState<string[]>([]);
   const [ifNotFound, setIfNotFound] = useState('Not found');
+  const [matchMode, setMatchMode] = useState<number>(0); // 0 = exact, -1 = exact or next smaller, 1 = exact or next larger, 2 = wildcard
+  const [searchMode, setSearchMode] = useState<number>(1); // 1 = first-to-last, -1 = last-to-first
 
   const otherDatasets = datasets.filter((d) => d.id !== selectedDataset?.id);
-  const lookupDataset = datasets.find((d) => d.id === lookupDatasetId) || otherDatasets[0];
+  const lookupDataset =
+    datasets.find((d) => d.id === lookupDatasetId) || otherDatasets[0] || selectedDataset;
   const lookupColumns = lookupDataset?.schema_metadata || [];
 
   useEffect(() => {
     if (isOpen && otherDatasets.length > 0) {
       setLookupDatasetId(otherDatasets[0].id);
+    } else if (isOpen && selectedDataset) {
+      setLookupDatasetId(selectedDataset.id);
     }
   }, [isOpen, datasets]);
 
@@ -31,7 +36,6 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
       setLeftKey(leftColumns[0].name);
     }
     if (lookupColumns.length > 0) {
-      // Find matching key or pick first
       const match = lookupColumns.find((c) => c.name.toLowerCase() === leftKey.toLowerCase());
       setRightKey(match ? match.name : lookupColumns[0].name);
       setSelectedReturnCols([lookupColumns[lookupColumns.length - 1].name]);
@@ -55,6 +59,8 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
         right_key_col: rightKey,
         return_columns: selectedReturnCols,
         if_not_found: ifNotFound,
+        match_mode: matchMode,
+        search_mode: searchMode,
       },
     });
     onClose();
@@ -70,7 +76,7 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-lg shadow-2xl p-6 relative">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-lg shadow-2xl p-6 relative max-h-[92vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute right-4 top-4 text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-800 transition-colors"
@@ -83,9 +89,9 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
             <Search size={20} />
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-100">XLOOKUP / VLOOKUP Wizard</h3>
+            <h3 className="text-base font-bold text-slate-100">XLOOKUP Wizard</h3>
             <p className="text-xs text-slate-400">
-              Bring values from a reference table using key matching without formulas
+              Flexible modern lookup in any column direction with multi-column return &amp; search modes
             </p>
           </div>
         </div>
@@ -101,7 +107,7 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
               onChange={(e) => setLookupDatasetId(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
             >
-              {otherDatasets.map((d) => (
+              {(otherDatasets.length > 0 ? otherDatasets : datasets).map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name} ({d.row_count} rows)
                 </option>
@@ -112,7 +118,9 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
           {/* Key matching */}
           <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800">
             <div>
-              <span className="text-[10px] text-slate-500 block mb-1">{selectedDataset.name} Key</span>
+              <span className="text-[10px] text-slate-500 block mb-1">
+                Lookup Value ({selectedDataset.name})
+              </span>
               <select
                 value={leftKey}
                 onChange={(e) => setLeftKey(e.target.value)}
@@ -126,7 +134,9 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
               </select>
             </div>
             <div>
-              <span className="text-[10px] text-slate-500 block mb-1">{lookupDataset?.name} Key</span>
+              <span className="text-[10px] text-slate-500 block mb-1">
+                Lookup Array ({lookupDataset?.name})
+              </span>
               <select
                 value={rightKey}
                 onChange={(e) => setRightKey(e.target.value)}
@@ -144,7 +154,7 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
           {/* Return Columns */}
           <div>
             <label className="text-[11px] font-medium text-slate-300 block mb-1">
-              Return Columns to Bring Back
+              Return Array (Columns to Bring Back)
             </label>
             <div className="max-h-28 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
               {lookupColumns.map((c) => (
@@ -164,10 +174,42 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
             </div>
           </div>
 
+          {/* Match Mode & Search Mode */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Match Mode (<code className="font-mono">[match_mode]</code>)
+              </label>
+              <select
+                value={matchMode}
+                onChange={(e) => setMatchMode(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+              >
+                <option value={0}>0 — Exact match</option>
+                <option value={-1}>-1 — Exact or next smaller</option>
+                <option value={1}>1 — Exact or next larger</option>
+                <option value={2}>2 — Wildcard match (*, ?)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Search Mode (<code className="font-mono">[search_mode]</code>)
+              </label>
+              <select
+                value={searchMode}
+                onChange={(e) => setSearchMode(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+              >
+                <option value={1}>1 — First-to-Last (Top down)</option>
+                <option value={-1}>-1 — Last-to-First (Bottom up)</option>
+              </select>
+            </div>
+          </div>
+
           {/* Fallback */}
           <div>
             <label className="text-[11px] font-medium text-slate-300 block mb-1">
-              If Not Found Value
+              If Not Found Value (<code className="font-mono">[if_not_found]</code>)
             </label>
             <input
               type="text"
@@ -179,8 +221,9 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
           </div>
 
           {/* Live Excel Formula Preview */}
-          <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 font-mono">
-            =XLOOKUP({leftKey}2, {lookupDataset?.name}!{rightKey}:{rightKey}, {lookupDataset?.name}!{selectedReturnCols[0] || 'Result'}, "{ifNotFound}", 0)
+          <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 font-mono break-all">
+            =XLOOKUP({leftKey}2, {lookupDataset?.name}!{rightKey}:{rightKey}, {lookupDataset?.name}!
+            {selectedReturnCols[0] || 'Result'}, &quot;{ifNotFound}&quot;, {matchMode}, {searchMode})
           </div>
 
           {/* Actions */}
@@ -205,3 +248,4 @@ export const XLookupModal: React.FC<XLookupModalProps> = ({ isOpen, onClose }) =
     </div>
   );
 };
+

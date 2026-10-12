@@ -545,16 +545,40 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
       };
     }
     case 'xlookup': {
-      const lk = p.left_key_col || p.left_key || p.lookup_key || 'customer_id';
-      const rk = p.right_key_col || p.right_key || p.match_key || lk;
+      const lk = p.left_key_col || p.lookup_column || p.left_key || p.lookup_key || 'customer_id';
+      const rk = p.right_key_col || p.right_Lookup_column || p.right_key || p.match_key || lk;
       const retCols = Array.isArray(p.return_columns)
         ? p.return_columns.join(', ')
         : p.return_column || 'value';
+      const mm = p.match_mode !== undefined ? p.match_mode : 0;
+      const sm = p.search_mode !== undefined ? p.search_mode : 1;
       return {
         sql: `SELECT l.*, r."${retCols}" FROM prev_step l LEFT JOIN lookup_table r ON l."${lk}" = r."${rk}"`,
         polars: `df = df.join(lookup_df.select(["${rk}", "${retCols}"]), left_on="${lk}", right_on="${rk}", how="left")`,
         power_query_m: `Table.NestedJoin(PrevStep, {"${lk}"}, LookupTable, {"${rk}"}, "Lookup", JoinKind.LeftOuter)`,
-        excel_formula: `=XLOOKUP([@[${lk}]], LookupTable[${rk}], LookupTable[${retCols}], "${p.if_not_found ?? 'Not found'}")`,
+        excel_formula: `=XLOOKUP([@[${lk}]], LookupTable[${rk}], LookupTable[${retCols}], "${p.if_not_found ?? 'Not found'}", ${mm}, ${sm})`,
+      };
+    }
+    case 'vlookup': {
+      const lk = p.left_key_col || p.lookup_column || p.left_key || p.lookup_key || 'customer_id';
+      const rk = p.right_key_col || p.right_key || lk;
+      const colIdx = Number(p.col_index_num ?? 2);
+      const retCol =
+        p.return_column ||
+        (Array.isArray(p.return_columns) ? p.return_columns[0] : undefined) ||
+        'value';
+      const outCol = p.output_column || retCol;
+      const rangeLookup = p.range_lookup ? 'TRUE' : 'FALSE';
+      const rawVlookup = `VLOOKUP([@[${lk}]], LookupTable, ${colIdx}, ${rangeLookup})`;
+      const excelFormula =
+        p.if_not_found !== undefined && String(p.if_not_found) !== ''
+          ? `=IFERROR(${rawVlookup}, "${p.if_not_found}")`
+          : `=${rawVlookup}`;
+      return {
+        sql: `SELECT l.*, r."${retCol}" AS "${outCol}" FROM prev_step l LEFT JOIN lookup_table r ON l."${lk}" = r."${rk}"`,
+        polars: `df = df.join(lookup_df.select(["${rk}", "${retCol}"]), left_on="${lk}", right_on="${rk}", how="left")`,
+        power_query_m: `Table.NestedJoin(PrevStep, {"${lk}"}, LookupTable, {"${rk}"}, "VLookup", JoinKind.LeftOuter)`,
+        excel_formula: excelFormula,
       };
     }
     case 'conditional': {
@@ -1235,31 +1259,81 @@ function executePipelineSteps(
         const rightId = p.lookup_dataset_id || p.right_dataset_id;
         const rightDs = allDatasets.find((d) => d.meta.id === rightId) || allDatasets[1] || allDatasets[0];
         if (rightDs) {
-          const leftKey = p.left_key_col || p.left_key || p.lookup_key || 'customer_id';
-          const rightKey = p.right_key_col || p.right_key || p.match_key || leftKey;
+          const leftKey = p.left_key_col || p.lookup_column || p.left_key || p.lookup_key || 'customer_id';
+          const rightKey =
+            p.right_key_col || p.right_Lookup_column || p.right_key || p.match_key || leftKey;
           const returnCols: string[] = Array.isArray(p.return_columns)
             ? p.return_columns
             : p.return_column
             ? [p.return_column]
             : [];
           const fallback = p.if_not_found !== undefined ? p.if_not_found : null;
+          const matchMode = Number(p.match_mode ?? 0); // 0 exact, -1 next smaller, 1 next larger, 2 wildcard
+          const searchMode = Number(p.search_mode ?? 1); // 1 first-to-last, -1 last-to-first
+
+          const orderedRightRows =
+            searchMode === -1 ? [...rightDs.rows].reverse() : rightDs.rows;
 
           const lookupMap = new Map<string, Record<string, any>>();
-          rightDs.rows.forEach((rr) => {
+          orderedRightRows.forEach((rr) => {
             const k = String(rr[rightKey] ?? '').trim();
             if (!lookupMap.has(k)) {
               lookupMap.set(k, rr);
             }
           });
 
+          const findXlookupMatch = (rawVal: any): Record<string, any> | undefined => {
+            const keyStr = String(rawVal ?? '').trim();
+            const exact = lookupMap.get(keyStr);
+            if (exact || matchMode === 0) return exact;
+
+            if (matchMode === 2) {
+              // Wildcard match (* and ?)
+              const pattern =
+                '^' +
+                keyStr
+                  .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                  .replace(/\*/g, '.*')
+                  .replace(/\?/g, '.') +
+                '$';
+              try {
+                const rx = new RegExp(pattern, 'i');
+                return orderedRightRows.find((rr) => rx.test(String(rr[rightKey] ?? '').trim()));
+              } catch {
+                return undefined;
+              }
+            }
+
+            // Approximate match (-1 = next smaller, 1 = next larger)
+            const numVal = Number(keyStr);
+            if (!Number.isNaN(numVal)) {
+              const candidates = orderedRightRows
+                .map((rr) => ({ row: rr, num: Number(rr[rightKey]) }))
+                .filter((c) => !Number.isNaN(c.num));
+              if (matchMode === -1) {
+                const smaller = candidates
+                  .filter((c) => c.num <= numVal)
+                  .sort((a, b) => b.num - a.num);
+                return smaller[0]?.row;
+              }
+              if (matchMode === 1) {
+                const larger = candidates
+                  .filter((c) => c.num >= numVal)
+                  .sort((a, b) => a.num - b.num);
+                return larger[0]?.row;
+              }
+            }
+            return undefined;
+          };
+
           rows = rows.map((lr) => {
-            const match = lookupMap.get(String(lr[leftKey] ?? '').trim());
+            const match = findXlookupMatch(lr[leftKey]);
             const merged = { ...lr };
             if (returnCols.length > 0) {
               returnCols.forEach((col) => {
                 const targetName =
-                  p.target_column && returnCols.length === 1
-                    ? p.target_column
+                  (p.output_column || p.target_column) && returnCols.length === 1
+                    ? p.output_column || p.target_column
                     : col in merged && col !== rightKey
                     ? `lookup_${col}`
                     : col;
@@ -1273,6 +1347,72 @@ function executePipelineSteps(
               });
             }
             return merged;
+          });
+        }
+        break;
+      }
+
+      case 'vlookup': {
+        const rightId = p.lookup_dataset_id || p.right_dataset_id;
+        const rightDs = allDatasets.find((d) => d.meta.id === rightId) || allDatasets[1] || allDatasets[0];
+        if (rightDs) {
+          const leftKey = p.left_key_col || p.lookup_column || p.left_key || p.lookup_key || 'customer_id';
+          const rightSchema = rightDs.meta.schema_metadata || [];
+          const rightKey =
+            p.right_key_col || p.right_key || rightSchema[0]?.name || leftKey;
+          const colIdx1 = Math.max(1, Number(p.col_index_num ?? 2));
+          const resolvedColFromIndex = rightSchema[colIdx1 - 1]?.name;
+          const retCol =
+            p.return_column ||
+            resolvedColFromIndex ||
+            (Array.isArray(p.return_columns) ? p.return_columns[0] : undefined) ||
+            rightSchema[Math.min(1, rightSchema.length - 1)]?.name ||
+            rightKey;
+          const outCol =
+            p.output_column ||
+            p.target_column ||
+            (retCol in (rows[0] || {}) && retCol !== rightKey ? `vlookup_${retCol}` : retCol);
+          const rangeLookup = Boolean(p.range_lookup); // false = Exact Match, true = Approximate Match
+          const fallback = p.if_not_found !== undefined ? p.if_not_found : null;
+
+          const exactMap = new Map<string, Record<string, any>>();
+          rightDs.rows.forEach((rr) => {
+            const k = String(rr[rightKey] ?? '').trim();
+            if (!exactMap.has(k)) {
+              exactMap.set(k, rr);
+            }
+          });
+
+          const findVlookupMatch = (rawVal: any): Record<string, any> | undefined => {
+            const keyStr = String(rawVal ?? '').trim();
+            const exact = exactMap.get(keyStr);
+            if (exact || !rangeLookup) return exact;
+
+            // Approximate match (TRUE): largest key <= lookup_value
+            const numVal = Number(keyStr);
+            if (!Number.isNaN(numVal)) {
+              const smaller = rightDs.rows
+                .map((rr) => ({ row: rr, num: Number(rr[rightKey]) }))
+                .filter((c) => !Number.isNaN(c.num) && c.num <= numVal)
+                .sort((a, b) => b.num - a.num);
+              if (smaller.length > 0) return smaller[0].row;
+            }
+            const strSmaller = rightDs.rows
+              .filter((rr) => String(rr[rightKey] ?? '').trim().localeCompare(keyStr) <= 0)
+              .sort((a, b) =>
+                String(b[rightKey] ?? '')
+                  .trim()
+                  .localeCompare(String(a[rightKey] ?? '').trim())
+              );
+            return strSmaller[0];
+          };
+
+          rows = rows.map((lr) => {
+            const match = findVlookupMatch(lr[leftKey]);
+            return {
+              ...lr,
+              [outCol]: match ? (match[retCol] ?? fallback) : fallback,
+            };
           });
         }
         break;

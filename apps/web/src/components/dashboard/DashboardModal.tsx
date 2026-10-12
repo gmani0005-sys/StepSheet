@@ -81,6 +81,19 @@ export interface DashboardKpiConfig {
   accentColor: string;
 }
 
+export type LegendPositionType =
+  | 'top_left'
+  | 'top'
+  | 'top_right'
+  | 'left'
+  | 'left_center'
+  | 'right'
+  | 'right_center'
+  | 'bottom_left'
+  | 'bottom'
+  | 'bottom_right'
+  | 'hide';
+
 export interface DashboardVisualConfig {
   id: string;
   title: string;
@@ -97,7 +110,7 @@ export interface DashboardVisualConfig {
   showDataLabels: boolean;
   span: 1 | 2;
   paletteId?: PaletteId;
-  legendPosition?: 'top' | 'bottom' | 'hide';
+  legendPosition?: LegendPositionType;
   customColors?: Record<string, string>;
   customLegendLabels?: Record<string, string>;
   conditionalFormatting?: ConditionalFormattingConfig;
@@ -882,10 +895,170 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     return getDistinctValuesForColumn(targetCol).slice(0, activeVisual.topN || 10);
   })();
 
+  // Universal wrapper to position the legend inside any chart visual
+  const wrapWithLegend = (
+    vis: DashboardVisualConfig,
+    chartNode: React.ReactNode,
+    legendEntries: {
+      key: string;
+      label: string;
+      color: string;
+      filterCol: string;
+      valueText?: string;
+      shareText?: string;
+    }[]
+  ) => {
+    const pos: LegendPositionType = vis.legendPosition || 'top_left';
+    if (pos === 'hide' || legendEntries.length === 0) {
+      return (
+        <div data-testid={`visual-layout-${vis.id}`} data-legend-pos="hide">
+          {chartNode}
+        </div>
+      );
+    }
+
+    const isVerticalSide =
+      pos === 'left' || pos === 'left_center' || pos === 'right' || pos === 'right_center';
+
+    const horizontalJustify =
+      pos === 'top_left' || pos === 'bottom_left'
+        ? 'justify-start text-left'
+        : pos === 'top_right' || pos === 'bottom_right'
+        ? 'justify-end text-right'
+        : 'justify-center text-center';
+
+    const legendBlock = isVerticalSide ? (
+      <div
+        data-testid={`visual-legend-${vis.id}`}
+        data-legend-position={pos}
+        className="w-40 sm:w-44 shrink-0 space-y-1 max-h-52 overflow-y-auto px-2 py-1.5 bg-[#FAFAFA] border border-[#EAEAEA] rounded-lg"
+      >
+        {legendEntries.map((entry) => {
+          const isSelected =
+            Boolean(entry.filterCol) &&
+            crossFilter?.column === entry.filterCol &&
+            crossFilter?.value === entry.key;
+          return (
+            <button
+              key={entry.key}
+              type="button"
+              onClick={() => entry.filterCol && toggleCrossFilter(entry.filterCol, entry.key)}
+              className={`w-full flex items-center justify-between gap-1.5 text-[11px] px-1.5 py-1 rounded transition-colors ${
+                isSelected
+                  ? 'bg-[#E6F2EB] text-[#185C37] font-bold'
+                  : 'text-[#212121] hover:bg-[#EFEFEF]'
+              }`}
+              title={`${entry.label}${entry.valueText ? `: ${entry.valueText}` : ''}`}
+            >
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ backgroundColor: entry.color }}
+                />
+                <span className="truncate font-medium">{entry.label}</span>
+              </span>
+              {entry.valueText && (
+                <span className="font-mono text-[10px] text-[#605E5C] shrink-0">
+                  {entry.valueText}
+                  {entry.shareText ? ` (${entry.shareText})` : ''}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    ) : (
+      <div
+        data-testid={`visual-legend-${vis.id}`}
+        data-legend-position={pos}
+        className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-2.5 py-1.5 bg-[#FAFAFA] border border-[#EAEAEA] rounded-lg ${horizontalJustify}`}
+      >
+        {legendEntries.map((entry) => {
+          const isSelected =
+            Boolean(entry.filterCol) &&
+            crossFilter?.column === entry.filterCol &&
+            crossFilter?.value === entry.key;
+          return (
+            <button
+              key={entry.key}
+              type="button"
+              onClick={() => entry.filterCol && toggleCrossFilter(entry.filterCol, entry.key)}
+              className={`inline-flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors ${
+                isSelected
+                  ? 'bg-[#E6F2EB] text-[#185C37] font-bold'
+                  : 'text-[#212121] hover:text-[#217346] hover:bg-[#EFEFEF]'
+              }`}
+              title={`${entry.label}${entry.valueText ? `: ${entry.valueText}` : ''}`}
+            >
+              <span
+                className="w-2.5 h-2.5 rounded-sm shrink-0"
+                style={{ backgroundColor: entry.color }}
+              />
+              <span className="truncate max-w-[120px] font-medium">{entry.label}</span>
+              {entry.shareText && (
+                <span className="font-mono text-[10px] text-[#605E5C]">({entry.shareText})</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+
+    if (pos === 'top_left' || pos === 'top' || pos === 'top_right') {
+      return (
+        <div
+          data-testid={`visual-layout-${vis.id}`}
+          data-legend-pos={pos}
+          className="flex flex-col gap-2.5"
+        >
+          {legendBlock}
+          <div className="flex-1 min-w-0">{chartNode}</div>
+        </div>
+      );
+    }
+
+    if (pos === 'bottom_left' || pos === 'bottom' || pos === 'bottom_right') {
+      return (
+        <div
+          data-testid={`visual-layout-${vis.id}`}
+          data-legend-pos={pos}
+          className="flex flex-col gap-2.5"
+        >
+          <div className="flex-1 min-w-0">{chartNode}</div>
+          {legendBlock}
+        </div>
+      );
+    }
+
+    if (pos === 'left' || pos === 'left_center') {
+      return (
+        <div
+          data-testid={`visual-layout-${vis.id}`}
+          data-legend-pos={pos}
+          className={`flex flex-row gap-3 ${pos === 'left_center' ? 'items-center' : 'items-start'}`}
+        >
+          {legendBlock}
+          <div className="flex-1 min-w-0">{chartNode}</div>
+        </div>
+      );
+    }
+
+    // right or right_center
+    return (
+      <div
+        data-testid={`visual-layout-${vis.id}`}
+        data-legend-pos={pos}
+        className={`flex flex-row gap-3 ${pos === 'right_center' ? 'items-center' : 'items-start'}`}
+      >
+        <div className="flex-1 min-w-0">{chartNode}</div>
+        {legendBlock}
+      </div>
+    );
+  };
+
   // Render an individual Visual Card
   const renderVisualContent = (vis: DashboardVisualConfig) => {
     const visPalette = getVisualPalette(vis);
-    const legendPos = vis.legendPosition || 'top';
 
     // 1. HISTOGRAM VISUAL
     if (vis.type === 'histogram') {
@@ -925,7 +1098,19 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       const minCount = Math.min(...buckets.map((b) => b.count));
       const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
 
-      return (
+      const histLegendEntries = buckets.map((b, i) => {
+        const cfStyle = getConditionalFormatStyle(vis, b.count, minCount, maxCount);
+        const barColor = cfStyle.text || visPalette[i % visPalette.length];
+        return {
+          key: b.label,
+          label: b.label,
+          color: barColor,
+          filterCol: '',
+          valueText: String(b.count),
+        };
+      });
+
+      const histChart = (
         <div className="space-y-2 pt-1">
           <div className="flex items-center justify-between text-[11px] text-[#605E5C] px-1">
             <span>
@@ -941,7 +1126,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             {buckets.map((b, i) => {
               const heightPct = Math.max(4, Math.round((b.count / maxCount) * 100));
               const cfStyle = getConditionalFormatStyle(vis, b.count, minCount, maxCount);
-              const barColor = cfStyle.text || visPalette[0];
+              const barColor = cfStyle.text || visPalette[i % visPalette.length];
               return (
                 <div
                   key={i}
@@ -977,6 +1162,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           </div>
         </div>
       );
+
+      return wrapWithLegend(vis, histChart, histLegendEntries);
     }
 
     // Group rows by categoryCol for standard, table, matrix & multi-series visuals
@@ -1012,6 +1199,21 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         </div>
       );
     }
+
+    // Standard category legend entries for single-series charts (bar, column, donut, pie, line_area, treemap)
+    const categoryLegendEntries = items.map((item, idx) => {
+      const cfStyle = getConditionalFormatStyle(vis, item.value, minVal, maxVal);
+      const itemColor = cfStyle.text || getItemColor(vis, item.category, idx);
+      const share = ((Math.max(0, item.value) / totalVal) * 100).toFixed(1) + '%';
+      return {
+        key: item.category,
+        label: getItemLegendLabel(vis, item.category),
+        color: itemColor,
+        filterCol: vis.categoryCol,
+        valueText: formatNum(item.value),
+        shareText: share,
+      };
+    });
 
     // 2. TABLE VISUAL (WITH TOTALS & CONDITIONAL FORMATTING)
     if (vis.type === 'table') {
@@ -1295,160 +1497,141 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         ...matrix.map((m) => m.rowSum)
       );
 
-      const legendBar = legendPos !== 'hide' && (
-        <div className="flex flex-wrap items-center gap-3 px-1">
-          {seriesKeys.map((sk, idx) => (
-            <button
-              key={sk}
-              type="button"
-              onClick={() => toggleCrossFilter(seriesCol, sk)}
-              className="flex items-center gap-1.5 text-[11px] text-[#212121] hover:text-[#217346]"
-            >
-              <span
-                className="w-2.5 h-2.5 rounded-sm shrink-0"
-                style={{ backgroundColor: getItemColor(vis, sk, idx) }}
-              />
-              <span className="truncate max-w-[110px] font-medium">
-                {getItemLegendLabel(vis, sk)}
-              </span>
-            </button>
-          ))}
-        </div>
-      );
+      const seriesLegendEntries = seriesKeys.map((sk, idx) => ({
+        key: sk,
+        label: getItemLegendLabel(vis, sk),
+        color: getItemColor(vis, sk, idx),
+        filterCol: seriesCol,
+      }));
 
-      return (
-        <div className="space-y-3">
-          {legendPos === 'top' && legendBar}
-
-          {vis.type === 'clustered_bar' ? (
-            <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-              {matrix.map((row) => (
-                <div key={row.category} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <button
-                      type="button"
-                      onClick={() => toggleCrossFilter(vis.categoryCol, row.category)}
-                      className="font-semibold text-[#212121] hover:text-[#217346] truncate max-w-[180px]"
-                    >
-                      {getItemLegendLabel(vis, row.category)}
-                    </button>
-                    <span className="text-[10px] font-mono text-[#605E5C]">
-                      Total: {formatNum(row.rowSum)}
-                    </span>
-                  </div>
-                  <div className="space-y-1 pl-2 border-l border-[#D4D4D4]">
-                    {seriesKeys.map((sk, sIdx) => {
-                      const val = row.seriesVals[sk] || 0;
-                      const pct = Math.max(2, Math.round((val / maxSeriesVal) * 100));
-                      return (
-                        <div key={sk} className="flex items-center gap-2">
-                          <span className="w-16 text-[10px] text-[#605E5C] truncate">
-                            {getItemLegendLabel(vis, sk)}
-                          </span>
-                          <div className="flex-1 h-3.5 bg-[#EFEFEF] rounded-sm overflow-hidden">
-                            <div
-                              style={{
-                                width: `${pct}%`,
-                                backgroundColor: getItemColor(vis, sk, sIdx),
-                              }}
-                              className="h-full rounded-sm transition-all"
-                            />
-                          </div>
-                          {vis.showDataLabels && (
-                            <span className="w-14 text-right text-[10px] font-mono font-semibold text-[#212121]">
-                              {formatNum(val)}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div>
-              <div className="h-48 flex items-end gap-3 pt-4 pb-2 px-2 border-b border-[#D4D4D4]">
-                {matrix.map((row) => (
-                  <div
-                    key={row.category}
+      const chartContent =
+        vis.type === 'clustered_bar' ? (
+          <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+            {matrix.map((row) => (
+              <div key={row.category} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <button
+                    type="button"
                     onClick={() => toggleCrossFilter(vis.categoryCol, row.category)}
-                    className="flex-1 h-full flex flex-col justify-end items-center cursor-pointer group"
+                    className="font-semibold text-[#212121] hover:text-[#217346] truncate max-w-[180px]"
                   >
-                    {vis.type === 'stacked_column' ? (
-                      <div className="w-full max-w-[44px] h-full flex flex-col justify-end">
+                    {getItemLegendLabel(vis, row.category)}
+                  </button>
+                  <span className="text-[10px] font-mono text-[#605E5C]">
+                    Total: {formatNum(row.rowSum)}
+                  </span>
+                </div>
+                <div className="space-y-1 pl-2 border-l border-[#D4D4D4]">
+                  {seriesKeys.map((sk, sIdx) => {
+                    const val = row.seriesVals[sk] || 0;
+                    const pct = Math.max(2, Math.round((val / maxSeriesVal) * 100));
+                    return (
+                      <div key={sk} className="flex items-center gap-2">
+                        <span className="w-16 text-[10px] text-[#605E5C] truncate">
+                          {getItemLegendLabel(vis, sk)}
+                        </span>
+                        <div className="flex-1 h-3.5 bg-[#EFEFEF] rounded-sm overflow-hidden">
+                          <div
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: getItemColor(vis, sk, sIdx),
+                            }}
+                            className="h-full rounded-sm transition-all"
+                          />
+                        </div>
                         {vis.showDataLabels && (
-                          <span className="text-[10px] font-mono font-semibold text-[#212121] text-center mb-1">
-                            {formatNum(row.rowSum)}
+                          <span className="w-14 text-right text-[10px] font-mono font-semibold text-[#212121]">
+                            {formatNum(val)}
                           </span>
                         )}
-                        <div
-                          style={{
-                            height: `${Math.max(6, Math.round((row.rowSum / maxSeriesVal) * 100))}%`,
-                          }}
-                          className="w-full flex flex-col rounded-t overflow-hidden"
-                        >
-                          {seriesKeys.map((sk, sIdx) => {
-                            const val = row.seriesVals[sk] || 0;
-                            const share = row.rowSum > 0 ? (val / row.rowSum) * 100 : 0;
-                            if (share <= 0) return null;
-                            return (
-                              <div
-                                key={sk}
-                                style={{
-                                  height: `${share}%`,
-                                  backgroundColor: getItemColor(vis, sk, sIdx),
-                                }}
-                                title={`${row.category} • ${getItemLegendLabel(vis, sk)}: ${formatNum(val)}`}
-                              />
-                            );
-                          })}
-                        </div>
                       </div>
-                    ) : (
-                      <div className="w-full h-full flex items-end justify-center gap-1">
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>
+            <div className="h-48 flex items-end gap-3 pt-4 pb-2 px-2 border-b border-[#D4D4D4]">
+              {matrix.map((row) => (
+                <div
+                  key={row.category}
+                  onClick={() => toggleCrossFilter(vis.categoryCol, row.category)}
+                  className="flex-1 h-full flex flex-col justify-end items-center cursor-pointer group"
+                >
+                  {vis.type === 'stacked_column' ? (
+                    <div className="w-full max-w-[44px] h-full flex flex-col justify-end">
+                      {vis.showDataLabels && (
+                        <span className="text-[10px] font-mono font-semibold text-[#212121] text-center mb-1">
+                          {formatNum(row.rowSum)}
+                        </span>
+                      )}
+                      <div
+                        style={{
+                          height: `${Math.max(6, Math.round((row.rowSum / maxSeriesVal) * 100))}%`,
+                        }}
+                        className="w-full flex flex-col rounded-t overflow-hidden"
+                      >
                         {seriesKeys.map((sk, sIdx) => {
                           const val = row.seriesVals[sk] || 0;
-                          const hPct = Math.max(4, Math.round((val / maxSeriesVal) * 100));
+                          const share = row.rowSum > 0 ? (val / row.rowSum) * 100 : 0;
+                          if (share <= 0) return null;
                           return (
                             <div
                               key={sk}
                               style={{
-                                height: `${hPct}%`,
+                                height: `${share}%`,
                                 backgroundColor: getItemColor(vis, sk, sIdx),
                               }}
                               title={`${row.category} • ${getItemLegendLabel(vis, sk)}: ${formatNum(val)}`}
-                              className="flex-1 max-w-[16px] rounded-t transition-all opacity-90 group-hover:opacity-100"
                             />
                           );
                         })}
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="flex items-center gap-3 px-2 pt-1.5">
-                {matrix.map((row) => (
-                  <div
-                    key={row.category}
-                    className="flex-1 text-center text-[10px] font-medium text-[#212121] truncate"
-                    title={row.category}
-                  >
-                    {getItemLegendLabel(vis, row.category)}
-                  </div>
-                ))}
-              </div>
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex items-end justify-center gap-1">
+                      {seriesKeys.map((sk, sIdx) => {
+                        const val = row.seriesVals[sk] || 0;
+                        const hPct = Math.max(4, Math.round((val / maxSeriesVal) * 100));
+                        return (
+                          <div
+                            key={sk}
+                            style={{
+                              height: `${hPct}%`,
+                              backgroundColor: getItemColor(vis, sk, sIdx),
+                            }}
+                            title={`${row.category} • ${getItemLegendLabel(vis, sk)}: ${formatNum(val)}`}
+                            className="flex-1 max-w-[16px] rounded-t transition-all opacity-90 group-hover:opacity-100"
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
+            <div className="flex items-center gap-3 px-2 pt-1.5">
+              {matrix.map((row) => (
+                <div
+                  key={row.category}
+                  className="flex-1 text-center text-[10px] font-medium text-[#212121] truncate"
+                  title={row.category}
+                >
+                  {getItemLegendLabel(vis, row.category)}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
 
-          {legendPos === 'bottom' && legendBar}
-        </div>
-      );
+      return wrapWithLegend(vis, chartContent, seriesLegendEntries);
     }
 
     // 5. HORIZONTAL BAR CHART
     if (vis.type === 'bar') {
-      return (
+      const barChart = (
         <div className="space-y-2 max-h-60 overflow-y-auto pr-1 pt-1">
           {items.map((item, idx) => {
             const pct = Math.max(3, Math.round((Math.abs(item.value) / maxVal) * 100));
@@ -1492,11 +1675,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           })}
         </div>
       );
+      return wrapWithLegend(vis, barChart, categoryLegendEntries);
     }
 
     // 6. VERTICAL COLUMN CHART
     if (vis.type === 'column') {
-      return (
+      const colChart = (
         <div className="pt-2">
           <div className="h-48 flex items-end gap-2.5 pt-6 pb-2 px-2 border-b border-[#D4D4D4]">
             {items.map((item, idx) => {
@@ -1545,6 +1729,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           </div>
         </div>
       );
+      return wrapWithLegend(vis, colChart, categoryLegendEntries);
     }
 
     // 7. DONUT & PIE CHARTS (SVG)
@@ -1554,8 +1739,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       const circumference = 2 * Math.PI * radius;
       let cumulativeShare = 0;
 
-      return (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-2 px-2">
+      const donutSvg = (
+        <div className="flex items-center justify-center py-2 px-2">
           <div className="relative w-44 h-44 flex items-center justify-center shrink-0">
             <svg viewBox="0 0 160 160" className="w-44 h-44 -rotate-90">
               {items.map((item, idx) => {
@@ -1597,38 +1782,10 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               </div>
             )}
           </div>
-
-          {legendPos !== 'hide' && (
-            <div className="flex-1 w-full space-y-1.5 max-h-44 overflow-y-auto pr-1">
-              {items.map((item, idx) => {
-                const share = ((Math.max(0, item.value) / totalVal) * 100).toFixed(1);
-                return (
-                  <button
-                    key={item.category}
-                    type="button"
-                    onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
-                    className="w-full flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-[#F3F3F3]"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: getItemColor(vis, item.category, idx) }}
-                      />
-                      <span className="text-[#212121] font-medium truncate">
-                        {getItemLegendLabel(vis, item.category)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 font-mono text-[11px] shrink-0">
-                      <span className="text-[#212121] font-semibold">{formatNum(item.value)}</span>
-                      <span className="text-[#605E5C] w-12 text-right">({share}%)</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </div>
       );
+
+      return wrapWithLegend(vis, donutSvg, categoryLegendEntries);
     }
 
     // 8. LINE & AREA TREND CHART (SVG)
@@ -1656,7 +1813,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           : '';
       const primaryColor = getItemColor(vis, items[0]?.category || 'line', 0);
 
-      return (
+      const lineChart = (
         <div className="pt-1">
           <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-48 overflow-visible">
             <defs>
@@ -1712,10 +1869,11 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           </svg>
         </div>
       );
+      return wrapWithLegend(vis, lineChart, categoryLegendEntries);
     }
 
     // 9. TREEMAP HIERARCHY VISUAL
-    return (
+    const treemapChart = (
       <div className="flex flex-wrap gap-1.5 h-52 pt-1 content-start overflow-hidden">
         {items.map((item, idx) => {
           const share = Math.max(8, Math.round((Math.max(0, item.value) / totalVal) * 100));
@@ -1742,6 +1900,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         })}
       </div>
     );
+    return wrapWithLegend(vis, treemapChart, categoryLegendEntries);
   };
 
   return (
@@ -2547,18 +2706,67 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                         </label>
                         <select
                           aria-label="Legend Position"
-                          value={activeVisual.legendPosition || 'top'}
+                          value={activeVisual.legendPosition || 'top_left'}
                           onChange={(e) =>
                             updateActiveVisual({
-                              legendPosition: e.target.value as 'top' | 'bottom' | 'hide',
+                              legendPosition: e.target.value as LegendPositionType,
                             })
                           }
                           className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
                         >
-                          <option value="top">Top Legend</option>
-                          <option value="bottom">Bottom Legend</option>
+                          <option value="top_left">Top Left</option>
+                          <option value="top">Top Center</option>
+                          <option value="top_right">Top Right</option>
+                          <option value="left">Left</option>
+                          <option value="left_center">Left Center</option>
+                          <option value="right">Right</option>
+                          <option value="right_center">Right Center</option>
+                          <option value="bottom_left">Bottom Left</option>
+                          <option value="bottom">Bottom Center</option>
+                          <option value="bottom_right">Bottom Right</option>
                           <option value="hide">Hide Legend</option>
                         </select>
+                      </div>
+                    </div>
+
+                    {/* Quick Legend Position Selector Grid */}
+                    <div>
+                      <span className="text-[10px] font-semibold text-[#605E5C] uppercase tracking-wider block mb-1">
+                        Place Legend Inside Visual
+                      </span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {(
+                          [
+                            { id: 'top_left', label: 'Top Left' },
+                            { id: 'top', label: 'Top' },
+                            { id: 'top_right', label: 'Top Right' },
+                            { id: 'hide', label: 'Hide' },
+                            { id: 'left', label: 'Left' },
+                            { id: 'left_center', label: 'Left Center' },
+                            { id: 'right', label: 'Right' },
+                            { id: 'right_center', label: 'Right Center' },
+                            { id: 'bottom_left', label: 'Btm Left' },
+                            { id: 'bottom', label: 'Bottom' },
+                            { id: 'bottom_right', label: 'Btm Right' },
+                          ] as { id: LegendPositionType; label: string }[]
+                        ).map((posOpt) => {
+                          const currentPos = activeVisual.legendPosition || 'top_left';
+                          const isActive = currentPos === posOpt.id;
+                          return (
+                            <button
+                              key={posOpt.id}
+                              type="button"
+                              onClick={() => updateActiveVisual({ legendPosition: posOpt.id })}
+                              className={`px-1.5 py-1 rounded text-[10px] font-semibold border transition-all truncate ${
+                                isActive
+                                  ? 'bg-[#E6F2EB] border-[#217346] text-[#185C37]'
+                                  : 'bg-white border-[#D4D4D4] text-[#605E5C] hover:border-[#217346]/40 hover:text-[#212121]'
+                              }`}
+                            >
+                              {posOpt.label}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 

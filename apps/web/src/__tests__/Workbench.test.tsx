@@ -710,6 +710,21 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText(/Edit Visual Title/i)).toBeDefined();
     expect(screen.getByText(/3\. Edit Legend & Colors/i)).toBeDefined();
     expect(screen.getByText(/4\. Conditional Formatting/i)).toBeDefined();
+
+    // Verify Legend Position options (Left, Left Center, Right, Right Center, Top Left, Top Right) update the visual layout
+    expect(screen.getByText(/Place Legend Inside Visual/i)).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Left Center' }));
+    expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('left_center');
+    fireEvent.click(screen.getByRole('button', { name: 'Right Center' }));
+    expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('right_center');
+    fireEvent.click(screen.getByRole('button', { name: 'Top Right' }));
+    expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('top_right');
+    fireEvent.click(screen.getByRole('button', { name: 'Left' }));
+    expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('left');
+    fireEvent.click(screen.getByRole('button', { name: 'Right' }));
+    expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('right');
+    fireEvent.click(screen.getByRole('button', { name: 'Top Left' }));
+    expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('top_left');
   });
 });
 

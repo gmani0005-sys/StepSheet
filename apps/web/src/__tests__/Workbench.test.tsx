@@ -682,13 +682,19 @@ describe('StepSheet Workbench', () => {
     expect(pivotPreview.rows[pivotPreview.rows.length - 1].region).toBe('Grand Total');
     expect(pivotPreview.steps[0].generated_code.excel_formula).toContain('PIVOTBY');
 
-    render(<PivotUnpivotModal isOpen={true} onClose={() => {}} initialMode="pivot" />);
+    const pivotRender = render(
+      <PivotUnpivotModal isOpen={false} onClose={() => {}} initialMode="pivot" />
+    );
+    pivotRender.rerender(
+      <PivotUnpivotModal isOpen={true} onClose={() => {}} initialMode="pivot" />
+    );
     expect(screen.getByText('Excel PivotTable Builder')).toBeDefined();
     expect(screen.getByText('Live PivotTable Preview')).toBeDefined();
     expect(screen.getByText('Apply PivotTable to Sheet')).toBeDefined();
 
     // 9. Visual Dashboard & Custom Visuals Studio (with Table, Matrix Table, Legend Editor & Conditional Formatting)
-    render(<DashboardModal isOpen={true} onClose={() => {}} />);
+    const dashRender = render(<DashboardModal isOpen={false} onClose={() => {}} />);
+    dashRender.rerender(<DashboardModal isOpen={true} onClose={() => {}} />);
     expect(screen.getByText(/Visual Dashboard & Custom Visuals Studio/i)).toBeDefined();
     expect(screen.getByText('Visualizations Pane')).toBeDefined();
     expect(screen.getByText(/Slicers \(Multi-Select\):/i)).toBeDefined();
@@ -706,4 +712,5 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText(/4\. Conditional Formatting/i)).toBeDefined();
   });
 });
+
 

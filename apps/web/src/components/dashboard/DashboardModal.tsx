@@ -869,7 +869,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   };
 
   // Get legend keys for the currently selected visual so the user can edit their colors & labels
-  const activeVisualLegendItems = useMemo(() => {
+  const activeVisualLegendItems = (() => {
     if (!activeVisual) return [];
     const targetCol =
       activeVisual.type === 'clustered_bar' ||
@@ -880,7 +880,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         : activeVisual.categoryCol;
 
     return getDistinctValuesForColumn(targetCol).slice(0, activeVisual.topN || 10);
-  }, [activeVisual, sourceRows]);
+  })();
 
   // Render an individual Visual Card
   const renderVisualContent = (vis: DashboardVisualConfig) => {

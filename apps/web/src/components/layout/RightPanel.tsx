@@ -9,23 +9,17 @@ import {
   Copy,
   ChevronUp,
   ChevronDown,
-  Eye,
   Check,
   Code2,
   Filter,
-  ArrowUpDown,
   Calculator,
   Type,
-  Split,
-  Binary,
-  Layers,
   Sparkles,
-  Info,
   GitBranch,
   Calendar,
   TrendingUp,
-  TableProperties,
   Pencil,
+  X,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { StepType } from '../../types/steps';
@@ -35,6 +29,7 @@ export const RightPanel: React.FC = () => {
     activeTab,
     setActiveTab,
     isRightPanelOpen,
+    toggleRightPanel,
     selectedDataset,
     steps,
     activeStepIndex,
@@ -135,76 +130,91 @@ export const RightPanel: React.FC = () => {
     activeStepIndex !== null ? steps[activeStepIndex] : steps[steps.length - 1];
 
   return (
-    <aside className="w-80 bg-slate-900 border-l border-slate-800 flex flex-col shrink-0 select-none z-10 h-[calc(100vh-3.5rem)]">
-      {/* Tabs Header */}
-      <div className="flex border-b border-slate-800 bg-slate-950/60 p-1">
+    <aside className="w-80 bg-[#F3F3F3] border-l border-[#D4D4D4] flex flex-col shrink-0 select-none z-10 h-full">
+      {/* Excel Task Pane Title Strip */}
+      <div className="h-8 px-3 bg-[#E6E6E6] border-b border-[#D4D4D4] flex items-center justify-between">
+        <span className="text-[12px] font-bold text-[#212121] tracking-tight">
+          Query Settings & Applied Steps
+        </span>
+        <button
+          type="button"
+          onClick={toggleRightPanel}
+          title="Close Task Pane"
+          className="p-1 text-[#605E5C] hover:text-[#212121] hover:bg-[#D4D4D4] rounded-[2px] transition-colors"
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      {/* Task Pane Sub-Tabs */}
+      <div className="flex border-b border-[#D4D4D4] bg-[#F3F3F3] px-1 pt-1 gap-0.5">
         <button
           onClick={() => setActiveTab('applied')}
-          className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-md flex items-center justify-center gap-1.5 transition-all ${
+          className={`flex-1 py-1.5 px-2 text-[12px] flex items-center justify-center gap-1 transition-colors rounded-t-[2px] ${
             activeTab === 'applied'
-              ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700/60'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-white text-[#217346] font-semibold border-t border-x border-[#D4D4D4] border-b-2 border-b-[#217346] -mb-px'
+              : 'text-[#444444] hover:text-[#212121] hover:bg-[#E6E6E6]'
           }`}
         >
-          <ListTree size={14} className="text-emerald-400" />
+          <ListTree size={13} className="text-[#217346]" />
           <span>Applied Steps ({steps.length + 1})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('catalog')}
-          className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-md flex items-center justify-center gap-1.5 transition-all ${
+          className={`flex-1 py-1.5 px-2 text-[12px] flex items-center justify-center gap-1 transition-colors rounded-t-[2px] ${
             activeTab === 'catalog'
-              ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700/60'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-white text-[#217346] font-semibold border-t border-x border-[#D4D4D4] border-b-2 border-b-[#217346] -mb-px'
+              : 'text-[#444444] hover:text-[#212121] hover:bg-[#E6E6E6]'
           }`}
         >
-          <PlusCircle size={14} className="text-sky-400" />
+          <PlusCircle size={13} className="text-[#217346]" />
           <span>Add Step</span>
         </button>
 
         <button
           onClick={() => setActiveTab('details')}
-          className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-md flex items-center justify-center gap-1.5 transition-all ${
+          className={`flex-1 py-1.5 px-2 text-[12px] flex items-center justify-center gap-1 transition-colors rounded-t-[2px] ${
             activeTab === 'details'
-              ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700/60'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-white text-[#217346] font-semibold border-t border-x border-[#D4D4D4] border-b-2 border-b-[#217346] -mb-px'
+              : 'text-[#444444] hover:text-[#212121] hover:bg-[#E6E6E6]'
           }`}
         >
-          <SlidersHorizontal size={14} className="text-purple-400" />
+          <SlidersHorizontal size={13} className="text-[#217346]" />
           <span>Details</span>
         </button>
       </div>
 
       {/* Tab 1: Applied Steps */}
       {activeTab === 'applied' && (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="p-2.5 border-b border-slate-800/60 bg-slate-950/30 text-xs text-slate-400 space-y-1.5">
+        <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div className="p-2.5 border-b border-[#D4D4D4] bg-[#F8F8F8] text-[12px] text-[#605E5C] space-y-1.5">
             <div className="flex items-center justify-between">
               <span>{steps.length + 1} steps in pipeline</span>
-              <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                Live DuckDB Preview
+              <span className="text-[11px] text-[#217346] bg-[#E6F2EB] px-1.5 py-0.5 rounded-[2px] border border-[#217346]/30 font-medium">
+                Live Preview
               </span>
             </div>
             {selectedDataset && (
-              <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[11px]">
+              <div className="flex items-center justify-between pt-1 border-t border-[#E1E1E1] text-[12px]">
                 {activeQueryId ? (
-                  <span className="text-sky-300 flex items-center gap-1 truncate font-medium">
-                    <GitBranch size={11} className="text-sky-400 shrink-0" />
+                  <span className="text-[#217346] flex items-center gap-1 truncate font-medium">
+                    <GitBranch size={11} className="text-[#217346] shrink-0" />
                     <span className="truncate">
                       Query: {queries.find((q) => q.id === activeQueryId)?.name || selectedDataset.name}
                     </span>
                   </span>
                 ) : (
-                  <span className="text-slate-500 truncate">Table: {selectedDataset.name}</span>
+                  <span className="text-[#605E5C] truncate">Table: {selectedDataset.name}</span>
                 )}
                 {activeQueryId ? (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/15 text-sky-400 border border-sky-500/20 shrink-0">
+                  <span className="text-[11px] px-1.5 py-0.2 rounded-[2px] bg-[#E6F2EB] text-[#217346] border border-[#217346]/30 shrink-0">
                     Saved in Connections
                   </span>
                 ) : (
                   <button
                     onClick={() => addConnectionQuery(selectedDataset.id)}
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 shrink-0 transition-colors"
+                    className="text-[11px] px-1.5 py-0.5 rounded-[2px] bg-white hover:bg-[#E6F2EB] text-[#217346] border border-[#217346] shrink-0 transition-colors"
                   >
                     + Save to Connections
                   </button>
@@ -213,26 +223,26 @@ export const RightPanel: React.FC = () => {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
             {/* Step 0: Source Dataset */}
             <div
               onClick={() => selectStep(null)}
-              className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+              className={`p-2 rounded-[2px] border transition-colors cursor-pointer ${
                 activeStepIndex === null && steps.length === 0
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-                  : 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800/70 text-slate-200'
+                  ? 'bg-[#E6F2EB] border-[#217346] text-[#212121]'
+                  : 'bg-[#F8F8F8] border-[#D4D4D4] hover:bg-[#F3F3F3] text-[#212121]'
               }`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-bold">
+                  <div className="w-5 h-5 rounded-[2px] bg-[#217346] text-white flex items-center justify-center text-[11px] font-bold">
                     0
                   </div>
-                  <span className="text-xs font-semibold">Source Dataset</span>
+                  <span className="text-[12px] font-semibold">Source Dataset</span>
                 </div>
-                <CheckCircle2 size={13} className="text-emerald-400" />
+                <CheckCircle2 size={13} className="text-[#107C10]" />
               </div>
-              <p className="text-[11px] text-slate-400 mt-1 pl-7 truncate">
+              <p className="text-[12px] text-[#605E5C] mt-0.5 pl-7 truncate">
                 {selectedDataset ? selectedDataset.name : 'No dataset selected'}
               </p>
             </div>
@@ -244,37 +254,37 @@ export const RightPanel: React.FC = () => {
                 <div
                   key={step.id}
                   onClick={() => selectStep(idx)}
-                  className={`p-2.5 rounded-lg border transition-all cursor-pointer group ${
+                  className={`p-2 rounded-[2px] border transition-colors cursor-pointer group ${
                     isSelected
-                      ? 'bg-sky-500/15 border-sky-500/40 text-sky-200'
+                      ? 'bg-[#E6F2EB] border-[#217346] text-[#212121]'
                       : step.enabled
-                      ? 'bg-slate-800/50 border-slate-700/60 hover:bg-slate-800 text-slate-200'
-                      : 'bg-slate-900/40 border-slate-800 opacity-60 text-slate-400'
+                      ? 'bg-white border-[#D4D4D4] hover:bg-[#F3F3F3] text-[#212121]'
+                      : 'bg-[#F3F3F3] border-[#D4D4D4] opacity-60 text-[#605E5C]'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
                       <div
-                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                        className={`w-5 h-5 rounded-[2px] flex items-center justify-center text-[11px] font-bold ${
                           step.enabled
-                            ? 'bg-sky-500/20 text-sky-400'
-                            : 'bg-slate-800 text-slate-500'
+                            ? 'bg-[#217346] text-white'
+                            : 'bg-[#D4D4D4] text-[#605E5C]'
                         }`}
                       >
                         {idx + 1}
                       </div>
-                      <span className="text-xs font-medium truncate">{step.label}</span>
+                      <span className="text-[12px] font-semibold truncate">{step.label}</span>
                     </div>
 
                     <div
-                      className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
                         onClick={() => moveStep(idx, 'up')}
                         disabled={idx === 0}
                         title="Move Up"
-                        className="p-1 hover:text-slate-100 text-slate-400 disabled:opacity-20"
+                        className="p-1 hover:bg-[#E6E6E6] text-[#605E5C] hover:text-[#212121] disabled:opacity-20 rounded-[2px]"
                       >
                         <ChevronUp size={12} />
                       </button>
@@ -282,36 +292,36 @@ export const RightPanel: React.FC = () => {
                         onClick={() => moveStep(idx, 'down')}
                         disabled={idx === steps.length - 1}
                         title="Move Down"
-                        className="p-1 hover:text-slate-100 text-slate-400 disabled:opacity-20"
+                        className="p-1 hover:bg-[#E6E6E6] text-[#605E5C] hover:text-[#212121] disabled:opacity-20 rounded-[2px]"
                       >
                         <ChevronDown size={12} />
                       </button>
                       <button
                         onClick={() => openEditStepModal(step)}
                         title="Edit Step Parameters"
-                        className="p-1 hover:text-amber-400 text-slate-400"
+                        className="p-1 hover:bg-[#E6E6E6] text-[#605E5C] hover:text-[#217346] rounded-[2px]"
                       >
                         <Pencil size={12} />
                       </button>
                       <button
                         onClick={() => duplicateStep(step.id)}
                         title="Duplicate Step"
-                        className="p-1 hover:text-sky-400 text-slate-400"
+                        className="p-1 hover:bg-[#E6E6E6] text-[#605E5C] hover:text-[#217346] rounded-[2px]"
                       >
                         <Copy size={12} />
                       </button>
                       <button
                         onClick={() => removeStep(step.id)}
                         title="Delete Step"
-                        className="p-1 hover:text-rose-400 text-slate-400"
+                        className="p-1 hover:bg-[#E6E6E6] text-[#605E5C] hover:text-[#C50F1F] rounded-[2px]"
                       >
                         <Trash2 size={12} />
                       </button>
                     </div>
                   </div>
 
-                  <div className="mt-1.5 pl-7 flex items-center justify-between text-[10px] text-slate-400">
-                    <span className="font-mono uppercase bg-slate-950 px-1 py-0.5 rounded border border-slate-800">
+                  <div className="mt-1.5 pl-7 flex items-center justify-between text-[11px] text-[#605E5C]">
+                    <span className="font-mono uppercase bg-[#F3F3F3] px-1.5 py-0.2 rounded-[2px] border border-[#D4D4D4] text-[#444444]">
                       {step.type.replace('_', ' ')}
                     </span>
                     <label
@@ -322,9 +332,9 @@ export const RightPanel: React.FC = () => {
                         type="checkbox"
                         checked={step.enabled}
                         onChange={() => toggleStep(step.id)}
-                        className="rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-0 text-xs"
+                        className="rounded-[2px] border-[#8A8886] text-[#217346] focus:ring-0 text-xs"
                       />
-                      <span className="text-[10px]">{step.enabled ? 'Enabled' : 'Disabled'}</span>
+                      <span className="text-[11px]">{step.enabled ? 'Enabled' : 'Disabled'}</span>
                     </label>
                   </div>
                 </div>
@@ -334,7 +344,7 @@ export const RightPanel: React.FC = () => {
             {/* Add step CTA */}
             <button
               onClick={() => setActiveTab('catalog')}
-              className="w-full mt-2 py-2.5 px-3 rounded-lg border border-dashed border-slate-800 hover:border-slate-700 bg-slate-950/40 hover:bg-slate-950/60 flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-emerald-400 transition-all"
+              className="w-full mt-2 py-2 px-3 rounded-[2px] border border-dashed border-[#8A8886] hover:border-[#217346] bg-[#F8F8F8] hover:bg-[#E6F2EB] flex items-center justify-center gap-1.5 text-[12px] font-medium text-[#212121] hover:text-[#217346] transition-colors"
             >
               <PlusCircle size={14} />
               <span>Add Transformation Step</span>
@@ -345,21 +355,21 @@ export const RightPanel: React.FC = () => {
 
       {/* Tab 2: Function Catalog */}
       {activeTab === 'catalog' && (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="p-3 border-b border-slate-800">
+        <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div className="p-2.5 border-b border-[#D4D4D4] bg-[#F8F8F8]">
             <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-2.5 text-slate-500" />
+              <Search size={13} className="absolute left-2.5 top-2 text-[#605E5C]" />
               <input
                 type="text"
                 value={catalogSearch}
                 onChange={(e) => setCatalogSearch(e.target.value)}
                 placeholder="Search functions & formulas..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-white border border-[#8A8886] rounded-[2px] pl-8 pr-3 py-1 text-[12px] text-[#212121] placeholder-[#605E5C] focus:outline-none focus:border-[#217346]"
               />
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-3">
             {stepCategories.map((cat) => {
               const Icon = cat.icon;
               const filtered = cat.items.filter(
@@ -371,23 +381,23 @@ export const RightPanel: React.FC = () => {
 
               return (
                 <div key={cat.category}>
-                  <div className="flex items-center gap-1.5 mb-2 px-1 text-slate-400">
-                    <Icon size={13} className="text-emerald-400" />
-                    <span className="text-[11px] font-semibold uppercase tracking-wider">{cat.category}</span>
+                  <div className="flex items-center gap-1.5 mb-1.5 px-1 text-[#444444]">
+                    <Icon size={13} className="text-[#217346]" />
+                    <span className="text-[12px] font-bold uppercase tracking-wider">{cat.category}</span>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     {filtered.map((item) => (
                       <div
                         key={item.id}
                         onClick={() => {
                           openStepWizard(item.id as StepType);
                         }}
-                        className="p-2 rounded-lg bg-slate-950/40 hover:bg-slate-800/80 border border-slate-800/60 hover:border-slate-700 cursor-pointer transition-all group"
+                        className="p-2 rounded-[2px] bg-[#F8F8F8] hover:bg-[#E6F2EB] border border-[#D4D4D4] hover:border-[#217346] cursor-pointer transition-colors group"
                       >
-                        <p className="text-xs font-medium text-slate-200 group-hover:text-emerald-300">
+                        <p className="text-[12px] font-semibold text-[#212121] group-hover:text-[#217346]">
                           {item.name}
                         </p>
-                        <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">{item.desc}</p>
+                        <p className="text-[12px] text-[#605E5C] mt-0.5 leading-tight">{item.desc}</p>
                       </div>
                     ))}
                   </div>
@@ -400,105 +410,105 @@ export const RightPanel: React.FC = () => {
 
       {/* Tab 3: Step Details & Live Formula Equivalents */}
       {activeTab === 'details' && (
-        <div className="flex-1 p-3 overflow-y-auto space-y-4">
+        <div className="flex-1 p-2.5 overflow-y-auto space-y-3 bg-white">
           {currentInspectedStep ? (
             <>
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+              <div className="p-2.5 rounded-[2px] bg-[#F8F8F8] border border-[#D4D4D4]">
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-bold text-slate-100">{currentInspectedStep.label}</h4>
+                  <h4 className="text-[12px] font-bold text-[#212121]">{currentInspectedStep.label}</h4>
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => openEditStepModal(currentInspectedStep)}
-                      className="px-2 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 flex items-center gap-1 transition-colors"
+                      className="px-2 py-0.5 text-[11px] rounded-[2px] bg-[#E6F2EB] text-[#217346] hover:bg-[#cce5d6] border border-[#217346] flex items-center gap-1 transition-colors font-medium"
                       title="Edit this step's configuration"
                     >
                       <Pencil size={10} />
                       <span>Edit</span>
                     </button>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                    <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-[2px] bg-[#E6E6E6] text-[#212121]">
                       {currentInspectedStep.type}
                     </span>
                   </div>
                 </div>
-                <div className="text-[11px] text-slate-400 space-y-1 font-mono">
+                <div className="text-[12px] text-[#605E5C] space-y-1 font-mono">
                   {Object.entries(currentInspectedStep.params).map(([k, v]) => (
                     <div key={k} className="flex justify-between">
-                      <span className="text-slate-500">{k}:</span>
-                      <span className="text-slate-300">{JSON.stringify(v)}</span>
+                      <span className="text-[#605E5C]">{k}:</span>
+                      <span className="text-[#212121]">{JSON.stringify(v)}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Equivalent Code Generator Section */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                  <Code2 size={14} className="text-sky-400" />
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#212121]">
+                  <Code2 size={14} className="text-[#217346]" />
                   <span>Equivalent Code</span>
                 </div>
 
                 {/* DuckDB SQL */}
-                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-semibold text-amber-400">DuckDB SQL</span>
+                <div className="p-2 rounded-[2px] bg-[#F8F8F8] border border-[#D4D4D4] space-y-1">
+                  <div className="flex items-center justify-between text-[12px]">
+                    <span className="font-semibold text-[#217346]">DuckDB SQL</span>
                     <button
                       onClick={() =>
                         handleCopyCode(selectedStepSummary?.generated_code.sql || '', 'sql')
                       }
-                      className="text-[10px] text-slate-400 hover:text-emerald-400 flex items-center gap-1"
+                      className="text-[11px] text-[#605E5C] hover:text-[#217346] flex items-center gap-1"
                     >
                       {copiedCodeType === 'sql' ? <Check size={10} /> : <Copy size={10} />}
                       <span>{copiedCodeType === 'sql' ? 'Copied' : 'Copy'}</span>
                     </button>
                   </div>
-                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-900/60 p-2 rounded overflow-x-auto whitespace-pre-wrap">
+                  <pre className="text-[12px] font-mono text-[#212121] bg-white border border-[#E1E1E1] p-2 rounded-[2px] overflow-x-auto whitespace-pre-wrap">
                     {selectedStepSummary?.generated_code.sql || '-- SQL fragment'}
                   </pre>
                 </div>
 
                 {/* Python Polars */}
-                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-semibold text-sky-400">Python (Polars)</span>
+                <div className="p-2 rounded-[2px] bg-[#F8F8F8] border border-[#D4D4D4] space-y-1">
+                  <div className="flex items-center justify-between text-[12px]">
+                    <span className="font-semibold text-[#217346]">Python (Polars)</span>
                     <button
                       onClick={() =>
                         handleCopyCode(selectedStepSummary?.generated_code.polars || '', 'polars')
                       }
-                      className="text-[10px] text-slate-400 hover:text-emerald-400 flex items-center gap-1"
+                      className="text-[11px] text-[#605E5C] hover:text-[#217346] flex items-center gap-1"
                     >
                       {copiedCodeType === 'polars' ? <Check size={10} /> : <Copy size={10} />}
                       <span>{copiedCodeType === 'polars' ? 'Copied' : 'Copy'}</span>
                     </button>
                   </div>
-                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-900/60 p-2 rounded overflow-x-auto whitespace-pre-wrap">
+                  <pre className="text-[12px] font-mono text-[#212121] bg-white border border-[#E1E1E1] p-2 rounded-[2px] overflow-x-auto whitespace-pre-wrap">
                     {selectedStepSummary?.generated_code.polars || '# Polars code'}
                   </pre>
                 </div>
 
                 {/* Power Query M */}
-                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-semibold text-purple-400">Power Query M</span>
+                <div className="p-2 rounded-[2px] bg-[#F8F8F8] border border-[#D4D4D4] space-y-1">
+                  <div className="flex items-center justify-between text-[12px]">
+                    <span className="font-semibold text-[#217346]">Power Query M</span>
                     <button
                       onClick={() =>
                         handleCopyCode(selectedStepSummary?.generated_code.power_query_m || '', 'm')
                       }
-                      className="text-[10px] text-slate-400 hover:text-emerald-400 flex items-center gap-1"
+                      className="text-[11px] text-[#605E5C] hover:text-[#217346] flex items-center gap-1"
                     >
                       {copiedCodeType === 'm' ? <Check size={10} /> : <Copy size={10} />}
                       <span>{copiedCodeType === 'm' ? 'Copied' : 'Copy'}</span>
                     </button>
                   </div>
-                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-900/60 p-2 rounded overflow-x-auto whitespace-pre-wrap">
+                  <pre className="text-[12px] font-mono text-[#212121] bg-white border border-[#E1E1E1] p-2 rounded-[2px] overflow-x-auto whitespace-pre-wrap">
                     {selectedStepSummary?.generated_code.power_query_m || '// Power Query M'}
                   </pre>
                 </div>
 
                 {/* Excel Formula */}
                 {selectedStepSummary?.generated_code.excel_formula && (
-                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-semibold text-emerald-400">Excel Formula</span>
+                  <div className="p-2 rounded-[2px] bg-[#F8F8F8] border border-[#D4D4D4] space-y-1">
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span className="font-semibold text-[#217346]">Excel Formula</span>
                       <button
                         onClick={() =>
                           handleCopyCode(
@@ -506,13 +516,13 @@ export const RightPanel: React.FC = () => {
                             'excel'
                           )
                         }
-                        className="text-[10px] text-slate-400 hover:text-emerald-400 flex items-center gap-1"
+                        className="text-[11px] text-[#605E5C] hover:text-[#217346] flex items-center gap-1"
                       >
                         {copiedCodeType === 'excel' ? <Check size={10} /> : <Copy size={10} />}
                         <span>{copiedCodeType === 'excel' ? 'Copied' : 'Copy'}</span>
                       </button>
                     </div>
-                    <pre className="text-[11px] font-mono text-slate-300 bg-slate-900/60 p-2 rounded overflow-x-auto whitespace-pre-wrap">
+                    <pre className="text-[12px] font-mono text-[#212121] bg-white border border-[#E1E1E1] p-2 rounded-[2px] overflow-x-auto whitespace-pre-wrap">
                       {selectedStepSummary.generated_code.excel_formula}
                     </pre>
                   </div>
@@ -520,10 +530,10 @@ export const RightPanel: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="text-center py-10 text-slate-500">
-              <SlidersHorizontal size={28} className="mx-auto mb-2 opacity-40 text-purple-400" />
-              <p className="text-xs font-medium text-slate-300">No step selected</p>
-              <p className="text-[11px] text-slate-500 mt-1 max-w-[200px] mx-auto">
+            <div className="text-center py-10 text-[#605E5C]">
+              <SlidersHorizontal size={24} className="mx-auto mb-2 text-[#217346]" />
+              <p className="text-[12px] font-semibold text-[#212121]">No step selected</p>
+              <p className="text-[12px] text-[#605E5C] mt-1 max-w-[200px] mx-auto">
                 Apply a step or select an existing step from the Applied Steps list to view its formulas.
               </p>
             </div>

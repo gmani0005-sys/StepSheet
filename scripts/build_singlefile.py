@@ -31,8 +31,8 @@ def build_single_html() -> Path:
     favicon_svg = (
         "data:image/svg+xml;utf8,"
         "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
-        "<rect width='32' height='32' rx='8' fill='%2310b981'/>"
-        "<path d='M8 10h16M8 16h16M8 22h10' stroke='white' stroke-width='2.5' stroke-linecap='round'/>"
+        "<rect width='32' height='32' rx='2' fill='%23217346'/>"
+        "<path d='M7 10h18M7 16h18M7 22h18M14 7v18' stroke='white' stroke-width='2' stroke-linecap='square'/>"
         "</svg>"
     )
 
@@ -45,12 +45,12 @@ def build_single_html() -> Path:
     <title>StepSheet — No-Code Data Workbench (Standalone Edition)</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Carlito:ital,wght@0,400;0,700;1,400;1,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
 {combined_css}
     </style>
   </head>
-  <body class="bg-slate-900 text-slate-100 antialiased font-sans overflow-hidden">
+  <body class="excel-theme bg-[#F3F3F3] text-[#212121] antialiased font-sans overflow-hidden">
     <div id="root"></div>
     <script>
       window.__STEPSHEET_STANDALONE__ = true;

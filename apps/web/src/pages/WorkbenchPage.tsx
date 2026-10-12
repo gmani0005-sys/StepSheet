@@ -62,7 +62,7 @@ export const WorkbenchPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
+    <div className="excel-theme flex flex-col h-screen w-screen overflow-hidden bg-[#F3F3F3] text-[#212121]">
       {/* Top Application Bar */}
       <TopBar
         onOpenAuthModal={() => setIsAuthModalOpen(true)}

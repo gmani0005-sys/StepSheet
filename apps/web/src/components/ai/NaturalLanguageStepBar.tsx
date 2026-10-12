@@ -1,12 +1,19 @@
 import React, { useState } from 'react';
-import { Sparkles, ArrowRight, Loader2, Wand2 } from 'lucide-react';
+import { Sparkles, ArrowRight, Loader2, Wand2, ChevronDown, Check, X } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { api } from '../../api/client';
 import { StepDefinition } from '../../types/steps';
 import { ReviewGeneratedStepModal } from './ReviewGeneratedStepModal';
 
 export const NaturalLanguageStepBar: React.FC = () => {
-  const { selectedDataset, addStep } = useWorkbenchStore();
+  const {
+    selectedDataset,
+    addStep,
+    steps,
+    activeStepIndex,
+    stepSummaries,
+    columns,
+  } = useWorkbenchStore();
 
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -51,59 +58,117 @@ export const NaturalLanguageStepBar: React.FC = () => {
     'Capitalize customer names',
   ];
 
+  // Read-only Formula Bar (fx) value from active step or source dataset
+  const activeSummary =
+    activeStepIndex !== null && stepSummaries[activeStepIndex]
+      ? stepSummaries[activeStepIndex]
+      : stepSummaries.length > 0
+      ? stepSummaries[stepSummaries.length - 1]
+      : null;
+
+  const activeStep =
+    activeStepIndex !== null && steps[activeStepIndex]
+      ? steps[activeStepIndex]
+      : steps.length > 0
+      ? steps[steps.length - 1]
+      : null;
+
+  const formulaBarText =
+    activeSummary?.generated_code?.excel_formula ||
+    activeSummary?.generated_code?.sql ||
+    (activeStep
+      ? `=STEP("${activeStep.label}")`
+      : columns.length > 0
+      ? `=TABLE("${selectedDataset.name}", [${columns.map((c) => c.name).slice(0, 4).join(', ')}${columns.length > 4 ? ', ...' : ''}])`
+      : `=SOURCE("${selectedDataset.name}")`);
+
+  const nameBoxLabel = activeStep
+    ? `STEP_${(activeStepIndex !== null ? activeStepIndex : steps.length - 1) + 1}`
+    : columns[0]?.name || 'A1';
+
   return (
     <>
-      <div className="bg-slate-900/90 border-b border-slate-800/80 px-4 pt-2.5 pb-2 flex flex-col gap-2">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleGenerate();
-          }}
-          className="flex items-center gap-2"
-        >
-          <div className="relative flex-1">
-            <div className="absolute left-3 top-2.5 text-amber-400">
-              <Sparkles size={15} />
-            </div>
-            <input
-              type="text"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe transformation in plain English (e.g. 'discounted = amount - discount', 'filter amount > 100', 'running total of sales')..."
-              className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl pl-9 pr-24 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60 shadow-inner"
-              disabled={isLoading}
-            />
-            <button
-              type="submit"
-              disabled={isLoading || !prompt.trim()}
-              className="absolute right-1.5 top-1.5 px-3 py-1 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1 shadow-sm transition-all"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 size={13} className="animate-spin text-slate-950" />
-                  <span>Thinking...</span>
-                </>
-              ) : (
-                <>
-                  <span>Create Step</span>
-                  <ArrowRight size={13} />
-                </>
-              )}
-            </button>
+      <div className="bg-[#F3F3F3] border-b border-[#D4D4D4] px-2 py-1 flex flex-col gap-1 shrink-0">
+        {/* Row 1: Excel Name Box + Read-Only Formula Bar (fx) + Plain English ("Tell me what you want to do") */}
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5">
+          {/* Name Box (Read-Only Display) */}
+          <div
+            title={`Active Reference: ${nameBoxLabel} (${selectedDataset.name})`}
+            className="h-7 w-32 bg-white border border-[#D4D4D4] px-2 flex items-center justify-between text-[12px] font-mono text-[#212121] shrink-0 select-none rounded-[1px]"
+          >
+            <span className="truncate">{nameBoxLabel}</span>
+            <ChevronDown size={12} className="text-[#605E5C] shrink-0" />
           </div>
-        </form>
 
-        {/* Suggestion Chips with proper spacing to prevent scrollbar overlapping */}
+          {/* Formula Bar Function Badge (✕ ✓ fx) */}
+          <div className="h-7 bg-white border border-[#D4D4D4] px-2 flex items-center gap-1.5 text-[#605E5C] shrink-0 select-none rounded-[1px]">
+            <X size={12} className="text-[#A19F9D]" />
+            <Check size={12} className="text-[#A19F9D]" />
+            <span className="font-serif italic font-bold text-[13px] text-[#217346] pl-0.5">
+              fx
+            </span>
+          </div>
+
+          {/* Read-Only Formula Display Strip */}
+          <div
+            title={formulaBarText}
+            className="h-7 flex-1 min-w-[180px] bg-white border border-[#D4D4D4] px-2.5 flex items-center text-[12px] font-mono text-[#212121] overflow-x-auto whitespace-nowrap select-all rounded-[1px]"
+          >
+            {formulaBarText}
+          </div>
+
+          {/* "Tell me what you want to do" / Plain English Step Input */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleGenerate();
+            }}
+            className="flex items-center gap-1 w-full lg:w-[430px] xl:w-[500px] shrink-0"
+          >
+            <div className="relative flex-1 flex items-center">
+              <div className="absolute left-2.5 text-[#217346] pointer-events-none">
+                <Sparkles size={13} />
+              </div>
+              <input
+                type="text"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Describe transformation in plain English (e.g. 'discounted = amount - discount', 'filter amount > 100', 'running total of sales')..."
+                className="w-full h-7 bg-white border border-[#8A8886] focus:border-[#217346] rounded-[2px] pl-7 pr-24 text-[12px] text-[#212121] placeholder-[#605E5C] focus:outline-none"
+                disabled={isLoading}
+              />
+              <button
+                type="submit"
+                disabled={isLoading || !prompt.trim()}
+                className="absolute right-0.5 top-0.5 bottom-0.5 px-2.5 bg-[#217346] hover:bg-[#185C37] disabled:opacity-40 text-white font-semibold text-[12px] rounded-[1px] flex items-center gap-1 transition-colors"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin text-white" />
+                    <span>Thinking...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Create Step</span>
+                    <ArrowRight size={12} />
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Row 2: Compact Quick Formula / Plain-English Suggestion Strip */}
         <div
-          className="flex items-center gap-2 text-[11px] overflow-x-auto pt-1 pb-3 chips-scrollbar select-none"
+          className="flex items-center gap-1.5 text-[12px] overflow-x-auto py-0.5 chips-scrollbar select-none"
           onWheel={(e) => {
             if (e.deltaY !== 0 && !e.deltaX) {
               e.currentTarget.scrollLeft += e.deltaY;
             }
           }}
         >
-          <span className="text-slate-500 shrink-0 flex items-center gap-1 font-medium">
-            <Wand2 size={11} className="text-indigo-400" />
+          <span className="text-[#605E5C] shrink-0 flex items-center gap-1 font-medium text-[12px]">
+            <Wand2 size={11} className="text-[#217346]" />
             Try:
           </span>
           {examplePrompts.map((eg, i) => (
@@ -111,12 +176,12 @@ export const NaturalLanguageStepBar: React.FC = () => {
               key={i}
               type="button"
               onClick={() => handleGenerate(eg)}
-              className="px-2.5 py-1 rounded-full bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800/80 hover:border-slate-700 shrink-0 transition-colors cursor-pointer"
+              className="px-2 py-0.5 rounded-[2px] bg-white hover:bg-[#E6F2EB] text-[#444444] hover:text-[#217346] border border-[#D4D4D4] hover:border-[#217346]/50 shrink-0 transition-colors cursor-pointer text-[12px]"
             >
               {eg}
             </button>
           ))}
-          {error && <span className="text-rose-400 ml-2 shrink-0">{error}</span>}
+          {error && <span className="text-[#C50F1F] ml-2 shrink-0 font-medium">{error}</span>}
         </div>
       </div>
 

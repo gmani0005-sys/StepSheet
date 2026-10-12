@@ -2,40 +2,61 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --accent: #217346;
+  --accent-hover: #185C37;
+  --accent-soft: #E6F2EB;
+  --surface: #FFFFFF;
+  --chrome: #F3F3F3;
+  --chrome-border: #D4D4D4;
+  --grid-line: #E1E1E1;
+  --header-bg: #F3F3F3;
+  --header-text: #444444;
+  --text: #212121;
+  --text-muted: #605E5C;
+  --error: #C50F1F;
+  --warn: #BC4B09;
+  --ok: #107C10;
+}
+
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-100 font-sans;
-    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: var(--chrome);
+    color: var(--text);
+    font-family: Aptos, Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
   }
 
   code, pre, .font-mono {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: Consolas, "Cascadia Mono", "JetBrains Mono", monospace;
   }
 }
 
-/* Custom slick dark scrollbars */
+/* Excel-style thin light scrollbars */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #F3F3F3;
+  border-left: 1px solid #E1E1E1;
+  border-top: 1px solid #E1E1E1;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 4px;
+  background: #C6C6C6;
+  border: 2px solid #F3F3F3;
+  border-radius: 0px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #999999;
 }
 
-/* Sleek horizontal chips scrollbar with transparent track & thin roller */
 .chips-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #334155 transparent;
+  scrollbar-color: #C6C6C6 transparent;
 }
 
 .chips-scrollbar::-webkit-scrollbar {
@@ -44,21 +65,18 @@
 
 .chips-scrollbar::-webkit-scrollbar-track {
   background: transparent;
+  border: none;
 }
 
 .chips-scrollbar::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 9999px;
+  background: #C6C6C6;
+  border-radius: 0px;
 }
 
-.chips-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
-}
-
-/* Prominent table preview scroller (horizontal & vertical) */
+/* DataGrid dedicated horizontal & vertical scrollbars */
 .grid-scrollbar {
   scrollbar-width: auto;
-  scrollbar-color: #475569 #090d16;
+  scrollbar-color: #C1C1C1 #F3F3F3;
 }
 
 .grid-scrollbar::-webkit-scrollbar {
@@ -67,23 +85,164 @@
 }
 
 .grid-scrollbar::-webkit-scrollbar-track {
-  background: #090d16;
-  border-top: 1px solid #1e293b;
-  border-left: 1px solid #1e293b;
+  background: #F3F3F3;
+  border-top: 1px solid #D4D4D4;
+  border-left: 1px solid #D4D4D4;
 }
 
 .grid-scrollbar::-webkit-scrollbar-thumb {
-  background: #334155;
-  border: 2px solid #090d16;
-  border-radius: 9999px;
+  background: #C1C1C1;
+  border: 2px solid #F3F3F3;
+  border-radius: 0px;
 }
 
 .grid-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #10b981;
+  background: #8E8E8E;
 }
 
 .grid-scrollbar::-webkit-scrollbar-corner {
-  background: #090d16;
+  background: #F3F3F3;
 }
 
+/* ============================================================================
+   Excel Function Arguments & Wizard Dialog Reskin (Presentational Layer)
+   Applies Excel flat light-theme styling to all modal overlays & drawers
+   without altering any component props, state, or DOM structure.
+   ============================================================================ */
+.fixed.inset-0 {
+  background-color: rgba(0, 0, 0, 0.35) !important;
+  backdrop-filter: none !important;
+}
 
+.fixed.inset-0 > div {
+  background-color: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid #8A8886 !important;
+  border-radius: 4px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Dialog headers and footers */
+.fixed.inset-0 > div > div:first-child,
+.fixed.inset-0 > div > div:last-child {
+  background-color: var(--chrome) !important;
+  border-color: var(--chrome-border) !important;
+}
+
+/* Neutralize dark backgrounds inside dialogs into crisp Excel frames */
+.fixed.inset-0 [class*="bg-slate-950"],
+.fixed.inset-0 [class*="bg-slate-900"] {
+  background-color: #FAFAFA !important;
+  border-color: var(--chrome-border) !important;
+  color: var(--text) !important;
+}
+
+.fixed.inset-0 [class*="bg-slate-800"] {
+  background-color: #F3F3F3 !important;
+  border-color: var(--chrome-border) !important;
+  color: var(--text) !important;
+}
+
+/* Typography inside dialogs */
+.fixed.inset-0 [class*="text-slate-100"],
+.fixed.inset-0 [class*="text-slate-200"],
+.fixed.inset-0 [class*="text-slate-300"] {
+  color: var(--text) !important;
+}
+
+.fixed.inset-0 [class*="text-slate-400"],
+.fixed.inset-0 [class*="text-slate-500"] {
+  color: var(--text-muted) !important;
+}
+
+.fixed.inset-0 [class*="text-emerald-"],
+.fixed.inset-0 [class*="text-sky-"],
+.fixed.inset-0 [class*="text-indigo-"],
+.fixed.inset-0 [class*="text-purple-"],
+.fixed.inset-0 [class*="text-violet-"] {
+  color: var(--accent) !important;
+}
+
+.fixed.inset-0 [class*="text-amber-"] {
+  color: var(--warn) !important;
+}
+
+.fixed.inset-0 [class*="text-rose-"] {
+  color: var(--error) !important;
+}
+
+/* Borders and corners inside dialogs */
+.fixed.inset-0 [class*="border-slate-"] {
+  border-color: var(--chrome-border) !important;
+}
+
+.fixed.inset-0 [class*="rounded-2xl"],
+.fixed.inset-0 [class*="rounded-xl"],
+.fixed.inset-0 [class*="rounded-lg"],
+.fixed.inset-0 [class*="rounded-md"] {
+  border-radius: 2px !important;
+}
+
+/* Inputs, Selects, and Textareas inside dialogs */
+.fixed.inset-0 input:not([type="checkbox"]):not([type="radio"]),
+.fixed.inset-0 select,
+.fixed.inset-0 textarea {
+  background-color: #FFFFFF !important;
+  color: var(--text) !important;
+  border: 1px solid #8A8886 !important;
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+
+.fixed.inset-0 input:focus,
+.fixed.inset-0 select:focus,
+.fixed.inset-0 textarea:focus {
+  border-color: var(--accent) !important;
+  outline: 1px solid var(--accent) !important;
+}
+
+/* Primary Action Buttons inside dialogs -> Excel Green */
+.fixed.inset-0 button[class*="bg-emerald-600"],
+.fixed.inset-0 button[class*="bg-sky-600"],
+.fixed.inset-0 button[class*="bg-indigo-600"],
+.fixed.inset-0 button[class*="bg-purple-600"],
+.fixed.inset-0 button[class*="bg-violet-600"],
+.fixed.inset-0 button[class*="bg-amber-600"],
+.fixed.inset-0 button[class*="from-"] {
+  background: var(--accent) !important;
+  background-image: none !important;
+  color: #FFFFFF !important;
+  border: 1px solid var(--accent-hover) !important;
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+
+.fixed.inset-0 button[class*="bg-emerald-600"] *,
+.fixed.inset-0 button[class*="bg-sky-600"] *,
+.fixed.inset-0 button[class*="bg-indigo-600"] *,
+.fixed.inset-0 button[class*="bg-purple-600"] *,
+.fixed.inset-0 button[class*="bg-violet-600"] *,
+.fixed.inset-0 button[class*="bg-amber-600"] *,
+.fixed.inset-0 button[class*="from-"] * {
+  color: #FFFFFF !important;
+}
+
+.fixed.inset-0 button[class*="bg-emerald-600"]:hover,
+.fixed.inset-0 button[class*="bg-sky-600"]:hover,
+.fixed.inset-0 button[class*="bg-indigo-600"]:hover,
+.fixed.inset-0 button[class*="bg-purple-600"]:hover,
+.fixed.inset-0 button[class*="bg-violet-600"]:hover,
+.fixed.inset-0 button[class*="bg-amber-600"]:hover,
+.fixed.inset-0 button[class*="from-"]:hover {
+  background: var(--accent-hover) !important;
+}
+
+/* Tinted status/selection boxes inside dialogs */
+.fixed.inset-0 [class*="bg-emerald-500/"],
+.fixed.inset-0 [class*="bg-sky-500/"],
+.fixed.inset-0 [class*="bg-indigo-500/"],
+.fixed.inset-0 [class*="bg-purple-500/"],
+.fixed.inset-0 [class*="bg-violet-500/"] {
+  background-color: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
+}

@@ -631,8 +631,35 @@ describe('StepSheet Workbench', () => {
     render(<VLookupModal isOpen={true} onClose={() => {}} />);
     expect(screen.getByText('VLOOKUP Wizard')).toBeDefined();
     expect(screen.getByText('Apply VLOOKUP Step')).toBeDefined();
+
+    // 7. EditStepModal Visual Editors for VLOOKUP and XLOOKUP
+    useWorkbenchStore.setState({
+      datasets,
+      selectedDataset: datasets[0],
+      columns: datasets[0].schema_metadata,
+      isEditStepModalOpen: true,
+      editingStep: {
+        id: 'edit-vlookup-1',
+        type: 'vlookup',
+        label: 'VLOOKUP Col #2 (customer_name)',
+        enabled: true,
+        params: {
+          lookup_dataset_id: custId,
+          left_key_col: 'customer_id',
+          right_key_col: 'customer_id',
+          col_index_num: 2,
+          return_column: 'customer_name',
+          range_lookup: false,
+          if_not_found: 'Not found',
+        },
+      },
+    });
+    render(<EditStepModal />);
+    expect(screen.getByText(/1\. Table Array \(Lookup Reference Table\)/i)).toBeDefined();
+    expect(screen.getByText(/FALSE \(0\) — Exact Match/i)).toBeDefined();
   });
 });
+
 
 
 

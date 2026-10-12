@@ -263,6 +263,7 @@ export const RightPanel: React.FC = () => {
                 <div
                   key={step.id}
                   onClick={() => selectStep(idx)}
+                  onDoubleClick={() => openEditStepModal(step)}
                   className={`p-2 rounded-[2px] border transition-colors cursor-pointer group ${
                     isSelected
                       ? 'bg-[#E6F2EB] border-[#217346] text-[#212121]'
@@ -271,10 +272,10 @@ export const RightPanel: React.FC = () => {
                       : 'bg-[#F3F3F3] border-[#D4D4D4] opacity-60 text-[#605E5C]'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-1.5">
                     <div className="flex items-center gap-2 min-w-0">
                       <div
-                        className={`w-5 h-5 rounded-[2px] flex items-center justify-center text-[11px] font-bold ${
+                        className={`w-5 h-5 rounded-[2px] shrink-0 flex items-center justify-center text-[11px] font-bold ${
                           step.enabled
                             ? 'bg-[#217346] text-white'
                             : 'bg-[#D4D4D4] text-[#605E5C]'
@@ -282,13 +283,23 @@ export const RightPanel: React.FC = () => {
                       >
                         {idx + 1}
                       </div>
-                      <span className="text-[12px] font-semibold truncate">{step.label}</span>
+                      <span className="text-[12px] font-semibold truncate" title={step.label}>
+                        {step.label}
+                      </span>
                     </div>
 
                     <div
-                      className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="flex items-center gap-1 shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      <button
+                        onClick={() => openEditStepModal(step)}
+                        title="Edit Step Parameters"
+                        className="px-1.5 py-0.5 bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#217346] border border-[#217346]/40 rounded-[2px] text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                      >
+                        <Pencil size={11} />
+                        <span>Edit</span>
+                      </button>
                       <button
                         onClick={() => moveStep(idx, 'up')}
                         disabled={idx === 0}
@@ -304,13 +315,6 @@ export const RightPanel: React.FC = () => {
                         className="p-1 hover:bg-[#E6E6E6] text-[#605E5C] hover:text-[#212121] disabled:opacity-20 rounded-[2px]"
                       >
                         <ChevronDown size={12} />
-                      </button>
-                      <button
-                        onClick={() => openEditStepModal(step)}
-                        title="Edit Step Parameters"
-                        className="p-1 hover:bg-[#E6E6E6] text-[#605E5C] hover:text-[#217346] rounded-[2px]"
-                      >
-                        <Pencil size={12} />
                       </button>
                       <button
                         onClick={() => duplicateStep(step.id)}

@@ -8,11 +8,8 @@ import {
   Trash2,
   Plus,
   AlertCircle,
-  HelpCircle,
-  CheckCircle2,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
-import { StepDefinition } from '../../types/steps';
 
 export const EditStepModal: React.FC = () => {
   const {
@@ -20,6 +17,7 @@ export const EditStepModal: React.FC = () => {
     editingStep,
     columns,
     datasets,
+    selectedDataset,
     updateStep,
     closeEditStepModal,
   } = useWorkbenchStore();
@@ -39,15 +37,20 @@ export const EditStepModal: React.FC = () => {
       setParams(clonedParams);
       setRawJson(JSON.stringify(clonedParams, null, 2));
       setJsonError(null);
+      setActiveTab('visual');
     }
   }, [editingStep]);
 
   if (!isEditStepModalOpen || !editingStep) return null;
 
-  const handleParamChange = (key: string, value: any) => {
-    const updated = { ...params, [key]: value };
+  const updateParams = (patch: Record<string, any>) => {
+    const updated = { ...params, ...patch };
     setParams(updated);
     setRawJson(JSON.stringify(updated, null, 2));
+  };
+
+  const handleParamChange = (key: string, value: any) => {
+    updateParams({ [key]: value });
   };
 
   const handleRawJsonChange = (val: string) => {
@@ -61,6 +64,10 @@ export const EditStepModal: React.FC = () => {
     }
   };
 
+  const toggleArrayItem = (arr: string[], item: string): string[] => {
+    return arr.includes(item) ? arr.filter((x) => x !== item) : [...arr, item];
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (jsonError && activeTab === 'raw') return;
@@ -72,10 +79,601 @@ export const EditStepModal: React.FC = () => {
     });
   };
 
+  // Helper to resolve reference dataset & its columns for lookup/join steps
+  const getReferenceDataset = (dsId?: string) => {
+    const otherDatasets = datasets.filter((d) => d.id !== selectedDataset?.id);
+    return (
+      datasets.find((d) => d.id === dsId) ||
+      otherDatasets[0] ||
+      datasets[0] ||
+      selectedDataset
+    );
+  };
+
   const renderVisualEditor = () => {
     const type = editingStep.type;
 
     switch (type) {
+      case 'vlookup': {
+        const refId = params.lookup_dataset_id || params.right_dataset_id || '';
+        const refDs = getReferenceDataset(refId);
+        const refCols = refDs?.schema_metadata || [];
+        const leftKey = params.left_key_col || params.lookup_column || columns[0]?.name || '';
+        const rightKey = params.right_key_col || refCols[0]?.name || '';
+        const colIdx = Number(params.col_index_num ?? 2);
+        const retCol =
+          params.return_column ||
+          refCols[colIdx - 1]?.name ||
+          (Array.isArray(params.return_columns) ? params.return_columns[0] : '') ||
+          refCols[0]?.name ||
+          '';
+        const rangeLookup = Boolean(params.range_lookup);
+
+        return (
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                1. Table Array (Lookup Reference Table)
+              </label>
+              <select
+                value={refDs?.id || ''}
+                onChange={(e) => {
+                  const newDs = datasets.find((d) => d.id === e.target.value);
+                  const newCols = newDs?.schema_metadata || [];
+                  const newIdx = Math.min(colIdx, Math.max(1, newCols.length));
+                  const newRetCol = newCols[newIdx - 1]?.name || '';
+                  updateParams({
+                    lookup_dataset_id: e.target.value,
+                    right_key_col: newCols[0]?.name || '',
+                    col_index_num: newIdx,
+                    return_column: newRetCol,
+                    return_columns: newRetCol ? [newRetCol] : [],
+                  });
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                {datasets.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.row_count} rows • {d.column_count} cols)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  2. Lookup Value Column ({selectedDataset?.name || 'Active Sheet'})
+                </label>
+                <select
+                  value={leftKey}
+                  onChange={(e) => handleParamChange('left_key_col', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Reference Key Column ({refDs?.name || 'Lookup Table'})
+                </label>
+                <select
+                  value={rightKey}
+                  onChange={(e) => handleParamChange('right_key_col', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {refCols.map((c, idx) => (
+                    <option key={c.name} value={c.name}>
+                      Col #{idx + 1}: {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-300">
+                  3. Column Index Number (<code className="font-mono">col_index_num</code>) &amp; Return Column
+                </label>
+                <span className="text-[11px] font-mono text-emerald-400 font-semibold">
+                  Col #{colIdx} ({retCol})
+                </span>
+              </div>
+              <div className="max-h-36 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {refCols.map((c, idx) => {
+                  const idx1 = idx + 1;
+                  const isSel = colIdx === idx1 || retCol === c.name;
+                  return (
+                    <button
+                      key={c.name}
+                      type="button"
+                      onClick={() => {
+                        updateParams({
+                          col_index_num: idx1,
+                          return_column: c.name,
+                          return_columns: [c.name],
+                          output_column: c.name,
+                        });
+                        setLabel(`VLOOKUP Col #${idx1} (${c.name}) from ${refDs?.name || 'Table'}`);
+                      }}
+                      className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded text-xs text-left border transition-colors ${
+                        isSel
+                          ? 'bg-emerald-500/15 border-emerald-500 text-slate-100 font-semibold'
+                          : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="truncate">
+                        <strong className="font-mono text-emerald-400 mr-1">#{idx1}</strong>
+                        {c.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500 uppercase">
+                        {c.data_type}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                4. Range Lookup (<code className="font-mono">[range_lookup]</code>)
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleParamChange('range_lookup', false)}
+                  className={`py-2 px-3 rounded-lg border text-xs font-medium transition-colors ${
+                    !rangeLookup
+                      ? 'bg-emerald-500/15 border-emerald-500 text-slate-100'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  FALSE (0) — Exact Match
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleParamChange('range_lookup', true)}
+                  className={`py-2 px-3 rounded-lg border text-xs font-medium transition-colors ${
+                    rangeLookup
+                      ? 'bg-emerald-500/15 border-emerald-500 text-slate-100'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  TRUE (1) — Approximate Match
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Output Column Name
+                </label>
+                <input
+                  type="text"
+                  value={params.output_column ?? retCol}
+                  onChange={(e) => handleParamChange('output_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  IFERROR Fallback Value
+                </label>
+                <input
+                  type="text"
+                  value={params.if_not_found ?? 'Not found'}
+                  onChange={(e) => handleParamChange('if_not_found', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'xlookup': {
+        const refId = params.lookup_dataset_id || params.right_dataset_id || '';
+        const refDs = getReferenceDataset(refId);
+        const refCols = refDs?.schema_metadata || [];
+        const leftKey = params.left_key_col || params.lookup_column || columns[0]?.name || '';
+        const rightKey =
+          params.right_key_col || params.right_Lookup_column || refCols[0]?.name || '';
+        const returnCols: string[] = Array.isArray(params.return_columns)
+          ? params.return_columns
+          : params.return_column
+          ? [params.return_column]
+          : [];
+
+        return (
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Lookup Reference Table
+              </label>
+              <select
+                value={refDs?.id || ''}
+                onChange={(e) => {
+                  const newDs = datasets.find((d) => d.id === e.target.value);
+                  const newCols = newDs?.schema_metadata || [];
+                  updateParams({
+                    lookup_dataset_id: e.target.value,
+                    right_key_col: newCols[0]?.name || '',
+                    return_columns: newCols.length > 0 ? [newCols[newCols.length - 1].name] : [],
+                  });
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                {datasets.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.row_count} rows • {d.column_count} cols)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Lookup Value ({selectedDataset?.name || 'Active Sheet'})
+                </label>
+                <select
+                  value={leftKey}
+                  onChange={(e) => handleParamChange('left_key_col', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Lookup Array ({refDs?.name || 'Reference Table'})
+                </label>
+                <select
+                  value={rightKey}
+                  onChange={(e) => handleParamChange('right_key_col', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {refCols.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Return Array (Columns to Bring Back)
+              </label>
+              <div className="max-h-32 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {refCols.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={returnCols.includes(c.name)}
+                      onChange={() => {
+                        const next = toggleArrayItem(returnCols, c.name);
+                        handleParamChange('return_columns', next);
+                        if (next.length > 0) {
+                          setLabel(`XLOOKUP ${next.join(', ')} from ${refDs?.name || 'Table'}`);
+                        }
+                      }}
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Match Mode (<code className="font-mono">[match_mode]</code>)
+                </label>
+                <select
+                  value={params.match_mode ?? 0}
+                  onChange={(e) => handleParamChange('match_mode', Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200"
+                >
+                  <option value={0}>0 — Exact match</option>
+                  <option value={-1}>-1 — Exact or next smaller</option>
+                  <option value={1}>1 — Exact or next larger</option>
+                  <option value={2}>2 — Wildcard match (*, ?)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Search Mode (<code className="font-mono">[search_mode]</code>)
+                </label>
+                <select
+                  value={params.search_mode ?? 1}
+                  onChange={(e) => handleParamChange('search_mode', Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200"
+                >
+                  <option value={1}>1 — First-to-Last (Top down)</option>
+                  <option value={-1}>-1 — Last-to-First (Bottom up)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                If Not Found Value (<code className="font-mono">[if_not_found]</code>)
+              </label>
+              <input
+                type="text"
+                value={params.if_not_found ?? 'Not found'}
+                onChange={(e) => handleParamChange('if_not_found', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+            </div>
+          </div>
+        );
+      }
+
+      case 'join': {
+        const rightId = params.right_dataset_id || params.lookup_dataset_id || '';
+        const rightDs = getReferenceDataset(rightId);
+        const rightCols = rightDs?.schema_metadata || [];
+        const keyPairs: any[] =
+          Array.isArray(params.key_pairs) && params.key_pairs.length > 0
+            ? params.key_pairs
+            : [
+                {
+                  left_col: params.left_key || columns[0]?.name || '',
+                  right_col: params.right_key || rightCols[0]?.name || '',
+                  trim_whitespace: true,
+                  case_insensitive: false,
+                },
+              ];
+        const selectedRightCols: string[] = Array.isArray(params.right_columns)
+          ? params.right_columns
+          : rightCols.map((c) => c.name);
+
+        return (
+          <div className="space-y-3.5">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Right Table to Join
+                </label>
+                <select
+                  value={rightDs?.id || ''}
+                  onChange={(e) => {
+                    const newDs = datasets.find((d) => d.id === e.target.value);
+                    const newCols = newDs?.schema_metadata || [];
+                    updateParams({
+                      right_dataset_id: e.target.value,
+                      right_columns: newCols.map((c) => c.name),
+                    });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {datasets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.row_count} rows)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Join Type</label>
+                <select
+                  value={params.join_type || 'left'}
+                  onChange={(e) => handleParamChange('join_type', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  <option value="left">Left Join (Keep all left rows)</option>
+                  <option value="inner">Inner Join (Matching rows only)</option>
+                  <option value="full">Full Outer Join (All rows from both)</option>
+                  <option value="right">Right Join (Keep all right rows)</option>
+                  <option value="left_anti">Left Anti (Only in Left)</option>
+                  <option value="right_anti">Right Anti (Only in Right)</option>
+                  <option value="left_semi">Left Semi (Left with match)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-300">Join Key Mapping</label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleParamChange('key_pairs', [
+                      ...keyPairs,
+                      {
+                        left_col: columns[0]?.name || '',
+                        right_col: rightCols[0]?.name || '',
+                        trim_whitespace: true,
+                        case_insensitive: false,
+                      },
+                    ])
+                  }
+                  className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                >
+                  <Plus size={12} /> Add Key
+                </button>
+              </div>
+              <div className="space-y-2">
+                {keyPairs.map((kp, idx) => (
+                  <div
+                    key={idx}
+                    className="grid grid-cols-12 gap-2 items-center bg-slate-950 p-2 rounded-lg border border-slate-800"
+                  >
+                    <select
+                      value={kp.left_col || kp.left_key || ''}
+                      onChange={(e) => {
+                        const next = [...keyPairs];
+                        next[idx] = { ...next[idx], left_col: e.target.value };
+                        handleParamChange('key_pairs', next);
+                      }}
+                      className="col-span-5 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
+                    >
+                      {columns.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="col-span-1 text-center text-xs text-slate-500">=</span>
+                    <select
+                      value={kp.right_col || kp.right_key || ''}
+                      onChange={(e) => {
+                        const next = [...keyPairs];
+                        next[idx] = { ...next[idx], right_col: e.target.value };
+                        handleParamChange('key_pairs', next);
+                      }}
+                      className="col-span-5 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
+                    >
+                      {rightCols.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    {keyPairs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleParamChange(
+                            'key_pairs',
+                            keyPairs.filter((_, i) => i !== idx)
+                          )
+                        }
+                        className="col-span-1 text-slate-500 hover:text-rose-400 flex justify-center"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Right Table Columns to Include
+              </label>
+              <div className="max-h-28 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {rightCols.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedRightCols.includes(c.name)}
+                      onChange={() =>
+                        handleParamChange('right_columns', toggleArrayItem(selectedRightCols, c.name))
+                      }
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 items-center">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Right Column Prefix
+                </label>
+                <input
+                  type="text"
+                  value={params.right_prefix ?? 'right_'}
+                  onChange={(e) => handleParamChange('right_prefix', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200"
+                />
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300 pt-4">
+                <input
+                  type="checkbox"
+                  checked={Boolean(params.deduplicate_right)}
+                  onChange={(e) => handleParamChange('deduplicate_right', e.target.checked)}
+                  className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                />
+                <span>Deduplicate right table first</span>
+              </label>
+            </div>
+          </div>
+        );
+      }
+
+      case 'append': {
+        const currentIds: string[] = Array.isArray(params.dataset_ids)
+          ? params.dataset_ids
+          : params.append_dataset_id
+          ? [params.append_dataset_id]
+          : [];
+
+        return (
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Tables to Append / Stack
+              </label>
+              <div className="max-h-36 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg space-y-1.5">
+                {datasets
+                  .filter((d) => d.id !== selectedDataset?.id)
+                  .map((d) => (
+                    <label
+                      key={d.id}
+                      className="flex items-center justify-between p-2 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-200 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={currentIds.includes(d.id)}
+                          onChange={() => {
+                            const next = toggleArrayItem(currentIds, d.id);
+                            updateParams({
+                              dataset_ids: next,
+                              append_dataset_id: next[0] || '',
+                            });
+                          }}
+                          className="rounded border-slate-700 bg-slate-950 text-emerald-500"
+                        />
+                        <span className="font-medium">{d.name}</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {d.row_count} rows • {d.column_count} cols
+                      </span>
+                    </label>
+                  ))}
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(params.remove_duplicates)}
+                onChange={(e) => handleParamChange('remove_duplicates', e.target.checked)}
+                className="rounded border-slate-700 bg-slate-950 text-emerald-500"
+              />
+              <span>Remove duplicate rows after union (UNION DISTINCT)</span>
+            </label>
+          </div>
+        );
+      }
+
       case 'change_type':
         return (
           <div className="space-y-3">
@@ -84,7 +682,7 @@ export const EditStepModal: React.FC = () => {
               <select
                 value={params.column || ''}
                 onChange={(e) => handleParamChange('column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
                 {columns.map((c) => (
                   <option key={c.name} value={c.name}>
@@ -98,7 +696,7 @@ export const EditStepModal: React.FC = () => {
               <select
                 value={params.target_type || 'text'}
                 onChange={(e) => handleParamChange('target_type', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
                 <option value="text">Text / String</option>
                 <option value="integer">Integer (Whole number)</option>
@@ -116,9 +714,9 @@ export const EditStepModal: React.FC = () => {
             <div>
               <label className="text-xs font-medium text-slate-300 block mb-1">Current Column Name</label>
               <select
-                value={params.column || ''}
+                value={params.column || params.old_name || ''}
                 onChange={(e) => handleParamChange('column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
                 {columns.map((c) => (
                   <option key={c.name} value={c.name}>
@@ -133,7 +731,7 @@ export const EditStepModal: React.FC = () => {
                 type="text"
                 value={params.new_name || ''}
                 onChange={(e) => handleParamChange('new_name', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               />
             </div>
           </div>
@@ -147,7 +745,7 @@ export const EditStepModal: React.FC = () => {
               <select
                 value={params.column || ''}
                 onChange={(e) => handleParamChange('column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
                 {columns.map((c) => (
                   <option key={c.name} value={c.name}>
@@ -161,7 +759,7 @@ export const EditStepModal: React.FC = () => {
               <select
                 value={params.operator || 'eq'}
                 onChange={(e) => handleParamChange('operator', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
                 <option value="eq">Equals (=)</option>
                 <option value="neq">Does not equal (≠)</option>
@@ -183,7 +781,7 @@ export const EditStepModal: React.FC = () => {
                   type="text"
                   value={params.value ?? ''}
                   onChange={(e) => handleParamChange('value', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 />
               </div>
             )}
@@ -198,7 +796,7 @@ export const EditStepModal: React.FC = () => {
               <select
                 value={params.column || ''}
                 onChange={(e) => handleParamChange('column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
                 {columns.map((c) => (
                   <option key={c.name} value={c.name}>
@@ -237,33 +835,499 @@ export const EditStepModal: React.FC = () => {
           </div>
         );
 
-      case 'math_transform':
+      case 'remove_duplicates': {
+        const selCols: string[] = Array.isArray(params.columns)
+          ? params.columns
+          : params.column
+          ? [params.column]
+          : [];
         return (
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Operation</label>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Columns to Check for Duplicates
+              </label>
+              <div className="max-h-36 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {columns.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selCols.includes(c.name)}
+                      onChange={() =>
+                        handleParamChange('columns', toggleArrayItem(selCols, c.name))
+                      }
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">Keep Occurrence</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleParamChange('keep', 'first')}
+                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                    (params.keep || 'first') === 'first'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Keep First Row
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleParamChange('keep', 'last')}
+                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                    params.keep === 'last'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Keep Last Row
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'fill_down':
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">Target Column</label>
               <select
-                value={params.operation || 'arithmetic'}
-                onChange={(e) => handleParamChange('operation', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                value={params.column || (Array.isArray(params.columns) ? params.columns[0] : '') || ''}
+                onChange={(e) =>
+                  updateParams({ column: e.target.value, columns: [e.target.value] })
+                }
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                <option value="arithmetic">Arithmetic (+, -, *, /)</option>
-                <option value="round">Round</option>
-                <option value="roundup">Round Up (Ceiling)</option>
-                <option value="rounddown">Round Down (Floor)</option>
-                <option value="abs">Absolute Value</option>
-                <option value="percent_change">Percent Change</option>
-                <option value="bin">Numeric Bins / Tiers</option>
+                {columns.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">Fill Direction</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleParamChange('direction', 'down')}
+                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                    (params.direction || 'down') === 'down'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Fill Down (Top → Bottom)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleParamChange('direction', 'up')}
+                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                    params.direction === 'up'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Fill Up (Bottom → Top)
+                </button>
+              </div>
+            </div>
+          </div>
+        );
 
+      case 'split_column':
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">Column to Split</label>
+              <select
+                value={params.column || ''}
+                onChange={(e) => handleParamChange('column', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                {columns.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">Delimiter</label>
+              <input
+                type="text"
+                value={params.delimiter ?? ','}
+                onChange={(e) => handleParamChange('delimiter', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                New Column Names (comma-separated)
+              </label>
+              <input
+                type="text"
+                value={
+                  Array.isArray(params.new_column_names)
+                    ? params.new_column_names.join(', ')
+                    : params.new_column_names || ''
+                }
+                onChange={(e) =>
+                  handleParamChange(
+                    'new_column_names',
+                    e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                  )
+                }
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+            </div>
+          </div>
+        );
+
+      case 'conditional': {
+        const rules: any[] =
+          Array.isArray(params.rules) && params.rules.length > 0
+            ? params.rules
+            : [
+                {
+                  column: params.column || columns[0]?.name || '',
+                  operator: params.operator || 'gt',
+                  value: params.value ?? '',
+                  then_value: params.then_value ?? '',
+                },
+              ];
+
+        return (
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Output Column Name
+              </label>
+              <input
+                type="text"
+                value={params.output_column || params.new_column || params.target_column || ''}
+                onChange={(e) => handleParamChange('output_column', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-300">IF / ELSE IF Rules</label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleParamChange('rules', [
+                      ...rules,
+                      {
+                        column: columns[0]?.name || '',
+                        operator: 'eq',
+                        value: '',
+                        then_value: '',
+                      },
+                    ])
+                  }
+                  className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                >
+                  <Plus size={12} /> Add Rule
+                </button>
+              </div>
+              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                {rules.map((r, idx) => (
+                  <div
+                    key={idx}
+                    className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-[10px] font-mono text-emerald-400">
+                      <span>{idx === 0 ? 'IF' : 'ELSE IF'}</span>
+                      {rules.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleParamChange(
+                              'rules',
+                              rules.filter((_, i) => i !== idx)
+                            )
+                          }
+                          className="text-slate-500 hover:text-rose-400"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <select
+                        value={r.column || ''}
+                        onChange={(e) => {
+                          const next = [...rules];
+                          next[idx] = { ...next[idx], column: e.target.value };
+                          handleParamChange('rules', next);
+                        }}
+                        className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                      >
+                        {columns.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={r.operator || 'eq'}
+                        onChange={(e) => {
+                          const next = [...rules];
+                          next[idx] = { ...next[idx], operator: e.target.value };
+                          handleParamChange('rules', next);
+                        }}
+                        className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                      >
+                        <option value="eq">Equals (=)</option>
+                        <option value="neq">Not Equal (≠)</option>
+                        <option value="gt">&gt;</option>
+                        <option value="gte">&gt;=</option>
+                        <option value="lt">&lt;</option>
+                        <option value="lte">&lt;=</option>
+                        <option value="contains">Contains</option>
+                        <option value="is_null">Is Null</option>
+                        <option value="is_not_null">Not Null</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Value"
+                        value={r.value ?? ''}
+                        onChange={(e) => {
+                          const next = [...rules];
+                          next[idx] = { ...next[idx], value: e.target.value };
+                          handleParamChange('rules', next);
+                        }}
+                        className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-slate-400 shrink-0">THEN →</span>
+                      <input
+                        type="text"
+                        placeholder="Output value when true"
+                        value={r.then_value ?? r.result ?? ''}
+                        onChange={(e) => {
+                          const next = [...rules];
+                          next[idx] = {
+                            ...next[idx],
+                            then_value: e.target.value,
+                            result: e.target.value,
+                          };
+                          handleParamChange('rules', next);
+                        }}
+                        className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                ELSE (Default Fallback Value)
+              </label>
+              <input
+                type="text"
+                value={params.else_value ?? ''}
+                onChange={(e) => handleParamChange('else_value', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+            </div>
+          </div>
+        );
+      }
+
+      case 'group_by': {
+        const groupCols: string[] = Array.isArray(params.group_by_columns)
+          ? params.group_by_columns
+          : Array.isArray(params.group_columns)
+          ? params.group_columns
+          : [];
+        const aggs: any[] =
+          Array.isArray(params.aggregations) && params.aggregations.length > 0
+            ? params.aggregations
+            : [{ column: columns[0]?.name || '', agg_func: 'sum', output_column: 'total' }];
+
+        return (
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Group By Columns
+              </label>
+              <div className="max-h-28 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {columns.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={groupCols.includes(c.name)}
+                      onChange={() => {
+                        const next = toggleArrayItem(groupCols, c.name);
+                        updateParams({ group_by_columns: next, group_columns: next });
+                      }}
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-300">Summary Aggregations</label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleParamChange('aggregations', [
+                      ...aggs,
+                      {
+                        column: columns[0]?.name || '',
+                        agg_func: 'sum',
+                        function: 'sum',
+                        output_column: `sum_${columns[0]?.name || 'col'}`,
+                      },
+                    ])
+                  }
+                  className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                >
+                  <Plus size={12} /> Add Aggregation
+                </button>
+              </div>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {aggs.map((agg, idx) => (
+                  <div
+                    key={idx}
+                    className="grid grid-cols-12 gap-2 items-center bg-slate-950 p-2 rounded-lg border border-slate-800"
+                  >
+                    <select
+                      value={agg.column || ''}
+                      onChange={(e) => {
+                        const next = [...aggs];
+                        next[idx] = { ...next[idx], column: e.target.value };
+                        handleParamChange('aggregations', next);
+                      }}
+                      className="col-span-4 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
+                    >
+                      {columns.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={agg.agg_func || agg.function || 'sum'}
+                      onChange={(e) => {
+                        const next = [...aggs];
+                        next[idx] = {
+                          ...next[idx],
+                          agg_func: e.target.value,
+                          function: e.target.value,
+                        };
+                        handleParamChange('aggregations', next);
+                      }}
+                      className="col-span-3 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
+                    >
+                      <option value="sum">SUM</option>
+                      <option value="count">COUNT</option>
+                      <option value="distinct_count">DISTINCT</option>
+                      <option value="avg">AVG</option>
+                      <option value="min">MIN</option>
+                      <option value="max">MAX</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Output alias"
+                      value={agg.output_column || agg.output_name || agg.alias || ''}
+                      onChange={(e) => {
+                        const next = [...aggs];
+                        next[idx] = {
+                          ...next[idx],
+                          output_column: e.target.value,
+                          alias: e.target.value,
+                        };
+                        handleParamChange('aggregations', next);
+                      }}
+                      className="col-span-4 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
+                    />
+                    {aggs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleParamChange(
+                            'aggregations',
+                            aggs.filter((_, i) => i !== idx)
+                          )
+                        }
+                        className="col-span-1 text-slate-500 hover:text-rose-400 flex justify-center"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'window_calc': {
+        const calcType = params.calc_type || params.function || 'running_total';
+        const partCols: string[] = Array.isArray(params.partition_by) ? params.partition_by : [];
+        return (
+          <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-slate-300 block mb-1">Column 1</label>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Window Function
+                </label>
                 <select
-                  value={params.column1 || ''}
-                  onChange={(e) => handleParamChange('column1', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                  value={calcType}
+                  onChange={(e) =>
+                    updateParams({ calc_type: e.target.value, function: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  <option value="running_total">Running Total (Cumulative Sum)</option>
+                  <option value="running_avg">Running Average</option>
+                  <option value="moving_avg">Moving Average (N-Row Window)</option>
+                  <option value="rank">Rank (Dense Rank)</option>
+                  <option value="row_number">Row Number</option>
+                  <option value="lag">Lag (Previous Row Value)</option>
+                  <option value="lead">Lead (Next Row Value)</option>
+                  <option value="percent_of_total">% of Group Total</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Value Column
+                </label>
+                <select
+                  value={params.value_column || params.target_column || columns[0]?.name || ''}
+                  onChange={(e) =>
+                    updateParams({ value_column: e.target.value, target_column: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
                   {columns.map((c) => (
                     <option key={c.name} value={c.name}>
@@ -272,31 +1336,155 @@ export const EditStepModal: React.FC = () => {
                   ))}
                 </select>
               </div>
-
-              {params.operation === 'arithmetic' && (
-                <div>
-                  <label className="text-xs font-medium text-slate-300 block mb-1">Operator</label>
-                  <select
-                    value={params.math_operator || '-'}
-                    onChange={(e) => handleParamChange('math_operator', e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
-                  >
-                    <option value="+">Plus (+)</option>
-                    <option value="-">Minus (−)</option>
-                    <option value="*">Multiply (×)</option>
-                    <option value="/">Divide (/)</option>
-                  </select>
-                </div>
-              )}
             </div>
 
-            {params.operation === 'arithmetic' && (
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-slate-300 block mb-1">Column 2 (or Second Value)</label>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Order By Column
+                </label>
                 <select
-                  value={params.column2 || ''}
-                  onChange={(e) => handleParamChange('column2', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                  value={params.order_by || columns[0]?.name || ''}
+                  onChange={(e) => handleParamChange('order_by', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Output Column Name
+                </label>
+                <input
+                  type="text"
+                  value={params.output_column || ''}
+                  onChange={(e) => handleParamChange('output_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Partition By Columns (Optional Grouping)
+              </label>
+              <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {columns.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={partCols.includes(c.name)}
+                      onChange={() =>
+                        handleParamChange('partition_by', toggleArrayItem(partCols, c.name))
+                      }
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'date_transform': {
+        const op = params.operation || 'extract_part';
+        return (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Date Column</label>
+                <select
+                  value={params.column || ''}
+                  onChange={(e) => handleParamChange('column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Operation</label>
+                <select
+                  value={op}
+                  onChange={(e) => handleParamChange('operation', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  <option value="extract_part">Extract Date Part (Year, Month, etc.)</option>
+                  <option value="start_of_month">Start of Month</option>
+                  <option value="end_of_month">End of Month (EOMONTH)</option>
+                  <option value="date_add">Add / Subtract Time Interval</option>
+                  <option value="date_diff">Date Difference (DATEDIF)</option>
+                  <option value="fiscal_year">Fiscal Year</option>
+                  <option value="age_days">Age in Days (vs Today)</option>
+                </select>
+              </div>
+            </div>
+
+            {op === 'extract_part' && (
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Date Part</label>
+                <select
+                  value={params.date_part || 'year'}
+                  onChange={(e) => handleParamChange('date_part', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  <option value="year">Year (YYYY)</option>
+                  <option value="quarter">Quarter (1–4)</option>
+                  <option value="month">Month Number (1–12)</option>
+                  <option value="month_name">Month Name</option>
+                  <option value="day">Day of Month</option>
+                  <option value="day_name">Day Name</option>
+                </select>
+              </div>
+            )}
+
+            {op === 'date_add' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">Amount</label>
+                  <input
+                    type="number"
+                    value={params.amount ?? 7}
+                    onChange={(e) => handleParamChange('amount', Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">Unit</label>
+                  <select
+                    value={params.unit || 'days'}
+                    onChange={(e) => handleParamChange('unit', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                  >
+                    <option value="days">Days</option>
+                    <option value="months">Months</option>
+                    <option value="years">Years</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {op === 'date_diff' && (
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  End Date Column
+                </label>
+                <select
+                  value={params.end_date_column || ''}
+                  onChange={(e) => handleParamChange('end_date_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
                   {columns.map((c) => (
                     <option key={c.name} value={c.name}>
@@ -308,16 +1496,162 @@ export const EditStepModal: React.FC = () => {
             )}
 
             <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Output Column Name</label>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Output Column Name
+              </label>
               <input
                 type="text"
-                value={params.output_column || ''}
+                value={params.output_column || params.target_column || ''}
                 onChange={(e) => handleParamChange('output_column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               />
             </div>
           </div>
         );
+      }
+
+      case 'math_transform': {
+        const mode = params.mode || (params.expression ? 'formula' : 'two_col');
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Calculation Mode
+              </label>
+              <select
+                value={mode}
+                onChange={(e) => handleParamChange('mode', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                <option value="two_col">Two Columns (Col1 ± × ÷ Col2)</option>
+                <option value="scalar">Column &amp; Constant Value</option>
+                <option value="round">Round / Absolute Value</option>
+                <option value="formula">Custom Formula Expression</option>
+              </select>
+            </div>
+
+            {mode === 'formula' ? (
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Formula Expression
+                </label>
+                <input
+                  type="text"
+                  value={params.expression || ''}
+                  onChange={(e) => handleParamChange('expression', e.target.value)}
+                  placeholder="e.g. amount - discount"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono"
+                />
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">
+                      Column 1
+                    </label>
+                    <select
+                      value={params.column1 || params.column || columns[0]?.name || ''}
+                      onChange={(e) =>
+                        updateParams({ column1: e.target.value, column: e.target.value })
+                      }
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                    >
+                      {columns.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {mode !== 'round' && (
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">
+                        Operator
+                      </label>
+                      <select
+                        value={params.math_operator || 'subtract'}
+                        onChange={(e) => handleParamChange('math_operator', e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                      >
+                        <option value="add">Add (+)</option>
+                        <option value="subtract">Subtract (−)</option>
+                        <option value="multiply">Multiply (×)</option>
+                        <option value="divide">Divide (÷)</option>
+                        <option value="modulo">Modulo (%)</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {mode === 'two_col' && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">
+                      Column 2
+                    </label>
+                    <select
+                      value={params.column2 || columns[1]?.name || columns[0]?.name || ''}
+                      onChange={(e) => handleParamChange('column2', e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                    >
+                      {columns.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {mode === 'scalar' && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">
+                      Constant Value
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={params.scalar_value ?? params.operand ?? 1}
+                      onChange={(e) => handleParamChange('scalar_value', Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Output Column Name
+                </label>
+                <input
+                  type="text"
+                  value={params.output_column || params.target_column || ''}
+                  onChange={(e) =>
+                    updateParams({ output_column: e.target.value, target_column: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Decimal Places
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={6}
+                  value={params.round_digits ?? 2}
+                  onChange={(e) => handleParamChange('round_digits', Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }
 
       case 'replace_values':
         return (
@@ -327,13 +1661,25 @@ export const EditStepModal: React.FC = () => {
               <select
                 value={params.column || ''}
                 onChange={(e) => handleParamChange('column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
                 {columns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">Match Type</label>
+              <select
+                value={params.match_type || 'exact'}
+                onChange={(e) => handleParamChange('match_type', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                <option value="exact">Exact Match</option>
+                <option value="contains">Contains Substring</option>
+                <option value="is_null">Null / Blank Cells</option>
               </select>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -341,116 +1687,280 @@ export const EditStepModal: React.FC = () => {
                 <label className="text-xs font-medium text-slate-300 block mb-1">Search For</label>
                 <input
                   type="text"
-                  value={params.search_value ?? ''}
+                  value={params.search_value ?? params.old_value ?? ''}
                   onChange={(e) => handleParamChange('search_value', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 />
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-300 block mb-1">Replace With</label>
                 <input
                   type="text"
-                  value={params.replace_value ?? ''}
+                  value={params.replace_value ?? params.new_value ?? ''}
                   onChange={(e) => handleParamChange('replace_value', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 />
               </div>
             </div>
           </div>
         );
 
-      case 'text_transform':
+      case 'text_transform': {
+        const op = params.operation || 'trim';
         return (
           <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Column</label>
-              <select
-                value={params.column || ''}
-                onChange={(e) => handleParamChange('column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
-              >
-                {columns.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Column</label>
+                <select
+                  value={params.column || ''}
+                  onChange={(e) => handleParamChange('column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Operation</label>
+                <select
+                  value={op}
+                  onChange={(e) => handleParamChange('operation', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  <option value="trim">Trim whitespace</option>
+                  <option value="clean">Clean non-printable</option>
+                  <option value="upper">UPPERCASE</option>
+                  <option value="lower">lowercase</option>
+                  <option value="proper">Proper Case (Title)</option>
+                  <option value="substring">Substring (MID)</option>
+                  <option value="replace">Replace Text</option>
+                  <option value="concat">Concatenate Columns</option>
+                  <option value="length">Length (LEN)</option>
+                </select>
+              </div>
             </div>
+
+            {op === 'concat' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">
+                    Second Column
+                  </label>
+                  <select
+                    value={params.other_column || ''}
+                    onChange={(e) => handleParamChange('other_column', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                  >
+                    {columns.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">Separator</label>
+                  <input
+                    type="text"
+                    value={params.delimiter ?? ' '}
+                    onChange={(e) => handleParamChange('delimiter', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                  />
+                </div>
+              </div>
+            )}
+
             <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Operation</label>
-              <select
-                value={params.operation || 'trim'}
-                onChange={(e) => handleParamChange('operation', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
-              >
-                <option value="trim">Trim whitespace</option>
-                <option value="clean">Clean non-printable characters</option>
-                <option value="upper">UPPERCASE</option>
-                <option value="lower">lowercase</option>
-                <option value="proper">Proper Case (Capitalize)</option>
-                <option value="left">LEFT characters</option>
-                <option value="right">RIGHT characters</option>
-                <option value="length">Length (LEN)</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-300 block mb-1">Output Column Name</label>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Output Column Name
+              </label>
               <input
                 type="text"
-                value={params.output_column || ''}
+                value={params.output_column || params.target_column || params.column || ''}
                 onChange={(e) => handleParamChange('output_column', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               />
             </div>
           </div>
         );
+      }
 
-      default:
-        // Default parameter list for other step types
+      case 'pivot': {
+        const idxCols: string[] = Array.isArray(params.index_columns) ? params.index_columns : [];
         return (
           <div className="space-y-3">
-            <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 text-xs text-slate-400">
-              <span className="font-semibold text-slate-200">Step Type: </span>
-              <span className="font-mono text-emerald-400 uppercase">{type.replace('_', ' ')}</span>
-              <p className="mt-1 text-[11px] text-slate-500">
-                You can adjust parameters below or switch to the JSON tab for full configuration control.
-              </p>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Row Index Columns
+              </label>
+              <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {columns.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={idxCols.includes(c.name)}
+                      onChange={() =>
+                        handleParamChange('index_columns', toggleArrayItem(idxCols, c.name))
+                      }
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
             </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Pivot Column
+                </label>
+                <select
+                  value={params.pivot_column || ''}
+                  onChange={(e) => handleParamChange('pivot_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Value Column
+                </label>
+                <select
+                  value={params.value_column || ''}
+                  onChange={(e) => handleParamChange('value_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Aggregation</label>
+                <select
+                  value={params.agg_func || 'sum'}
+                  onChange={(e) => handleParamChange('agg_func', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
+                >
+                  <option value="sum">SUM</option>
+                  <option value="count">COUNT</option>
+                  <option value="avg">AVG</option>
+                  <option value="min">MIN</option>
+                  <option value="max">MAX</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        );
+      }
 
+      case 'unpivot': {
+        const idCols: string[] = Array.isArray(params.id_columns) ? params.id_columns : [];
+        const valCols: string[] = Array.isArray(params.value_columns) ? params.value_columns : [];
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Identifier Columns to Keep
+              </label>
+              <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {columns.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={idCols.includes(c.name)}
+                      onChange={() =>
+                        handleParamChange('id_columns', toggleArrayItem(idCols, c.name))
+                      }
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Value Columns to Unpivot
+              </label>
+              <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {columns.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={valCols.includes(c.name)}
+                      onChange={() =>
+                        handleParamChange('value_columns', toggleArrayItem(valCols, c.name))
+                      }
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Attribute Column Name
+                </label>
+                <input
+                  type="text"
+                  value={params.name_column || 'attribute'}
+                  onChange={(e) => handleParamChange('name_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Value Column Name
+                </label>
+                <input
+                  type="text"
+                  value={params.value_column || 'value'}
+                  onChange={(e) => handleParamChange('value_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      default:
+        return (
+          <div className="space-y-3">
             {Object.entries(params).map(([key, val]) => (
               <div key={key}>
                 <label className="text-xs font-medium text-slate-300 block mb-1 font-mono">
                   {key}
                 </label>
-                {typeof val === 'boolean' ? (
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={val}
-                      onChange={(e) => handleParamChange(key, e.target.checked)}
-                      className="rounded border-slate-700 bg-slate-950 text-emerald-500"
-                    />
-                    <span>{val ? 'Enabled' : 'Disabled'}</span>
-                  </label>
-                ) : typeof val === 'object' && val !== null ? (
-                  <textarea
-                    value={JSON.stringify(val)}
-                    onChange={(e) => {
-                      try {
-                        handleParamChange(key, JSON.parse(e.target.value));
-                      } catch {}
-                    }}
-                    rows={2}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300 focus:outline-none focus:border-emerald-500/50"
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    value={val ?? ''}
-                    onChange={(e) => handleParamChange(key, e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/50"
-                  />
-                )}
+                <input
+                  type="text"
+                  value={typeof val === 'object' ? JSON.stringify(val) : (val ?? '')}
+                  onChange={(e) => handleParamChange(key, e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
               </div>
             ))}
           </div>
@@ -460,7 +1970,7 @@ export const EditStepModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden p-6 relative flex flex-col max-h-[90vh]">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden p-6 relative flex flex-col max-h-[92vh]">
         <button
           onClick={closeEditStepModal}
           className="absolute right-4 top-4 text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-800 transition-colors"
@@ -468,14 +1978,14 @@ export const EditStepModal: React.FC = () => {
           <X size={18} />
         </button>
 
-        <div className="flex items-center gap-3 mb-5 shrink-0">
+        <div className="flex items-center gap-3 mb-4 shrink-0">
           <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-sm">
             <Pencil size={20} />
           </div>
           <div>
             <h3 className="text-base font-bold text-slate-100">Edit Applied Step</h3>
             <p className="text-xs text-slate-400">
-              Modify step parameters in place — DuckDB will automatically recompute the pipeline.
+              Change columns, lookup keys, or parameters — pipeline updates automatically
             </p>
           </div>
         </div>
@@ -492,7 +2002,7 @@ export const EditStepModal: React.FC = () => {
             }`}
           >
             <Sliders size={13} />
-            <span>Parameters</span>
+            <span>Visual Parameters</span>
           </button>
           <button
             type="button"
@@ -518,7 +2028,7 @@ export const EditStepModal: React.FC = () => {
                   type="text"
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500/50"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                   placeholder="Step description / label"
                   required
                 />
@@ -552,7 +2062,7 @@ export const EditStepModal: React.FC = () => {
                   value={rawJson}
                   onChange={(e) => handleRawJsonChange(e.target.value)}
                   rows={10}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-amber-300/90 focus:outline-none focus:border-amber-500/50"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-amber-300/90"
                 />
                 {jsonError && (
                   <div className="flex items-center gap-1.5 text-xs text-rose-400 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">

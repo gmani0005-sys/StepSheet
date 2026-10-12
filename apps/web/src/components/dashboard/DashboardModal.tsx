@@ -2729,47 +2729,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                       </div>
                     </div>
 
-                    {/* Quick Legend Position Selector Grid */}
-                    <div>
-                      <span className="text-[10px] font-semibold text-[#605E5C] uppercase tracking-wider block mb-1">
-                        Place Legend Inside Visual
-                      </span>
-                      <div className="grid grid-cols-4 gap-1">
-                        {(
-                          [
-                            { id: 'top_left', label: 'Top Left' },
-                            { id: 'top', label: 'Top' },
-                            { id: 'top_right', label: 'Top Right' },
-                            { id: 'hide', label: 'Hide' },
-                            { id: 'left', label: 'Left' },
-                            { id: 'left_center', label: 'Left Center' },
-                            { id: 'right', label: 'Right' },
-                            { id: 'right_center', label: 'Right Center' },
-                            { id: 'bottom_left', label: 'Btm Left' },
-                            { id: 'bottom', label: 'Bottom' },
-                            { id: 'bottom_right', label: 'Btm Right' },
-                          ] as { id: LegendPositionType; label: string }[]
-                        ).map((posOpt) => {
-                          const currentPos = activeVisual.legendPosition || 'top_left';
-                          const isActive = currentPos === posOpt.id;
-                          return (
-                            <button
-                              key={posOpt.id}
-                              type="button"
-                              onClick={() => updateActiveVisual({ legendPosition: posOpt.id })}
-                              className={`px-1.5 py-1 rounded text-[10px] font-semibold border transition-all truncate ${
-                                isActive
-                                  ? 'bg-[#E6F2EB] border-[#217346] text-[#185C37]'
-                                  : 'bg-white border-[#D4D4D4] text-[#605E5C] hover:border-[#217346]/40 hover:text-[#212121]'
-                              }`}
-                            >
-                              {posOpt.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
                     {/* Palette Swatches Preview */}
                     <div className="flex items-center gap-1 p-1.5 bg-[#F8F9FA] rounded-lg border border-[#E1E1E1]">
                       {getVisualPalette(activeVisual).map((hex, i) => (

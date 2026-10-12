@@ -711,19 +711,20 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText(/3\. Edit Legend & Colors/i)).toBeDefined();
     expect(screen.getByText(/4\. Conditional Formatting/i)).toBeDefined();
 
-    // Verify Legend Position options (Left, Left Center, Right, Right Center, Top Left, Top Right) update the visual layout
-    expect(screen.getByText(/Place Legend Inside Visual/i)).toBeDefined();
-    fireEvent.click(screen.getByRole('button', { name: 'Left Center' }));
+    // Verify Legend Position dropdown options (Left, Left Center, Right, Right Center, Top Left, Top Right) update the visual layout
+    expect(screen.queryByText(/Place Legend Inside Visual/i)).toBeNull();
+    const legendSelect = screen.getByLabelText('Legend Position');
+    fireEvent.change(legendSelect, { target: { value: 'left_center' } });
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('left_center');
-    fireEvent.click(screen.getByRole('button', { name: 'Right Center' }));
+    fireEvent.change(legendSelect, { target: { value: 'right_center' } });
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('right_center');
-    fireEvent.click(screen.getByRole('button', { name: 'Top Right' }));
+    fireEvent.change(legendSelect, { target: { value: 'top_right' } });
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('top_right');
-    fireEvent.click(screen.getByRole('button', { name: 'Left' }));
+    fireEvent.change(legendSelect, { target: { value: 'left' } });
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('left');
-    fireEvent.click(screen.getByRole('button', { name: 'Right' }));
+    fireEvent.change(legendSelect, { target: { value: 'right' } });
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('right');
-    fireEvent.click(screen.getByRole('button', { name: 'Top Left' }));
+    fireEvent.change(legendSelect, { target: { value: 'top_left' } });
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('top_left');
   });
 });

@@ -26,6 +26,7 @@ import { TemplatesModal } from '../components/templates/TemplatesModal';
 import { VersionHistoryModal } from '../components/versioning/VersionHistoryModal';
 import { ShareModal } from '../components/collab/ShareModal';
 import { AuditModal } from '../components/audit/AuditModal';
+import { DashboardModal } from '../components/dashboard/DashboardModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -38,6 +39,7 @@ export const WorkbenchPage: React.FC = () => {
   const [isVersionsOpen, setIsVersionsOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [exportInitialTab, setExportInitialTab] = useState<'files' | 'code' | 'run'>('files');
   const [joinInitialRightId, setJoinInitialRightId] = useState<string | undefined>(undefined);
   const [joinInitialKeyPair, setJoinInitialKeyPair] = useState<{
@@ -81,6 +83,7 @@ export const WorkbenchPage: React.FC = () => {
         onOpenVersions={() => setIsVersionsOpen(true)}
         onOpenShare={() => setIsShareOpen(true)}
         onOpenAudit={() => setIsAuditOpen(true)}
+        onOpenDashboard={() => setIsDashboardOpen(true)}
       />
 
       {/* Main 3-Panel Layout */}
@@ -222,6 +225,11 @@ export const WorkbenchPage: React.FC = () => {
         isOpen={isAuditOpen}
         onClose={() => setIsAuditOpen(false)}
         projectId={selectedDataset?.project_id || 'default-project'}
+      />
+
+      <DashboardModal
+        isOpen={isDashboardOpen}
+        onClose={() => setIsDashboardOpen(false)}
       />
     </div>
   );

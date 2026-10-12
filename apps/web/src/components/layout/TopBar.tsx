@@ -38,6 +38,7 @@ import {
   ChevronUp,
   ChevronDown,
   CheckCircle2,
+  BarChart3,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { useAuthStore } from '../../store/authStore';
@@ -53,6 +54,7 @@ interface TopBarProps {
   onOpenVersions?: () => void;
   onOpenShare?: () => void;
   onOpenAudit?: () => void;
+  onOpenDashboard?: () => void;
 }
 
 type RibbonTabId = 'Home' | 'Formulas' | 'Data' | 'Join' | 'Quality' | 'View' | 'Help';
@@ -83,6 +85,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenVersions,
   onOpenShare,
   onOpenAudit,
+  onOpenDashboard,
 }) => {
   const {
     selectedDataset,
@@ -254,8 +257,16 @@ export const TopBar: React.FC<TopBarProps> = ({
         ],
       },
       {
-        name: 'Relationships & Quality',
+        name: 'Visuals, Canvas & Quality',
         items: [
+          {
+            id: 'home-dashboard',
+            label: 'Dashboard',
+            icon: BarChart3,
+            onClick: () => onOpenDashboard?.(),
+            title: 'Power BI Visual Dashboard: Bar, Clustered Bar, Column, Histogram, Donut, Pie & Treemap',
+            accent: true,
+          },
           {
             id: 'home-canvas',
             label: 'Canvas / ER',
@@ -518,6 +529,19 @@ export const TopBar: React.FC<TopBarProps> = ({
     ],
     View: [
       {
+        name: 'Visual Analytics',
+        items: [
+          {
+            id: 'v-dashboard',
+            label: 'Power BI Dashboard',
+            icon: BarChart3,
+            onClick: () => onOpenDashboard?.(),
+            title: 'Open interactive Power BI Visual Dashboard (Bar, Clustered Bar, Column, Histogram, Donut, Pie)',
+            accent: true,
+          },
+        ],
+      },
+      {
         name: 'Show Panes',
         items: [
           {
@@ -699,8 +723,18 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
         </div>
 
-        {/* Right: Share, User Menu, Task Pane Toggle */}
+        {/* Right: Dashboard, Share, User Menu, Task Pane Toggle */}
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onOpenDashboard}
+            title="Open Power BI Visual Dashboard (Bar, Clustered Bar, Column, Histogram, Donut, Pie)"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-[#185C37] hover:bg-[#124629] text-white border border-white/30 rounded-[2px] whitespace-nowrap shrink-0 transition-colors"
+          >
+            <BarChart3 size={14} className="shrink-0" />
+            <span> Visuals</span>
+          </button>
+
           <button
             type="button"
             onClick={onOpenShare}

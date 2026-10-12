@@ -18,6 +18,7 @@ import { TemplatesModal } from '../components/templates/TemplatesModal';
 import { VersionHistoryModal } from '../components/versioning/VersionHistoryModal';
 import { ShareModal } from '../components/collab/ShareModal';
 import { AuditModal } from '../components/audit/AuditModal';
+import { DashboardModal } from '../components/dashboard/DashboardModal';
 import { EditStepModal } from '../components/steps/EditStepModal';
 import { RightPanel } from '../components/layout/RightPanel';
 import { LeftPanel } from '../components/layout/LeftPanel';
@@ -685,6 +686,15 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Excel PivotTable Builder')).toBeDefined();
     expect(screen.getByText('Live PivotTable Preview')).toBeDefined();
     expect(screen.getByText('Apply PivotTable to Sheet')).toBeDefined();
+
+    // 9. Power BI Visual Dashboard & Custom Visuals Studio
+    render(<DashboardModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText(/Power BI Visual Dashboard/i)).toBeDefined();
+    expect(screen.getByText('Visualizations Pane')).toBeDefined();
+    expect(screen.getAllByText('Clustered Bar').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Histogram').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Donut').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Pie').length).toBeGreaterThan(0);
   });
 });
 

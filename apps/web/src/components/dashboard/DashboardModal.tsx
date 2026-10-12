@@ -15,7 +15,6 @@ import {
   SlidersHorizontal,
   LayoutGrid,
   Activity,
-  Hash,
   Table2,
   Grid,
   Pencil,
@@ -264,6 +263,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   const [selectedVisualId, setSelectedVisualId] = useState<string | null>(null);
   const [selectedKpiId, setSelectedKpiId] = useState<string | null>(null);
   const [paletteId, setPaletteId] = useState<PaletteId>('classic');
+  const [dashboardTitle, setDashboardTitle] = useState<string>('');
 
   // Inline Title Editing State on Canvas Cards
   const [editingTitleVisId, setEditingTitleVisId] = useState<string | null>(null);
@@ -456,6 +456,11 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         if (saved.paletteId && COLOR_PALETTES[saved.paletteId as PaletteId]) {
           setPaletteId(saved.paletteId as PaletteId);
         }
+        setDashboardTitle(
+          typeof saved.dashboardTitle === 'string'
+            ? saved.dashboardTitle
+            : `${selectedDataset?.name || 'Executive'} Dashboard`
+        );
         setVisuals(saved.visuals);
         setKpiCards(
           Array.isArray(saved.kpiCards) && saved.kpiCards.length > 0
@@ -477,6 +482,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
 
     const defaultVisuals = buildDefaultVisuals();
     const defaultKpis = buildDefaultKpiCards();
+    setDashboardTitle(`${selectedDataset?.name || 'Executive'} Dashboard`);
     setVisuals(defaultVisuals);
     setKpiCards(defaultKpis);
     setSlicerColumns([cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i));
@@ -492,12 +498,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     try {
       const raw = localStorage.getItem(STORAGE_KEY_DASHBOARDS);
       const parsed = raw ? JSON.parse(raw) : {};
-      parsed[dsKey] = { visuals, kpiCards, slicerColumns, paletteId };
+      parsed[dsKey] = { visuals, kpiCards, slicerColumns, paletteId, dashboardTitle };
       localStorage.setItem(STORAGE_KEY_DASHBOARDS, JSON.stringify(parsed));
     } catch {
       // ignore
     }
-  }, [visuals, kpiCards, slicerColumns, paletteId, selectedDataset?.id, isOpen]);
+  }, [visuals, kpiCards, slicerColumns, paletteId, dashboardTitle, selectedDataset?.id, isOpen]);
 
   const getDistinctValuesForColumn = (col: string): string[] => {
     if (!col) return [];
@@ -874,6 +880,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     const defaults = buildDefaultVisuals();
     const defaultKpis = buildDefaultKpiCards();
     const { cat1, cat2 } = getSmartDefaults();
+    setDashboardTitle(`${selectedDataset?.name || 'Executive'} Dashboard`);
     setVisuals(defaults);
     setKpiCards(defaultKpis);
     setSlicerColumns([cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i));
@@ -2406,15 +2413,24 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[#F3F3F3]">
             {/* Dynamic KPI Cards Section */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#605E5C] flex items-center gap-1.5">
-                  <Hash className="w-3.5 h-3.5 text-[#217346]" />
-                  Dynamic KPI Cards ({kpiCards.length}) — Click any card to customize title, color &amp; metric
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-1 min-w-[260px] max-w-xl">
+                  <span className="px-2 py-1 rounded-md bg-[#E6F2EB] text-[#217346] border border-[#217346]/30 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
+                    <Pencil className="w-3 h-3" /> Text Box
+                  </span>
+                  <input
+                    type="text"
+                    aria-label="Dashboard Title"
+                    value={dashboardTitle}
+                    onChange={(e) => setDashboardTitle(e.target.value)}
+                    placeholder="Enter Dashboard Title..."
+                    className="flex-1 bg-white border border-[#D4D4D4] hover:border-[#217346]/60 focus:border-[#217346] focus:ring-2 focus:ring-[#217346]/20 focus:outline-none rounded-lg px-3 py-1.5 text-sm font-extrabold text-[#212121] shadow-sm transition-all"
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={handleAddKpiCard}
-                  className="text-xs font-semibold text-[#217346] hover:underline flex items-center gap-1"
+                  className="text-xs font-semibold text-[#217346] hover:underline flex items-center gap-1 shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add KPI Card
                 </button>

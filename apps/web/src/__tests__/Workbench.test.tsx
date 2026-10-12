@@ -750,6 +750,12 @@ describe('StepSheet Workbench', () => {
     expect((labelPosSelect as HTMLSelectElement).value).toBe('inside_center');
     fireEvent.change(labelFormatSelect, { target: { value: 'totals_and_percentage' } });
     expect((labelFormatSelect as HTMLSelectElement).value).toBe('totals_and_percentage');
+
+    // Verify Dashboard Title Text Box option above KPI Cards
+    const dashboardTitleInput = screen.getByLabelText('Dashboard Title') as HTMLInputElement;
+    expect(dashboardTitleInput).toBeDefined();
+    fireEvent.change(dashboardTitleInput, { target: { value: 'Q4 Revenue Performance Dashboard' } });
+    expect(dashboardTitleInput.value).toBe('Q4 Revenue Performance Dashboard');
   });
 });
 

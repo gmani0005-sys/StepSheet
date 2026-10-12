@@ -94,6 +94,10 @@ export type LegendPositionType =
   | 'bottom_right'
   | 'hide';
 
+export type DataLabelPositionType = 'inside_end' | 'outside_end' | 'inside_center';
+
+export type DataLabelContentType = 'totals_only' | 'totals_and_percentage';
+
 export interface DashboardVisualConfig {
   id: string;
   title: string;
@@ -108,6 +112,8 @@ export interface DashboardVisualConfig {
   topN: number;
   sortBy: 'value_desc' | 'value_asc' | 'category_asc';
   showDataLabels: boolean;
+  dataLabelPosition?: DataLabelPositionType;
+  dataLabelContent?: DataLabelContentType;
   span: 1 | 2;
   paletteId?: PaletteId;
   legendPosition?: LegendPositionType;
@@ -447,6 +453,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             colNames.includes(v.categoryCol) || colNames.includes(v.valueCol)
         )
       ) {
+        if (saved.paletteId && COLOR_PALETTES[saved.paletteId as PaletteId]) {
+          setPaletteId(saved.paletteId as PaletteId);
+        }
         setVisuals(saved.visuals);
         setKpiCards(
           Array.isArray(saved.kpiCards) && saved.kpiCards.length > 0
@@ -483,12 +492,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     try {
       const raw = localStorage.getItem(STORAGE_KEY_DASHBOARDS);
       const parsed = raw ? JSON.parse(raw) : {};
-      parsed[dsKey] = { visuals, kpiCards, slicerColumns };
+      parsed[dsKey] = { visuals, kpiCards, slicerColumns, paletteId };
       localStorage.setItem(STORAGE_KEY_DASHBOARDS, JSON.stringify(parsed));
     } catch {
       // ignore
     }
-  }, [visuals, kpiCards, slicerColumns, selectedDataset?.id, isOpen]);
+  }, [visuals, kpiCards, slicerColumns, paletteId, selectedDataset?.id, isOpen]);
 
   const getDistinctValuesForColumn = (col: string): string[] => {
     if (!col) return [];
@@ -895,7 +904,24 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     return getDistinctValuesForColumn(targetCol).slice(0, activeVisual.topN || 10);
   })();
 
-  // Universal wrapper to position the legend inside any chart visual
+  // Format data label text according to visual's dataLabelContent ('totals_only' | 'totals_and_percentage')
+  const formatDataLabel = (
+    vis: DashboardVisualConfig,
+    val: number,
+    total: number,
+    badge?: string
+  ): string => {
+    const contentMode: DataLabelContentType = vis.dataLabelContent || 'totals_only';
+    const prefix = badge ? `${badge}` : '';
+    const numStr = formatNum(val);
+    if (contentMode === 'totals_and_percentage') {
+      const pct = total > 0 ? ((Math.max(0, val) / total) * 100).toFixed(1) : '0.0';
+      return `${prefix}${numStr} (${pct}%)`;
+    }
+    return `${prefix}${numStr}`;
+  };
+
+  // Universal wrapper to position the legend inside any chart visual (legend shows ONLY swatch + label, never data values)
   const wrapWithLegend = (
     vis: DashboardVisualConfig,
     chartNode: React.ReactNode,
@@ -904,8 +930,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       label: string;
       color: string;
       filterCol: string;
-      valueText?: string;
-      shareText?: string;
     }[]
   ) => {
     const pos: LegendPositionType = vis.legendPosition || 'top_left';
@@ -931,7 +955,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       <div
         data-testid={`visual-legend-${vis.id}`}
         data-legend-position={pos}
-        className="w-40 sm:w-44 shrink-0 space-y-1 max-h-52 overflow-y-auto px-2 py-1.5 bg-[#FAFAFA] border border-[#EAEAEA] rounded-lg"
+        className="w-36 sm:w-40 shrink-0 space-y-1 max-h-52 overflow-y-auto px-2 py-1.5 bg-[#FAFAFA] border border-[#EAEAEA] rounded-lg"
       >
         {legendEntries.map((entry) => {
           const isSelected =
@@ -943,26 +967,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               key={entry.key}
               type="button"
               onClick={() => entry.filterCol && toggleCrossFilter(entry.filterCol, entry.key)}
-              className={`w-full flex items-center justify-between gap-1.5 text-[11px] px-1.5 py-1 rounded transition-colors ${
+              className={`w-full flex items-center gap-1.5 text-[11px] px-1.5 py-1 rounded transition-colors ${
                 isSelected
                   ? 'bg-[#E6F2EB] text-[#185C37] font-bold'
                   : 'text-[#212121] hover:bg-[#EFEFEF]'
               }`}
-              title={`${entry.label}${entry.valueText ? `: ${entry.valueText}` : ''}`}
+              title={entry.label}
             >
-              <span className="flex items-center gap-1.5 min-w-0">
-                <span
-                  className="w-2.5 h-2.5 rounded-sm shrink-0"
-                  style={{ backgroundColor: entry.color }}
-                />
-                <span className="truncate font-medium">{entry.label}</span>
-              </span>
-              {entry.valueText && (
-                <span className="font-mono text-[10px] text-[#605E5C] shrink-0">
-                  {entry.valueText}
-                  {entry.shareText ? ` (${entry.shareText})` : ''}
-                </span>
-              )}
+              <span
+                className="w-2.5 h-2.5 rounded-sm shrink-0"
+                style={{ backgroundColor: entry.color }}
+              />
+              <span className="truncate font-medium">{entry.label}</span>
             </button>
           );
         })}
@@ -988,16 +1004,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                   ? 'bg-[#E6F2EB] text-[#185C37] font-bold'
                   : 'text-[#212121] hover:text-[#217346] hover:bg-[#EFEFEF]'
               }`}
-              title={`${entry.label}${entry.valueText ? `: ${entry.valueText}` : ''}`}
+              title={entry.label}
             >
               <span
                 className="w-2.5 h-2.5 rounded-sm shrink-0"
                 style={{ backgroundColor: entry.color }}
               />
               <span className="truncate max-w-[120px] font-medium">{entry.label}</span>
-              {entry.shareText && (
-                <span className="font-mono text-[10px] text-[#605E5C]">({entry.shareText})</span>
-              )}
             </button>
           );
         })}
@@ -1059,6 +1072,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   // Render an individual Visual Card
   const renderVisualContent = (vis: DashboardVisualConfig) => {
     const visPalette = getVisualPalette(vis);
+    const labelPos: DataLabelPositionType = vis.dataLabelPosition || 'outside_end';
 
     // 1. HISTOGRAM VISUAL
     if (vis.type === 'histogram') {
@@ -1106,7 +1120,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           label: b.label,
           color: barColor,
           filterCol: '',
-          valueText: String(b.count),
         };
       });
 
@@ -1124,18 +1137,19 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           </div>
           <div className="h-48 flex items-end gap-1.5 pt-6 pb-2 px-2 border-b border-[#D4D4D4]">
             {buckets.map((b, i) => {
-              const heightPct = Math.max(4, Math.round((b.count / maxCount) * 100));
+              const heightPct = Math.max(12, Math.round((b.count / maxCount) * 100));
               const cfStyle = getConditionalFormatStyle(vis, b.count, minCount, maxCount);
               const barColor = cfStyle.text || visPalette[i % visPalette.length];
+              const lblText = formatDataLabel(vis, b.count, nums.length);
               return (
                 <div
                   key={i}
                   className="flex-1 flex flex-col items-center justify-end h-full group"
                   title={`${b.label}: ${b.count} rows`}
                 >
-                  {vis.showDataLabels && (
-                    <span className="text-[10px] font-mono font-semibold text-[#212121] mb-1">
-                      {b.count}
+                  {vis.showDataLabels && labelPos === 'outside_end' && (
+                    <span className="text-[9px] font-mono font-semibold text-[#212121] mb-1 whitespace-nowrap">
+                      {lblText}
                     </span>
                   )}
                   <div
@@ -1143,8 +1157,16 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                       height: `${heightPct}%`,
                       backgroundColor: barColor,
                     }}
-                    className="w-full rounded-t transition-all opacity-90 group-hover:opacity-100"
-                  />
+                    className={`w-full rounded-t transition-all opacity-90 group-hover:opacity-100 flex flex-col items-center overflow-hidden ${
+                      labelPos === 'inside_center' ? 'justify-center' : 'justify-start pt-1'
+                    }`}
+                  >
+                    {vis.showDataLabels && labelPos !== 'outside_end' && (
+                      <span className="text-[9px] font-mono font-bold text-white drop-shadow whitespace-nowrap">
+                        {lblText}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1200,18 +1222,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       );
     }
 
-    // Standard category legend entries for single-series charts (bar, column, donut, pie, line_area, treemap)
+    // Standard category legend entries for single-series charts (swatch + category label ONLY, no embedded data values)
     const categoryLegendEntries = items.map((item, idx) => {
-      const cfStyle = getConditionalFormatStyle(vis, item.value, minVal, maxVal);
+      const cfStyle =
+        vis.type === 'donut' || vis.type === 'pie'
+          ? {}
+          : getConditionalFormatStyle(vis, item.value, minVal, maxVal);
       const itemColor = cfStyle.text || getItemColor(vis, item.category, idx);
-      const share = ((Math.max(0, item.value) / totalVal) * 100).toFixed(1) + '%';
       return {
         key: item.category,
         label: getItemLegendLabel(vis, item.category),
         color: itemColor,
         filterCol: vis.categoryCol,
-        valueText: formatNum(item.value),
-        shareText: share,
       };
     });
 
@@ -1524,24 +1546,35 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                 <div className="space-y-1 pl-2 border-l border-[#D4D4D4]">
                   {seriesKeys.map((sk, sIdx) => {
                     const val = row.seriesVals[sk] || 0;
-                    const pct = Math.max(2, Math.round((val / maxSeriesVal) * 100));
+                    const pct = Math.max(12, Math.round((val / maxSeriesVal) * 100));
+                    const lblText = formatDataLabel(vis, val, row.rowSum || totalVal);
                     return (
                       <div key={sk} className="flex items-center gap-2">
                         <span className="w-16 text-[10px] text-[#605E5C] truncate">
                           {getItemLegendLabel(vis, sk)}
                         </span>
-                        <div className="flex-1 h-3.5 bg-[#EFEFEF] rounded-sm overflow-hidden">
+                        <div className="flex-1 h-4 bg-[#EFEFEF] rounded-sm overflow-hidden">
                           <div
                             style={{
                               width: `${pct}%`,
                               backgroundColor: getItemColor(vis, sk, sIdx),
                             }}
-                            className="h-full rounded-sm transition-all"
-                          />
+                            className={`h-full rounded-sm transition-all flex items-center overflow-hidden ${
+                              labelPos === 'inside_center'
+                                ? 'justify-center'
+                                : 'justify-end pr-1.5'
+                            }`}
+                          >
+                            {vis.showDataLabels && labelPos !== 'outside_end' && (
+                              <span className="text-[9px] font-mono font-bold text-white drop-shadow whitespace-nowrap">
+                                {lblText}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        {vis.showDataLabels && (
-                          <span className="w-14 text-right text-[10px] font-mono font-semibold text-[#212121]">
-                            {formatNum(val)}
+                        {vis.showDataLabels && labelPos === 'outside_end' && (
+                          <span className="text-right text-[10px] font-mono font-semibold text-[#212121] whitespace-nowrap">
+                            {lblText}
                           </span>
                         )}
                       </div>
@@ -1554,63 +1587,95 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         ) : (
           <div>
             <div className="h-48 flex items-end gap-3 pt-4 pb-2 px-2 border-b border-[#D4D4D4]">
-              {matrix.map((row) => (
-                <div
-                  key={row.category}
-                  onClick={() => toggleCrossFilter(vis.categoryCol, row.category)}
-                  className="flex-1 h-full flex flex-col justify-end items-center cursor-pointer group"
-                >
-                  {vis.type === 'stacked_column' ? (
-                    <div className="w-full max-w-[44px] h-full flex flex-col justify-end">
-                      {vis.showDataLabels && (
-                        <span className="text-[10px] font-mono font-semibold text-[#212121] text-center mb-1">
-                          {formatNum(row.rowSum)}
-                        </span>
-                      )}
-                      <div
-                        style={{
-                          height: `${Math.max(6, Math.round((row.rowSum / maxSeriesVal) * 100))}%`,
-                        }}
-                        className="w-full flex flex-col rounded-t overflow-hidden"
-                      >
+              {matrix.map((row) => {
+                const rowLbl = formatDataLabel(vis, row.rowSum, totalVal);
+                return (
+                  <div
+                    key={row.category}
+                    onClick={() => toggleCrossFilter(vis.categoryCol, row.category)}
+                    className="flex-1 h-full flex flex-col justify-end items-center cursor-pointer group"
+                  >
+                    {vis.type === 'stacked_column' ? (
+                      <div className="w-full max-w-[44px] h-full flex flex-col justify-end items-center">
+                        {vis.showDataLabels && labelPos === 'outside_end' && (
+                          <span className="text-[9px] font-mono font-semibold text-[#212121] text-center mb-1 whitespace-nowrap">
+                            {rowLbl}
+                          </span>
+                        )}
+                        <div
+                          style={{
+                            height: `${Math.max(14, Math.round((row.rowSum / maxSeriesVal) * 100))}%`,
+                          }}
+                          className="w-full flex flex-col rounded-t overflow-hidden relative"
+                        >
+                          {seriesKeys.map((sk, sIdx) => {
+                            const val = row.seriesVals[sk] || 0;
+                            const share = row.rowSum > 0 ? (val / row.rowSum) * 100 : 0;
+                            if (share <= 0) return null;
+                            return (
+                              <div
+                                key={sk}
+                                style={{
+                                  height: `${share}%`,
+                                  backgroundColor: getItemColor(vis, sk, sIdx),
+                                }}
+                                title={`${row.category} • ${getItemLegendLabel(vis, sk)}: ${formatNum(val)}`}
+                              />
+                            );
+                          })}
+                          {vis.showDataLabels && labelPos !== 'outside_end' && (
+                            <div
+                              className={`absolute inset-0 flex flex-col items-center pointer-events-none ${
+                                labelPos === 'inside_center' ? 'justify-center' : 'justify-start pt-1'
+                              }`}
+                            >
+                              <span className="text-[9px] font-mono font-bold text-white drop-shadow whitespace-nowrap">
+                                {rowLbl}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full h-full flex items-end justify-center gap-1">
                         {seriesKeys.map((sk, sIdx) => {
                           const val = row.seriesVals[sk] || 0;
-                          const share = row.rowSum > 0 ? (val / row.rowSum) * 100 : 0;
-                          if (share <= 0) return null;
+                          const hPct = Math.max(12, Math.round((val / maxSeriesVal) * 100));
+                          const subLbl = formatDataLabel(vis, val, row.rowSum || totalVal);
                           return (
                             <div
                               key={sk}
-                              style={{
-                                height: `${share}%`,
-                                backgroundColor: getItemColor(vis, sk, sIdx),
-                              }}
-                              title={`${row.category} • ${getItemLegendLabel(vis, sk)}: ${formatNum(val)}`}
-                            />
+                              className="flex-1 max-w-[18px] h-full flex flex-col justify-end items-center"
+                            >
+                              {vis.showDataLabels && labelPos === 'outside_end' && (
+                                <span className="text-[8px] font-mono font-semibold text-[#212121] mb-0.5 whitespace-nowrap">
+                                  {subLbl}
+                                </span>
+                              )}
+                              <div
+                                style={{
+                                  height: `${hPct}%`,
+                                  backgroundColor: getItemColor(vis, sk, sIdx),
+                                }}
+                                title={`${row.category} • ${getItemLegendLabel(vis, sk)}: ${formatNum(val)}`}
+                                className={`w-full rounded-t transition-all opacity-90 group-hover:opacity-100 flex flex-col items-center overflow-hidden ${
+                                  labelPos === 'inside_center' ? 'justify-center' : 'justify-start pt-0.5'
+                                }`}
+                              >
+                                {vis.showDataLabels && labelPos !== 'outside_end' && (
+                                  <span className="text-[8px] font-mono font-bold text-white drop-shadow whitespace-nowrap">
+                                    {subLbl}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           );
                         })}
                       </div>
-                    </div>
-                  ) : (
-                    <div className="w-full h-full flex items-end justify-center gap-1">
-                      {seriesKeys.map((sk, sIdx) => {
-                        const val = row.seriesVals[sk] || 0;
-                        const hPct = Math.max(4, Math.round((val / maxSeriesVal) * 100));
-                        return (
-                          <div
-                            key={sk}
-                            style={{
-                              height: `${hPct}%`,
-                              backgroundColor: getItemColor(vis, sk, sIdx),
-                            }}
-                            title={`${row.category} • ${getItemLegendLabel(vis, sk)}: ${formatNum(val)}`}
-                            className="flex-1 max-w-[16px] rounded-t transition-all opacity-90 group-hover:opacity-100"
-                          />
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div className="flex items-center gap-3 px-2 pt-1.5">
               {matrix.map((row) => (
@@ -1634,11 +1699,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       const barChart = (
         <div className="space-y-2 max-h-60 overflow-y-auto pr-1 pt-1">
           {items.map((item, idx) => {
-            const pct = Math.max(3, Math.round((Math.abs(item.value) / maxVal) * 100));
+            const pct = Math.max(14, Math.round((Math.abs(item.value) / maxVal) * 100));
             const cfStyle = getConditionalFormatStyle(vis, item.value, minVal, maxVal);
             const barColor = cfStyle.text || getItemColor(vis, item.category, idx);
             const isSelected =
               crossFilter?.column === vis.categoryCol && crossFilter?.value === item.category;
+            const lblText = formatDataLabel(vis, item.value, totalVal, cfStyle.badge);
             return (
               <div
                 key={item.category}
@@ -1651,24 +1717,34 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                   <span className="font-semibold text-[#212121] truncate max-w-[200px]">
                     {getItemLegendLabel(vis, item.category)}
                   </span>
-                  {vis.showDataLabels && (
-                    <span className="font-mono font-semibold text-xs text-[#212121]">
-                      {cfStyle.badge && <span className="mr-1">{cfStyle.badge}</span>}
-                      {formatNum(item.value)}{' '}
-                      <span className="text-[10px] text-[#605E5C]">
-                        ({((Math.max(0, item.value) / totalVal) * 100).toFixed(1)}%)
-                      </span>
+                  {vis.showDataLabels && labelPos === 'outside_end' && (
+                    <span
+                      data-testid={`data-label-${vis.id}-${idx}`}
+                      className="font-mono font-semibold text-xs text-[#212121]"
+                    >
+                      {lblText}
                     </span>
                   )}
                 </div>
-                <div className="w-full h-4 bg-[#EFEFEF] rounded overflow-hidden">
+                <div className="w-full h-5 bg-[#EFEFEF] rounded overflow-hidden">
                   <div
                     style={{
                       width: `${pct}%`,
                       backgroundColor: barColor,
                     }}
-                    className="h-full rounded transition-all"
-                  />
+                    className={`h-full rounded transition-all flex items-center overflow-hidden ${
+                      labelPos === 'inside_center' ? 'justify-center px-1' : 'justify-end pr-2'
+                    }`}
+                  >
+                    {vis.showDataLabels && labelPos !== 'outside_end' && (
+                      <span
+                        data-testid={`data-label-${vis.id}-${idx}`}
+                        className="font-mono font-bold text-[10px] text-white drop-shadow whitespace-nowrap"
+                      >
+                        {lblText}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1684,11 +1760,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         <div className="pt-2">
           <div className="h-48 flex items-end gap-2.5 pt-6 pb-2 px-2 border-b border-[#D4D4D4]">
             {items.map((item, idx) => {
-              const hPct = Math.max(5, Math.round((Math.abs(item.value) / maxVal) * 100));
+              const hPct = Math.max(14, Math.round((Math.abs(item.value) / maxVal) * 100));
               const cfStyle = getConditionalFormatStyle(vis, item.value, minVal, maxVal);
               const colColor = cfStyle.text || getItemColor(vis, item.category, idx);
               const isSelected =
                 crossFilter?.column === vis.categoryCol && crossFilter?.value === item.category;
+              const lblText = formatDataLabel(vis, item.value, totalVal, cfStyle.badge);
               return (
                 <div
                   key={item.category}
@@ -1696,9 +1773,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                   className="flex-1 h-full flex flex-col items-center justify-end cursor-pointer group"
                   title={`${getItemLegendLabel(vis, item.category)}: ${formatNum(item.value)}`}
                 >
-                  {vis.showDataLabels && (
-                    <span className="text-[10px] font-mono font-bold text-[#212121] mb-1">
-                      {cfStyle.badge ? `${cfStyle.badge}${formatNum(item.value)}` : formatNum(item.value)}
+                  {vis.showDataLabels && labelPos === 'outside_end' && (
+                    <span
+                      data-testid={`data-label-${vis.id}-${idx}`}
+                      className="text-[10px] font-mono font-bold text-[#212121] mb-1 whitespace-nowrap"
+                    >
+                      {lblText}
                     </span>
                   )}
                   <div
@@ -1706,12 +1786,23 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                       height: `${hPct}%`,
                       backgroundColor: colColor,
                     }}
-                    className={`w-full max-w-[42px] rounded-t transition-all ${
+                    className={`w-full max-w-[44px] rounded-t transition-all flex flex-col items-center overflow-hidden ${
+                      labelPos === 'inside_center' ? 'justify-center' : 'justify-start pt-1.5'
+                    } ${
                       isSelected
                         ? 'ring-2 ring-[#217346] brightness-110'
                         : 'opacity-90 group-hover:opacity-100'
                     }`}
-                  />
+                  >
+                    {vis.showDataLabels && labelPos !== 'outside_end' && (
+                      <span
+                        data-testid={`data-label-${vis.id}-${idx}`}
+                        className="text-[9px] font-mono font-bold text-white drop-shadow whitespace-nowrap"
+                      >
+                        {lblText}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1737,21 +1828,22 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       const isDonut = vis.type === 'donut';
       const cx = 80;
       const cy = 80;
-      const pieRadius = 72;
-      const donutRadius = 56;
+      const pieRadius = 68;
+      const donutRadius = 54;
       const circumference = 2 * Math.PI * donutRadius;
       const rawPositiveSum = items.reduce((acc, x) => acc + Math.max(0, x.value), 0);
       const fallbackCountSum = items.reduce((acc, x) => acc + Math.max(1, x.count), 0) || 1;
+      const pieOrDonutLabelPos: DataLabelPositionType = vis.dataLabelPosition || 'inside_center';
       let cumulativeShare = 0;
 
       const pieOrDonutSvg = (
         <div className="flex items-center justify-center py-2 px-2">
-          <div className="relative w-44 h-44 flex items-center justify-center shrink-0">
+          <div className="relative w-52 h-48 flex items-center justify-center shrink-0">
             {isDonut ? (
               <svg
-                viewBox="0 0 160 160"
+                viewBox="-36 -18 232 196"
                 data-testid={`donut-svg-${vis.id}`}
-                className="w-44 h-44 -rotate-90"
+                className="w-52 h-48 overflow-visible"
               >
                 {items.map((item, idx) => {
                   const share =
@@ -1760,34 +1852,78 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                       : Math.max(1, item.count) / fallbackCountSum;
                   const dash = share * circumference;
                   const offset = -cumulativeShare * circumference;
+                  const startAngle = cumulativeShare * 2 * Math.PI - Math.PI / 2;
+                  const endAngle = (cumulativeShare + share) * 2 * Math.PI - Math.PI / 2;
+                  const midAngle = (startAngle + endAngle) / 2;
                   cumulativeShare += share;
+
+                  const sliceColor = getItemColor(vis, item.category, idx);
+                  const donutLabelRadius =
+                    pieOrDonutLabelPos === 'outside_end'
+                      ? 78
+                      : pieOrDonutLabelPos === 'inside_end'
+                      ? 61
+                      : 54;
+                  const lx = cx + donutLabelRadius * Math.cos(midAngle);
+                  const ly = cy + donutLabelRadius * Math.sin(midAngle);
+                  const lblText = formatDataLabel(vis, item.value, totalVal);
+
                   return (
-                    <circle
-                      key={item.category}
-                      cx={cx}
-                      cy={cy}
-                      r={donutRadius}
-                      fill="transparent"
-                      stroke={getItemColor(vis, item.category, idx)}
-                      strokeWidth={26}
-                      strokeDasharray={`${dash} ${circumference}`}
-                      strokeDashoffset={offset}
-                      onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
-                      className="cursor-pointer transition-opacity hover:opacity-85"
-                    >
-                      <title>
-                        {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (
-                        {(share * 100).toFixed(1)}%)
-                      </title>
-                    </circle>
+                    <g key={item.category}>
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={donutRadius}
+                        fill="transparent"
+                        stroke={sliceColor}
+                        strokeWidth={24}
+                        strokeDasharray={`${dash} ${circumference}`}
+                        strokeDashoffset={offset}
+                        transform={`rotate(-90 ${cx} ${cy})`}
+                        onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                        className="cursor-pointer transition-opacity hover:opacity-85"
+                      >
+                        <title>
+                          {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (
+                          {(share * 100).toFixed(1)}%)
+                        </title>
+                      </circle>
+                      {vis.showDataLabels && share >= 0.06 && (
+                        <>
+                          {pieOrDonutLabelPos === 'outside_end' && (
+                            <line
+                              x1={cx + 66 * Math.cos(midAngle)}
+                              y1={cy + 66 * Math.sin(midAngle)}
+                              x2={cx + 73 * Math.cos(midAngle)}
+                              y2={cy + 73 * Math.sin(midAngle)}
+                              stroke={sliceColor}
+                              strokeWidth="1.2"
+                            />
+                          )}
+                          <text
+                            x={lx}
+                            y={ly}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            className={`text-[8.5px] font-mono font-bold pointer-events-none ${
+                              pieOrDonutLabelPos === 'outside_end'
+                                ? 'fill-[#212121]'
+                                : 'fill-white drop-shadow'
+                            }`}
+                          >
+                            {lblText}
+                          </text>
+                        </>
+                      )}
+                    </g>
                   );
                 })}
               </svg>
             ) : (
               <svg
-                viewBox="0 0 160 160"
+                viewBox="-36 -18 232 196"
                 data-testid={`pie-svg-${vis.id}`}
-                className="w-44 h-44"
+                className="w-52 h-48 overflow-visible"
               >
                 {items.map((item, idx) => {
                   const share =
@@ -1800,6 +1936,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                   cumulativeShare += share;
 
                   const sliceColor = getItemColor(vis, item.category, idx);
+                  const lblText = formatDataLabel(vis, item.value, totalVal);
 
                   if (share >= 0.9999) {
                     const fullCirclePath = [
@@ -1827,12 +1964,22 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                         {vis.showDataLabels && (
                           <text
                             x={cx}
-                            y={cy}
+                            y={
+                              pieOrDonutLabelPos === 'outside_end'
+                                ? cy - pieRadius - 10
+                                : pieOrDonutLabelPos === 'inside_end'
+                                ? cy - pieRadius * 0.72
+                                : cy
+                            }
                             textAnchor="middle"
                             dominantBaseline="central"
-                            className="fill-white text-[10px] font-mono font-bold pointer-events-none"
+                            className={`text-[9px] font-mono font-bold pointer-events-none ${
+                              pieOrDonutLabelPos === 'outside_end'
+                                ? 'fill-[#212121]'
+                                : 'fill-white drop-shadow'
+                            }`}
                           >
-                            100%
+                            {lblText}
                           </text>
                         )}
                       </g>
@@ -1854,7 +2001,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                     'Z',
                   ].join(' ');
 
-                  const labelRadius = pieRadius * 0.62;
+                  const labelRadius =
+                    pieOrDonutLabelPos === 'outside_end'
+                      ? pieRadius + 14
+                      : pieOrDonutLabelPos === 'inside_end'
+                      ? pieRadius * 0.76
+                      : pieRadius * 0.5;
                   const lx = cx + labelRadius * Math.cos(midAngle);
                   const ly = cy + labelRadius * Math.sin(midAngle);
 
@@ -1876,16 +2028,32 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                           {(share * 100).toFixed(1)}%)
                         </title>
                       </path>
-                      {vis.showDataLabels && share >= 0.08 && (
-                        <text
-                          x={lx}
-                          y={ly}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          className="fill-white text-[9px] font-mono font-bold pointer-events-none drop-shadow"
-                        >
-                          {Math.round(share * 100)}%
-                        </text>
+                      {vis.showDataLabels && share >= 0.06 && (
+                        <>
+                          {pieOrDonutLabelPos === 'outside_end' && (
+                            <line
+                              x1={cx + pieRadius * Math.cos(midAngle)}
+                              y1={cy + pieRadius * Math.sin(midAngle)}
+                              x2={cx + (pieRadius + 8) * Math.cos(midAngle)}
+                              y2={cy + (pieRadius + 8) * Math.sin(midAngle)}
+                              stroke={sliceColor}
+                              strokeWidth="1.2"
+                            />
+                          )}
+                          <text
+                            x={lx}
+                            y={ly}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            className={`text-[8.5px] font-mono font-bold pointer-events-none ${
+                              pieOrDonutLabelPos === 'outside_end'
+                                ? 'fill-[#212121]'
+                                : 'fill-white drop-shadow'
+                            }`}
+                          >
+                            {lblText}
+                          </text>
+                        </>
                       )}
                     </g>
                   );
@@ -1953,40 +2121,48 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                 strokeLinecap="round"
               />
             )}
-            {pts.map((p, idx) => (
-              <g
-                key={p.category}
-                onClick={() => toggleCrossFilter(vis.categoryCol, p.category)}
-                className="cursor-pointer"
-              >
-                <circle
-                  cx={p.x}
-                  cy={p.y}
-                  r="4.5"
-                  fill={getItemColor(vis, p.category, idx)}
-                  stroke="#FFFFFF"
-                  strokeWidth="2"
-                />
-                {vis.showDataLabels && (
+            {pts.map((p, idx) => {
+              const labelY =
+                labelPos === 'inside_center'
+                  ? p.y + 3
+                  : labelPos === 'inside_end'
+                  ? p.y + 13
+                  : p.y - 9;
+              return (
+                <g
+                  key={p.category}
+                  onClick={() => toggleCrossFilter(vis.categoryCol, p.category)}
+                  className="cursor-pointer"
+                >
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r="4.5"
+                    fill={getItemColor(vis, p.category, idx)}
+                    stroke="#FFFFFF"
+                    strokeWidth="2"
+                  />
+                  {vis.showDataLabels && (
+                    <text
+                      x={p.x}
+                      y={labelY}
+                      textAnchor="middle"
+                      className="fill-[#212121] text-[9px] font-mono font-bold"
+                    >
+                      {formatDataLabel(vis, p.value, totalVal)}
+                    </text>
+                  )}
                   <text
                     x={p.x}
-                    y={p.y - 8}
+                    y={height - 4}
                     textAnchor="middle"
-                    className="fill-[#212121] text-[9px] font-mono font-bold"
+                    className="fill-[#605E5C] text-[9px]"
                   >
-                    {formatNum(p.value)}
+                    {getItemLegendLabel(vis, p.category).slice(0, 10)}
                   </text>
-                )}
-                <text
-                  x={p.x}
-                  y={height - 4}
-                  textAnchor="middle"
-                  className="fill-[#605E5C] text-[9px]"
-                >
-                  {getItemLegendLabel(vis, p.category).slice(0, 10)}
-                </text>
-              </g>
-            ))}
+                </g>
+              );
+            })}
           </svg>
         </div>
       );
@@ -1998,6 +2174,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       <div className="flex flex-wrap gap-1.5 h-52 pt-1 content-start overflow-hidden">
         {items.map((item, idx) => {
           const share = Math.max(8, Math.round((Math.max(0, item.value) / totalVal) * 100));
+          const lblText = formatDataLabel(vis, item.value, totalVal);
           return (
             <div
               key={item.category}
@@ -2008,12 +2185,24 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               }}
               className="flex-1 min-h-[64px] p-2.5 rounded border border-white/25 cursor-pointer hover:brightness-110 transition-all flex flex-col justify-between overflow-hidden"
             >
-              <span className="text-xs font-bold text-white truncate drop-shadow">
-                {getItemLegendLabel(vis, item.category)}
-              </span>
-              {vis.showDataLabels && (
-                <div className="text-[11px] font-mono text-white font-semibold drop-shadow">
-                  {formatNum(item.value)} ({((Math.max(0, item.value) / totalVal) * 100).toFixed(0)}%)
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-xs font-bold text-white truncate drop-shadow">
+                  {getItemLegendLabel(vis, item.category)}
+                </span>
+                {vis.showDataLabels && labelPos === 'outside_end' && (
+                  <span className="text-[10px] font-mono text-white font-semibold drop-shadow shrink-0">
+                    {lblText}
+                  </span>
+                )}
+              </div>
+              {vis.showDataLabels && labelPos === 'inside_center' && (
+                <div className="text-[11px] font-mono text-white font-bold drop-shadow text-center my-auto">
+                  {lblText}
+                </div>
+              )}
+              {vis.showDataLabels && labelPos === 'inside_end' && (
+                <div className="text-[11px] font-mono text-white font-semibold drop-shadow text-right">
+                  {lblText}
                 </div>
               )}
             </div>
@@ -2054,7 +2243,17 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             <select
               aria-label="Dashboard Color Theme"
               value={paletteId}
-              onChange={(e) => setPaletteId(e.target.value as PaletteId)}
+              onChange={(e) => {
+                const nextTheme = e.target.value as PaletteId;
+                setPaletteId(nextTheme);
+                setVisuals((prev) =>
+                  prev.map((v) => ({
+                    ...v,
+                    paletteId: nextTheme,
+                    customColors: {},
+                  }))
+                );
+              }}
               className="bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121] font-medium"
             >
               {Object.entries(COLOR_PALETTES).map(([id, p]) => (
@@ -2063,30 +2262,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                 </option>
               ))}
             </select>
-
-            <button
-              type="button"
-              onClick={handleAddKpiCard}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#217346] border border-[#217346]/40"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add KPI Card
-            </button>
-
-            <button
-              type="button"
-              onClick={handleAddTopSlicer}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#217346] border border-[#217346]/40"
-            >
-              <Filter className="w-3.5 h-3.5" /> Add Slicer
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleAddVisual('column')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#217346] hover:bg-[#185C37] text-white shadow"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Visual
-            </button>
 
             <button
               type="button"
@@ -2470,14 +2645,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
 
           {/* Right: Visualizations, Legend Colors & Conditional Formatting Inspector Pane */}
           <div className="w-80 sm:w-96 border-l border-[#D4D4D4] bg-white p-4 overflow-y-auto space-y-5 shrink-0">
-            <div className="flex items-center justify-between border-b border-[#D4D4D4] pb-2.5">
+            <div className="flex items-center justify-between border-b border-[#D4D4D4] pb-2.5 gap-2">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#217346]">
-                <SlidersHorizontal className="w-4 h-4" />
+                <SlidersHorizontal className="w-4 h-4 shrink-0" />
                 <span>Visualizations Pane</span>
               </div>
-              <span className="text-[10px] font-semibold text-[#605E5C]">
-                {activeKpi ? 'Editing KPI Card' : 'Editing Visual Tile'}
-              </span>
+              <button
+                type="button"
+                onClick={() => handleAddVisual(activeVisual?.type || 'column')}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#217346] hover:bg-[#185C37] text-white shadow-sm shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Visual
+              </button>
             </div>
 
             {activeKpi ? (
@@ -3051,11 +3230,64 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                     )}
                   </div>
 
-                  {/* 5. Sorting & Data Labels */}
+                  {/* 5. Data Labels & Sorting */}
                   <div className="space-y-3 pt-2 border-t border-[#D4D4D4]">
                     <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] block">
-                      5. Sorting &amp; Labels
+                      5. Data Labels &amp; Sorting
                     </label>
+
+                    <label className="flex items-center gap-2 text-xs text-[#212121] font-semibold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={activeVisual.showDataLabels}
+                        onChange={(e) => updateActiveVisual({ showDataLabels: e.target.checked })}
+                        className="rounded border-[#D4D4D4] text-[#217346]"
+                      />
+                      <span>Show Data Labels</span>
+                    </label>
+
+                    {activeVisual.showDataLabels && (
+                      <div className="grid grid-cols-2 gap-2 p-2.5 rounded-lg bg-[#F8F9FA] border border-[#D4D4D4]">
+                        <div>
+                          <label className="text-[11px] font-semibold text-[#212121] block mb-1">
+                            Label Position
+                          </label>
+                          <select
+                            aria-label="Data Label Position"
+                            value={activeVisual.dataLabelPosition || 'outside_end'}
+                            onChange={(e) =>
+                              updateActiveVisual({
+                                dataLabelPosition: e.target.value as DataLabelPositionType,
+                              })
+                            }
+                            className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
+                          >
+                            <option value="inside_end">Inside End</option>
+                            <option value="outside_end">Outside End</option>
+                            <option value="inside_center">Inside Center</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-semibold text-[#212121] block mb-1">
+                            Label Content
+                          </label>
+                          <select
+                            aria-label="Data Label Format"
+                            value={activeVisual.dataLabelContent || 'totals_only'}
+                            onChange={(e) =>
+                              updateActiveVisual({
+                                dataLabelContent: e.target.value as DataLabelContentType,
+                              })
+                            }
+                            className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
+                          >
+                            <option value="totals_only">Only Totals</option>
+                            <option value="totals_and_percentage">Totals and Percentage</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -3093,16 +3325,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                         </select>
                       </div>
                     </div>
-
-                    <label className="flex items-center gap-2 text-xs text-[#212121] cursor-pointer pt-1">
-                      <input
-                        type="checkbox"
-                        checked={activeVisual.showDataLabels}
-                        onChange={(e) => updateActiveVisual({ showDataLabels: e.target.checked })}
-                        className="rounded border-[#D4D4D4] text-[#217346]"
-                      />
-                      <span>Show Data Labels &amp; Values</span>
-                    </label>
                   </div>
                 </>
               )

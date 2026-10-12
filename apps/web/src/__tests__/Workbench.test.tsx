@@ -732,6 +732,24 @@ describe('StepSheet Workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: /Pie/i }));
     const pieSvg = screen.getByTestId('pie-svg-vis_1');
     expect(pieSvg.querySelectorAll('path').length).toBeGreaterThan(0);
+
+    // Verify Global Theme updates both Pie and Donut slice colors
+    const themeSelect = screen.getByLabelText('Dashboard Color Theme');
+    fireEvent.change(themeSelect, { target: { value: 'sunset' } });
+    const piePathsAfterTheme = screen.getByTestId('pie-svg-vis_1').querySelectorAll('path');
+    expect(piePathsAfterTheme[0].getAttribute('fill')).toBe('#EA580C');
+    const donutCirclesAfterTheme = screen.getByTestId('donut-svg-vis_2').querySelectorAll('circle');
+    expect(donutCirclesAfterTheme[0].getAttribute('stroke')).toBe('#EA580C');
+
+    // Verify Data Label Position (Inside End, Outside End, Inside Center) and Data Label Format (Only Totals, Totals and Percentage)
+    const labelPosSelect = screen.getByLabelText('Data Label Position');
+    const labelFormatSelect = screen.getByLabelText('Data Label Format');
+    fireEvent.change(labelPosSelect, { target: { value: 'inside_end' } });
+    expect((labelPosSelect as HTMLSelectElement).value).toBe('inside_end');
+    fireEvent.change(labelPosSelect, { target: { value: 'inside_center' } });
+    expect((labelPosSelect as HTMLSelectElement).value).toBe('inside_center');
+    fireEvent.change(labelFormatSelect, { target: { value: 'totals_and_percentage' } });
+    expect((labelFormatSelect as HTMLSelectElement).value).toBe('totals_and_percentage');
   });
 });
 

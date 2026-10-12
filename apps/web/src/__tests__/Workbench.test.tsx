@@ -726,6 +726,12 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('right');
     fireEvent.change(legendSelect, { target: { value: 'top_left' } });
     expect(screen.getByTestId('visual-layout-vis_1').getAttribute('data-legend-pos')).toBe('top_left');
+
+    // Verify Pie chart renders solid SVG wedge paths (not a Donut ring)
+    expect(screen.getByTestId('donut-svg-vis_2')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: /Pie/i }));
+    const pieSvg = screen.getByTestId('pie-svg-vis_1');
+    expect(pieSvg.querySelectorAll('path').length).toBeGreaterThan(0);
   });
 });
 

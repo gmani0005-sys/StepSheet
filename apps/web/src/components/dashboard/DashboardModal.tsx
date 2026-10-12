@@ -1735,42 +1735,163 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     // 7. DONUT & PIE CHARTS (SVG)
     if (vis.type === 'donut' || vis.type === 'pie') {
       const isDonut = vis.type === 'donut';
-      const radius = 64;
-      const circumference = 2 * Math.PI * radius;
+      const cx = 80;
+      const cy = 80;
+      const pieRadius = 72;
+      const donutRadius = 56;
+      const circumference = 2 * Math.PI * donutRadius;
+      const rawPositiveSum = items.reduce((acc, x) => acc + Math.max(0, x.value), 0);
+      const fallbackCountSum = items.reduce((acc, x) => acc + Math.max(1, x.count), 0) || 1;
       let cumulativeShare = 0;
 
-      const donutSvg = (
+      const pieOrDonutSvg = (
         <div className="flex items-center justify-center py-2 px-2">
           <div className="relative w-44 h-44 flex items-center justify-center shrink-0">
-            <svg viewBox="0 0 160 160" className="w-44 h-44 -rotate-90">
-              {items.map((item, idx) => {
-                const val = Math.max(0, item.value);
-                const share = val / totalVal;
-                const dash = share * circumference;
-                const offset = -cumulativeShare * circumference;
-                cumulativeShare += share;
-                return (
-                  <circle
-                    key={item.category}
-                    cx="80"
-                    cy="80"
-                    r={radius}
-                    fill="transparent"
-                    stroke={getItemColor(vis, item.category, idx)}
-                    strokeWidth={isDonut ? 28 : 64}
-                    strokeDasharray={`${dash} ${circumference}`}
-                    strokeDashoffset={offset}
-                    onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
-                    className="cursor-pointer transition-opacity hover:opacity-85"
-                  >
-                    <title>
-                      {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (
-                      {(share * 100).toFixed(1)}%)
-                    </title>
-                  </circle>
-                );
-              })}
-            </svg>
+            {isDonut ? (
+              <svg
+                viewBox="0 0 160 160"
+                data-testid={`donut-svg-${vis.id}`}
+                className="w-44 h-44 -rotate-90"
+              >
+                {items.map((item, idx) => {
+                  const share =
+                    rawPositiveSum > 0
+                      ? Math.max(0, item.value) / rawPositiveSum
+                      : Math.max(1, item.count) / fallbackCountSum;
+                  const dash = share * circumference;
+                  const offset = -cumulativeShare * circumference;
+                  cumulativeShare += share;
+                  return (
+                    <circle
+                      key={item.category}
+                      cx={cx}
+                      cy={cy}
+                      r={donutRadius}
+                      fill="transparent"
+                      stroke={getItemColor(vis, item.category, idx)}
+                      strokeWidth={26}
+                      strokeDasharray={`${dash} ${circumference}`}
+                      strokeDashoffset={offset}
+                      onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                      className="cursor-pointer transition-opacity hover:opacity-85"
+                    >
+                      <title>
+                        {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (
+                        {(share * 100).toFixed(1)}%)
+                      </title>
+                    </circle>
+                  );
+                })}
+              </svg>
+            ) : (
+              <svg
+                viewBox="0 0 160 160"
+                data-testid={`pie-svg-${vis.id}`}
+                className="w-44 h-44"
+              >
+                {items.map((item, idx) => {
+                  const share =
+                    rawPositiveSum > 0
+                      ? Math.max(0, item.value) / rawPositiveSum
+                      : Math.max(1, item.count) / fallbackCountSum;
+                  const startAngle = cumulativeShare * 2 * Math.PI - Math.PI / 2;
+                  const endAngle = (cumulativeShare + share) * 2 * Math.PI - Math.PI / 2;
+                  const midAngle = (startAngle + endAngle) / 2;
+                  cumulativeShare += share;
+
+                  const sliceColor = getItemColor(vis, item.category, idx);
+
+                  if (share >= 0.9999) {
+                    const fullCirclePath = [
+                      `M ${cx} ${cy - pieRadius}`,
+                      `A ${pieRadius} ${pieRadius} 0 1 1 ${cx} ${cy + pieRadius}`,
+                      `A ${pieRadius} ${pieRadius} 0 1 1 ${cx} ${cy - pieRadius}`,
+                      'Z',
+                    ].join(' ');
+                    return (
+                      <g
+                        key={item.category}
+                        onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                        className="cursor-pointer transition-opacity hover:opacity-90"
+                      >
+                        <path
+                          d={fullCirclePath}
+                          fill={sliceColor}
+                          stroke="#FFFFFF"
+                          strokeWidth="1.5"
+                        >
+                          <title>
+                            {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (100.0%)
+                          </title>
+                        </path>
+                        {vis.showDataLabels && (
+                          <text
+                            x={cx}
+                            y={cy}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            className="fill-white text-[10px] font-mono font-bold pointer-events-none"
+                          >
+                            100%
+                          </text>
+                        )}
+                      </g>
+                    );
+                  }
+
+                  if (share <= 0) return null;
+
+                  const x1 = cx + pieRadius * Math.cos(startAngle);
+                  const y1 = cy + pieRadius * Math.sin(startAngle);
+                  const x2 = cx + pieRadius * Math.cos(endAngle);
+                  const y2 = cy + pieRadius * Math.sin(endAngle);
+                  const largeArcFlag = share > 0.5 ? 1 : 0;
+
+                  const pathData = [
+                    `M ${cx} ${cy}`,
+                    `L ${x1} ${y1}`,
+                    `A ${pieRadius} ${pieRadius} 0 ${largeArcFlag} 1 ${x2} ${y2}`,
+                    'Z',
+                  ].join(' ');
+
+                  const labelRadius = pieRadius * 0.62;
+                  const lx = cx + labelRadius * Math.cos(midAngle);
+                  const ly = cy + labelRadius * Math.sin(midAngle);
+
+                  return (
+                    <g
+                      key={item.category}
+                      onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                      className="cursor-pointer transition-opacity hover:opacity-90"
+                    >
+                      <path
+                        d={pathData}
+                        fill={sliceColor}
+                        stroke="#FFFFFF"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
+                      >
+                        <title>
+                          {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (
+                          {(share * 100).toFixed(1)}%)
+                        </title>
+                      </path>
+                      {vis.showDataLabels && share >= 0.08 && (
+                        <text
+                          x={lx}
+                          y={ly}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          className="fill-white text-[9px] font-mono font-bold pointer-events-none drop-shadow"
+                        >
+                          {Math.round(share * 100)}%
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+              </svg>
+            )}
             {isDonut && (
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-[#605E5C]">
@@ -1785,7 +1906,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         </div>
       );
 
-      return wrapWithLegend(vis, donutSvg, categoryLegendEntries);
+      return wrapWithLegend(vis, pieOrDonutSvg, categoryLegendEntries);
     }
 
     // 8. LINE & AREA TREND CHART (SVG)

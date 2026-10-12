@@ -209,6 +209,14 @@ export const TopBar: React.FC<TopBarProps> = ({
         name: 'Formulas & Summary',
         items: [
           {
+            id: 'home-pivot',
+            label: 'PivotTable',
+            icon: Columns,
+            onClick: () => triggerStep('pivot'),
+            title: 'Insert / Build PivotTable: Interactive Rows, Columns, Values & Totals matrix',
+            accent: true,
+          },
+          {
             id: 'home-xlookup',
             label: 'XLOOKUP',
             icon: GitMerge,
@@ -424,9 +432,11 @@ export const TopBar: React.FC<TopBarProps> = ({
           },
           {
             id: 'd-pivot',
-            label: 'Pivot Table',
+            label: 'PivotTable',
             icon: Columns,
             onClick: () => triggerStep('pivot'),
+            title: 'Insert / Build PivotTable: Reshape rows into columns with live aggregation & totals',
+            accent: true,
           },
           {
             id: 'd-unpivot',

@@ -97,6 +97,11 @@ export const RightPanel: React.FC = () => {
       category: 'Aggregation & Summary',
       icon: Calculator,
       items: [
+        {
+          id: 'pivot',
+          name: 'PivotTable Builder',
+          desc: 'Interactive Excel PivotTable with Rows, Columns, Values, Filters & Grand Totals',
+        },
         { id: 'group_by', name: 'Group By & Aggregate', desc: 'SUM, COUNT, DISTINCT COUNT, AVG, MIN, MAX' },
         { id: 'window_calc', name: 'Window Calculations', desc: 'Running total, Rank, Moving average, Lag / Lead' },
       ],

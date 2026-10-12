@@ -9,6 +9,7 @@ import { VLookupModal } from '../components/joins/VLookupModal';
 import { RelationshipsModal } from '../components/joins/RelationshipsModal';
 import { ConditionalModal } from '../components/transforms/ConditionalModal';
 import { GroupByModal } from '../components/transforms/GroupByModal';
+import { PivotUnpivotModal } from '../components/transforms/PivotUnpivotModal';
 import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar';
 import { ReviewGeneratedStepModal } from '../components/ai/ReviewGeneratedStepModal';
 import { QualityModal } from '../components/quality/QualityModal';
@@ -657,11 +658,33 @@ describe('StepSheet Workbench', () => {
     render(<EditStepModal />);
     expect(screen.getAllByText(/1\. Table Array \(Lookup Reference Table\)/i).length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/FALSE \(0\) — Exact Match/i).length).toBeGreaterThanOrEqual(2);
+
+    // 8. Excel PivotTable Builder & Live Matrix Execution
+    const pivotPreview = await localEngine.previewPipeline(ordersId, [
+      {
+        id: 'w-pivot',
+        type: 'pivot',
+        label: 'PivotTable: SUM(amount) by region × category',
+        enabled: true,
+        params: {
+          index_columns: ['region'],
+          pivot_column: 'category',
+          value_column: 'amount',
+          agg_func: 'sum',
+          include_row_totals: true,
+          include_grand_total: true,
+        },
+      },
+    ]);
+    expect(pivotPreview.rows.length).toBeGreaterThan(1);
+    expect(pivotPreview.rows[0].Row_Total).toBeDefined();
+    expect(pivotPreview.rows[pivotPreview.rows.length - 1].region).toBe('Grand Total');
+    expect(pivotPreview.steps[0].generated_code.excel_formula).toContain('PIVOTBY');
+
+    render(<PivotUnpivotModal isOpen={true} onClose={() => {}} initialMode="pivot" />);
+    expect(screen.getByText('Excel PivotTable Builder')).toBeDefined();
+    expect(screen.getByText('Live PivotTable Preview')).toBeDefined();
+    expect(screen.getByText('Apply PivotTable to Sheet')).toBeDefined();
   });
 });
-
-
-
-
-
 

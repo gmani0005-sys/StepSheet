@@ -605,6 +605,32 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
         excel_formula: `=SUM($C$2:C2)`,
       };
     }
+    case 'pivot': {
+      const idxCols: string[] = Array.isArray(p.index_columns) && p.index_columns.length > 0
+        ? p.index_columns
+        : ['region'];
+      const pivCol = p.pivot_column || 'category';
+      const valCol = p.value_column || 'amount';
+      const agg = (p.agg_func || 'sum').toUpperCase();
+      return {
+        sql: `PIVOT prev_step ON "${pivCol}" USING ${agg === 'PCT_TOTAL' ? 'SUM' : agg}("${valCol}") GROUP BY ${idxCols.map((c) => `"${c}"`).join(', ')}`,
+        polars: `df = df.pivot(values="${valCol}", index=${JSON.stringify(idxCols)}, on="${pivCol}", aggregate_function="${(p.agg_func || 'sum').toLowerCase()}")`,
+        power_query_m: `Table.Pivot(PrevStep, List.Distinct(PrevStep[${pivCol}]), "${pivCol}", "${valCol}", List.Sum)`,
+        excel_formula: `=PIVOTBY(Table1[${idxCols[0]}], Table1[${pivCol}], Table1[${valCol}], ${agg === 'PCT_TOTAL' ? 'PERCENTOF' : agg})`,
+      };
+    }
+    case 'unpivot': {
+      const idCols: string[] = Array.isArray(p.id_columns) ? p.id_columns : ['id'];
+      const valCols: string[] = Array.isArray(p.value_columns) ? p.value_columns : [];
+      const nameCol = p.name_column || 'attribute';
+      const valOutCol = p.value_column || 'value';
+      return {
+        sql: `UNPIVOT prev_step ON (${valCols.map((c) => `"${c}"`).join(', ')}) INTO NAME "${nameCol}" VALUE "${valOutCol}"`,
+        polars: `df = df.unpivot(index=${JSON.stringify(idCols)}, on=${JSON.stringify(valCols)}, variable_name="${nameCol}", value_name="${valOutCol}")`,
+        power_query_m: `Table.UnpivotOtherColumns(PrevStep, {${idCols.map((c) => `"${c}"`).join(', ')}}, "${nameCol}", "${valOutCol}")`,
+        excel_formula: `=TOCOL(Table1)`,
+      };
+    }
     default:
       return {
         sql: `-- Step: ${step.label} (${step.type})\nSELECT * FROM prev_step`,
@@ -1185,18 +1211,59 @@ function executePipelineSteps(
 
       case 'pivot': {
         const idxCols: string[] = Array.isArray(p.index_columns) ? p.index_columns.filter(Boolean) : [];
-        const pivotCol: string = p.pivot_column;
-        const valCol: string = p.value_column;
+        const pivotCol: string = p.pivot_column && p.pivot_column !== '__NONE__' ? p.pivot_column : '';
+        const valCol: string = p.value_column || (rows[0] ? Object.keys(rows[0])[0] : '');
         const aggFn: string = (p.agg_func || 'sum').toLowerCase();
+        const filterCol: string | undefined = p.filter_column;
+        const filterVal: string | undefined = p.filter_value;
+        const includeRowTotals: boolean = Boolean(p.include_row_totals);
+        const includeGrandTotal: boolean = Boolean(p.include_grand_total);
 
-        if (pivotCol && valCol) {
-          const pivotValues = Array.from(
-            new Set(rows.map((r) => String(r[pivotCol] ?? 'Null')))
-          ).slice(0, 25);
+        if (valCol) {
+          const workingRows =
+            filterCol && filterVal !== undefined && filterVal !== '' && filterVal !== '__ALL__'
+              ? rows.filter((r) => String(r[filterCol] ?? '') === String(filterVal))
+              : rows;
+
+          const overallSum = workingRows.reduce((acc, r) => {
+            const n = Number(r[valCol]);
+            return acc + (Number.isNaN(n) ? 0 : n);
+          }, 0);
+
+          const computeAgg = (subset: Record<string, any>[]): number => {
+            if (subset.length === 0) return 0;
+            if (aggFn === 'count') return subset.length;
+            const nums = subset.map((m) => Number(m[valCol])).filter((n) => !Number.isNaN(n));
+            if (nums.length === 0) return 0;
+            const sum = nums.reduce((a, b) => a + b, 0);
+            if (aggFn === 'avg') return Number((sum / nums.length).toFixed(2));
+            if (aggFn === 'min') return Math.min(...nums);
+            if (aggFn === 'max') return Math.max(...nums);
+            if (aggFn === 'pct_total') {
+              return overallSum !== 0 ? Number(((sum / overallSum) * 100).toFixed(2)) : 0;
+            }
+            return Number(sum.toFixed(2));
+          };
+
+          const pivotValues = pivotCol
+            ? Array.from(
+                new Set(
+                  workingRows.map((r) => {
+                    const v = r[pivotCol];
+                    return v === null || v === undefined || String(v).trim() === ''
+                      ? 'Blank'
+                      : String(v);
+                  })
+                )
+              ).slice(0, 25)
+            : [`${aggFn.toUpperCase()}_${valCol}`];
 
           const groups = new Map<string, Record<string, any>[]>();
-          rows.forEach((r) => {
-            const k = idxCols.length > 0 ? idxCols.map((c) => String(r[c] ?? '')).join('||') : '__ALL__';
+          workingRows.forEach((r) => {
+            const k =
+              idxCols.length > 0
+                ? idxCols.map((c) => String(r[c] ?? '')).join('||')
+                : '__ALL__';
             if (!groups.has(k)) groups.set(k, []);
             groups.get(k)!.push(r);
           });
@@ -1204,23 +1271,62 @@ function executePipelineSteps(
           const pivoted: Record<string, any>[] = [];
           groups.forEach((gRows) => {
             const outRow: Record<string, any> = {};
-            idxCols.forEach((c) => {
-              outRow[c] = gRows[0]?.[c] ?? null;
-            });
-            pivotValues.forEach((pv) => {
-              const matching = gRows.filter((r) => String(r[pivotCol] ?? 'Null') === pv);
-              const nums = matching.map((m) => Number(m[valCol])).filter((n) => !Number.isNaN(n));
-              if (aggFn === 'count') outRow[pv] = matching.length;
-              else if (aggFn === 'avg')
-                outRow[pv] = nums.length
-                  ? Number((nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2))
-                  : 0;
-              else if (aggFn === 'min') outRow[pv] = nums.length ? Math.min(...nums) : 0;
-              else if (aggFn === 'max') outRow[pv] = nums.length ? Math.max(...nums) : 0;
-              else outRow[pv] = Number(nums.reduce((a, b) => a + b, 0).toFixed(2));
-            });
+            if (idxCols.length > 0) {
+              idxCols.forEach((c) => {
+                outRow[c] = gRows[0]?.[c] ?? null;
+              });
+            } else {
+              outRow['Summary'] = 'All Rows';
+            }
+
+            if (pivotCol) {
+              pivotValues.forEach((pv) => {
+                const matching = gRows.filter((r) => {
+                  const v = r[pivotCol];
+                  const norm =
+                    v === null || v === undefined || String(v).trim() === '' ? 'Blank' : String(v);
+                  return norm === pv;
+                });
+                outRow[pv] = computeAgg(matching);
+              });
+            } else {
+              outRow[pivotValues[0]] = computeAgg(gRows);
+            }
+
+            if (includeRowTotals) {
+              outRow['Row_Total'] = computeAgg(gRows);
+            }
             pivoted.push(outRow);
           });
+
+          if (includeGrandTotal && pivoted.length > 0) {
+            const totalRow: Record<string, any> = {};
+            if (idxCols.length > 0) {
+              idxCols.forEach((c, idx) => {
+                totalRow[c] = idx === 0 ? 'Grand Total' : '';
+              });
+            } else {
+              totalRow['Summary'] = 'Grand Total';
+            }
+            if (pivotCol) {
+              pivotValues.forEach((pv) => {
+                const matching = workingRows.filter((r) => {
+                  const v = r[pivotCol];
+                  const norm =
+                    v === null || v === undefined || String(v).trim() === '' ? 'Blank' : String(v);
+                  return norm === pv;
+                });
+                totalRow[pv] = computeAgg(matching);
+              });
+            } else {
+              totalRow[pivotValues[0]] = computeAgg(workingRows);
+            }
+            if (includeRowTotals) {
+              totalRow['Row_Total'] = computeAgg(workingRows);
+            }
+            pivoted.push(totalRow);
+          }
+
           rows = pivoted;
         }
         break;

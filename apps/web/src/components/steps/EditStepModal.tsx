@@ -1795,7 +1795,7 @@ export const EditStepModal: React.FC = () => {
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium text-slate-300 block mb-1">
-                Row Index Columns
+                Row Index Columns (Rows Zone)
               </label>
               <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
                 {columns.map((c) => (
@@ -1819,13 +1819,14 @@ export const EditStepModal: React.FC = () => {
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="text-xs font-medium text-slate-300 block mb-1">
-                  Pivot Column
+                  Pivot Column (Columns)
                 </label>
                 <select
-                  value={params.pivot_column || ''}
+                  value={params.pivot_column ?? ''}
                   onChange={(e) => handleParamChange('pivot_column', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
                 >
+                  <option value="">(None — Summary Only)</option>
                   {columns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
@@ -1835,7 +1836,7 @@ export const EditStepModal: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-300 block mb-1">
-                  Value Column
+                  Value Column (Values)
                 </label>
                 <select
                   value={params.value_column || ''}
@@ -1861,8 +1862,60 @@ export const EditStepModal: React.FC = () => {
                   <option value="avg">AVG</option>
                   <option value="min">MIN</option>
                   <option value="max">MAX</option>
+                  <option value="pct_total">% of Grand Total</option>
                 </select>
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Report Filter Column (Optional)
+                </label>
+                <select
+                  value={params.filter_column || ''}
+                  onChange={(e) => handleParamChange('filter_column', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
+                >
+                  <option value="">(None)</option>
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Report Filter Value
+                </label>
+                <input
+                  type="text"
+                  value={params.filter_value || ''}
+                  onChange={(e) => handleParamChange('filter_value', e.target.value)}
+                  placeholder="e.g. Completed"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-4 pt-1">
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(params.include_row_totals)}
+                  onChange={(e) => handleParamChange('include_row_totals', e.target.checked)}
+                  className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                />
+                <span>Include Row Totals (Row_Total)</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(params.include_grand_total)}
+                  onChange={(e) => handleParamChange('include_grand_total', e.target.checked)}
+                  className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                />
+                <span>Include Grand Total Row</span>
+              </label>
             </div>
           </div>
         );

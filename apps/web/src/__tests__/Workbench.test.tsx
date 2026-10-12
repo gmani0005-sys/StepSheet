@@ -687,7 +687,7 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Live PivotTable Preview')).toBeDefined();
     expect(screen.getByText('Apply PivotTable to Sheet')).toBeDefined();
 
-    // 9. Visual Dashboard & Custom Visuals Studio (with Multi-Select Slicers & Dynamic KPI Cards)
+    // 9. Visual Dashboard & Custom Visuals Studio (with Table, Matrix Table, Legend Editor & Conditional Formatting)
     render(<DashboardModal isOpen={true} onClose={() => {}} />);
     expect(screen.getByText(/Visual Dashboard & Custom Visuals Studio/i)).toBeDefined();
     expect(screen.getByText('Visualizations Pane')).toBeDefined();
@@ -699,6 +699,11 @@ describe('StepSheet Workbench', () => {
     expect(screen.getAllByText('Histogram').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Donut').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Pie').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Table').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Matrix Table').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Edit Visual Title/i)).toBeDefined();
+    expect(screen.getByText(/3\. Edit Legend & Colors/i)).toBeDefined();
+    expect(screen.getByText(/4\. Conditional Formatting/i)).toBeDefined();
   });
 });
 

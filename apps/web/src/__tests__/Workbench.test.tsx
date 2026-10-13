@@ -756,6 +756,28 @@ describe('StepSheet Workbench', () => {
     expect(dashboardTitleInput).toBeDefined();
     fireEvent.change(dashboardTitleInput, { target: { value: 'Q4 Revenue Performance Dashboard' } });
     expect(dashboardTitleInput.value).toBe('Q4 Revenue Performance Dashboard');
+
+    // Verify Diagonal Mouse Resize on visual tile (width & height updated without blanking)
+    const resizeHandle = screen.getByTestId('resize-handle-vis_1');
+    fireEvent.mouseDown(resizeHandle, { button: 0, clientX: 400, clientY: 300 });
+    fireEvent.mouseMove(window, { clientX: 540, clientY: 390 });
+    fireEvent.mouseUp(window);
+    const tile1AfterResize = screen.getByTestId('visual-tile-vis_1') as HTMLElement;
+    expect(tile1AfterResize.style.width).toBe('620px');
+    expect(tile1AfterResize.style.height).toBe('410px');
+
+    // Verify Long-Press Hover & Place/Align in Order
+    const dragGrip1 = screen.getByTestId('drag-grip-vis_1');
+    fireEvent.mouseDown(dragGrip1, { button: 0 });
+    expect(screen.getByTestId('visual-tile-vis_1').getAttribute('data-hover-dragging')).toBe('true');
+    expect(screen.getByTestId('hover-badge-vis_1')).toBeDefined();
+    fireEvent.mouseEnter(screen.getByTestId('visual-tile-vis_2'));
+    fireEvent.mouseUp(window);
+    const orderedTiles = screen
+      .getByTestId('visuals-canvas-grid')
+      .querySelectorAll('[data-visual-tile="true"]');
+    expect(orderedTiles[0].getAttribute('data-visual-id')).toBe('vis_2');
+    expect(orderedTiles[1].getAttribute('data-visual-id')).toBe('vis_1');
   });
 });
 

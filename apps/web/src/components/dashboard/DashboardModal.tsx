@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   BarChart3,
@@ -21,6 +21,7 @@ import {
   Check,
   Palette,
   Sparkles,
+  GripVertical,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 
@@ -114,6 +115,8 @@ export interface DashboardVisualConfig {
   dataLabelPosition?: DataLabelPositionType;
   dataLabelContent?: DataLabelContentType;
   span: 1 | 2;
+  customWidth?: number;
+  customHeight?: number;
   paletteId?: PaletteId;
   legendPosition?: LegendPositionType;
   customColors?: Record<string, string>;
@@ -268,6 +271,21 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   // Inline Title Editing State on Canvas Cards
   const [editingTitleVisId, setEditingTitleVisId] = useState<string | null>(null);
   const [editingTitleDraft, setEditingTitleDraft] = useState<string>('');
+
+  // Diagonal Mouse Resize State & Refs
+  const [resizingVisId, setResizingVisId] = useState<string | null>(null);
+  const resizeSessionRef = useRef<{
+    visId: string;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+  } | null>(null);
+
+  // Long-Press Hover & Place/Align State & Refs
+  const [hoverDragVisId, setHoverDragVisId] = useState<string | null>(null);
+  const [hoverTargetVisId, setHoverTargetVisId] = useState<string | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Multi-Slicer State: array of active slicer columns + map of column -> selected values
   const [slicerColumns, setSlicerColumns] = useState<string[]>([]);
@@ -504,6 +522,48 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       // ignore
     }
   }, [visuals, kpiCards, slicerColumns, paletteId, dashboardTitle, selectedDataset?.id, isOpen]);
+
+  // Global mousemove & mouseup handler for diagonal resizing and long-press hover placement
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const resizeSess = resizeSessionRef.current;
+      if (resizeSess) {
+        const deltaX = e.clientX - resizeSess.startX;
+        const deltaY = e.clientY - resizeSess.startY;
+        const nextW = Math.round(Math.max(280, Math.min(1400, resizeSess.startW + deltaX)));
+        const nextH = Math.round(Math.max(240, Math.min(900, resizeSess.startH + deltaY)));
+        setVisuals((prev) =>
+          prev.map((v) =>
+            v.id === resizeSess.visId
+              ? { ...v, customWidth: nextW, customHeight: nextH }
+              : v
+          )
+        );
+      }
+    };
+
+    const handleWindowMouseUp = () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      if (resizeSessionRef.current) {
+        resizeSessionRef.current = null;
+        setResizingVisId(null);
+      }
+      setHoverDragVisId(null);
+      setHoverTargetVisId(null);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, [isOpen]);
 
   const getDistinctValuesForColumn = (col: string): string[] => {
     if (!col) return [];
@@ -894,6 +954,104 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     if (!column) return;
     setCrossFilter((prev) =>
       prev && prev.column === column && prev.value === value ? null : { column, value }
+    );
+  };
+
+  const reorderVisuals = (sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    setVisuals((prev) => {
+      const fromIdx = prev.findIndex((v) => v.id === sourceId);
+      const toIdx = prev.findIndex((v) => v.id === targetId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(fromIdx, 1);
+      copy.splice(toIdx, 0, moved);
+      return copy;
+    });
+  };
+
+  const handleVisualMouseDown = (
+    e: React.MouseEvent<HTMLElement>,
+    visId: string,
+    immediate = false
+  ) => {
+    if (e.button !== 0) return;
+    if (!immediate) {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        target.closest('button, input, select, textarea, [data-resize-handle="true"]')
+      ) {
+        return;
+      }
+    }
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    if (immediate) {
+      e.stopPropagation();
+      setSelectedVisualId(visId);
+      setSelectedKpiId(null);
+      setHoverDragVisId(visId);
+      return;
+    }
+    longPressTimerRef.current = setTimeout(() => {
+      setSelectedVisualId(visId);
+      setSelectedKpiId(null);
+      setHoverDragVisId(visId);
+      longPressTimerRef.current = null;
+    }, 200);
+  };
+
+  const handleVisualMouseEnter = (targetVisId: string) => {
+    if (!hoverDragVisId || hoverDragVisId === targetVisId) return;
+    setHoverTargetVisId(targetVisId);
+    reorderVisuals(hoverDragVisId, targetVisId);
+  };
+
+  const handleStartResize = (
+    e: React.MouseEvent<HTMLElement>,
+    vis: DashboardVisualConfig
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    setHoverDragVisId(null);
+    setSelectedVisualId(vis.id);
+    setSelectedKpiId(null);
+
+    const tileEl = e.currentTarget.closest('[data-visual-tile="true"]') as HTMLElement | null;
+    const rect = tileEl ? tileEl.getBoundingClientRect() : null;
+    const startW =
+      rect && rect.width > 50 ? Math.round(rect.width) : vis.customWidth || 480;
+    const startH =
+      rect && rect.height > 50 ? Math.round(rect.height) : vis.customHeight || 320;
+
+    resizeSessionRef.current = {
+      visId: vis.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW,
+      startH,
+    };
+    setResizingVisId(vis.id);
+  };
+
+  const handleResetVisualSize = (
+    e: React.MouseEvent<HTMLElement>,
+    visId: string
+  ) => {
+    e.stopPropagation();
+    setVisuals((prev) =>
+      prev.map((v) =>
+        v.id === visId
+          ? { ...v, customWidth: undefined, customHeight: undefined }
+          : v
+      )
     );
   };
 
@@ -2512,34 +2670,83 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               </div>
             </div>
 
-            {/* Visual Tiles Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Visual Tiles Grid (Supports Diagonal Mouse Resize & Long-Press Hover Reorder/Align) */}
+            <div
+              data-testid="visuals-canvas-grid"
+              className="flex flex-wrap items-stretch gap-4"
+            >
               {visuals.map((vis) => {
                 const isSelected = !selectedKpiId && vis.id === activeVisual?.id;
                 const typeMeta = VISUAL_TYPES.find((t) => t.type === vis.type);
                 const isEditingTitle = editingTitleVisId === vis.id;
+                const isHoverDragging = hoverDragVisId === vis.id;
+                const isHoverTarget =
+                  hoverTargetVisId === vis.id &&
+                  hoverDragVisId !== null &&
+                  hoverDragVisId !== vis.id;
+                const isResizing = resizingVisId === vis.id;
+                const hasCustomSize = Boolean(vis.customWidth || vis.customHeight);
 
                 return (
                   <div
                     key={vis.id}
+                    data-testid={`visual-tile-${vis.id}`}
+                    data-visual-tile="true"
+                    data-visual-id={vis.id}
+                    data-hover-dragging={isHoverDragging ? 'true' : 'false'}
+                    onMouseDown={(e) => handleVisualMouseDown(e, vis.id, false)}
+                    onMouseEnter={() => handleVisualMouseEnter(vis.id)}
                     onClick={() => {
                       setSelectedVisualId(vis.id);
                       setSelectedKpiId(null);
                     }}
-                    className={`bg-white rounded-xl border transition-all p-4 flex flex-col justify-between cursor-pointer ${
-                      vis.span === 2 ? 'lg:col-span-2' : 'lg:col-span-1'
+                    style={{
+                      width: vis.customWidth ? `${vis.customWidth}px` : undefined,
+                      maxWidth: '100%',
+                      height: vis.customHeight ? `${vis.customHeight}px` : undefined,
+                      minHeight: vis.customHeight ? `${vis.customHeight}px` : '260px',
+                    }}
+                    className={`relative bg-white rounded-xl border transition-shadow p-4 flex flex-col justify-between select-none ${
+                      !vis.customWidth
+                        ? vis.span === 2
+                          ? 'w-full'
+                          : 'w-full lg:w-[calc(50%-0.5rem)]'
+                        : ''
                     } ${
-                      isSelected
-                        ? 'border-[#217346] ring-2 ring-[#217346]/25 shadow-md'
-                        : 'border-[#D4D4D4] hover:border-[#217346]/60 shadow-sm'
+                      isHoverDragging
+                        ? 'border-[#217346] ring-4 ring-[#217346]/30 shadow-2xl scale-[1.01] z-20 cursor-grabbing bg-[#F8FDFB]'
+                        : isHoverTarget
+                        ? 'border-[#217346] border-dashed ring-2 ring-[#217346]/40 shadow-lg'
+                        : isSelected
+                        ? 'border-[#217346] ring-2 ring-[#217346]/25 shadow-md cursor-pointer'
+                        : 'border-[#D4D4D4] hover:border-[#217346]/60 shadow-sm cursor-pointer'
                     }`}
                   >
-                    {/* Tile Header with Inline Edit Title Option */}
+                    {/* Tile Header with Drag Grip & Inline Edit Title Option */}
                     <div className="flex items-center justify-between gap-2 pb-3 mb-2 border-b border-[#E1E1E1]">
-                      <div className="min-w-0 flex-1 flex items-center gap-2">
+                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          data-testid={`drag-grip-${vis.id}`}
+                          onMouseDown={(e) => handleVisualMouseDown(e, vis.id, true)}
+                          title="Long-press visual or drag grip to hover, place & align visuals in order"
+                          className="p-0.5 text-[#605E5C] hover:text-[#217346] cursor-grab active:cursor-grabbing rounded hover:bg-[#F3F3F3] shrink-0"
+                        >
+                          <GripVertical className="w-3.5 h-3.5" />
+                        </button>
+
                         <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-[#E6F2EB] text-[#217346] border border-[#217346]/30 rounded shrink-0">
                           {typeMeta?.shortLabel || vis.type}
                         </span>
+
+                        {isHoverDragging && (
+                          <span
+                            data-testid={`hover-badge-${vis.id}`}
+                            className="px-2 py-0.5 rounded-full bg-[#217346] text-white text-[9px] font-bold uppercase tracking-wider shadow shrink-0"
+                          >
+                            Hovering • Move to Align
+                          </span>
+                        )}
 
                         {isEditingTitle ? (
                           <div
@@ -2612,12 +2819,28 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                         className="flex items-center gap-1 shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        {(hasCustomSize || isResizing) && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleResetVisualSize(e, vis.id)}
+                            title="Reset custom diagonal size to default grid width & height"
+                            className="px-1.5 py-0.5 rounded bg-[#F3F3F3] hover:bg-[#E6E6E6] text-[9px] font-mono font-semibold text-[#605E5C]"
+                          >
+                            {vis.customWidth || 480}×{vis.customHeight || 320}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() =>
                             setVisuals((prev) =>
                               prev.map((v) =>
-                                v.id === vis.id ? { ...v, span: v.span === 2 ? 1 : 2 } : v
+                                v.id === vis.id
+                                  ? {
+                                      ...v,
+                                      span: v.span === 2 ? 1 : 2,
+                                      customWidth: undefined,
+                                    }
+                                  : v
                               )
                             )
                           }
@@ -2652,7 +2875,36 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                     </div>
 
                     {/* Tile Body */}
-                    <div className="flex-1">{renderVisualContent(vis)}</div>
+                    <div className="flex-1 min-h-0 flex flex-col justify-center overflow-auto">
+                      {renderVisualContent(vis)}
+                    </div>
+
+                    {/* Bottom-Right Diagonal Mouse Resize Handle */}
+                    <div
+                      data-testid={`resize-handle-${vis.id}`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis)}
+                      onDoubleClick={(e) => handleResetVisualSize(e, vis.id)}
+                      title="Drag diagonally to resize visual width & height (Double-click to reset size)"
+                      className={`absolute bottom-1 right-1 w-5 h-5 flex items-end justify-end p-0.5 cursor-nwse-resize rounded transition-colors z-10 ${
+                        isResizing
+                          ? 'text-[#217346] bg-[#E6F2EB]'
+                          : 'text-[#605E5C]/70 hover:text-[#217346] hover:bg-[#E6F2EB]/60'
+                      }`}
+                    >
+                      <svg
+                        viewBox="0 0 12 12"
+                        className="w-3.5 h-3.5 pointer-events-none"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      >
+                        <line x1="11" y1="3" x2="3" y2="11" />
+                        <line x1="11" y1="7" x2="7" y2="11" />
+                        <line x1="11" y1="10.5" x2="10.5" y2="11" />
+                      </svg>
+                    </div>
                   </div>
                 );
               })}

@@ -15,5 +15,6 @@ class ProjectShare(Base):
     created_by = Column(String(255), nullable=False, default="demo@stepsheet.dev")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime, nullable=True)
+    passcode_hash = Column(String(255), nullable=True)
 
     project = relationship("Project")

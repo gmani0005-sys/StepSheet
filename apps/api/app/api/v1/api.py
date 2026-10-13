@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     versions,
     sharing,
     audit,
+    export_jobs,
 )
 
 api_router = APIRouter()
@@ -25,6 +26,7 @@ api_router.include_router(joins.router, prefix="/joins", tags=["Joins & Lookups"
 api_router.include_router(ai.router, prefix="/ai", tags=["AI Step Assistant"])
 api_router.include_router(quality.router, prefix="/quality", tags=["Data Integrity & Quality"])
 api_router.include_router(export.router, prefix="/export", tags=["Exporters & Pipeline Runner"])
+api_router.include_router(export_jobs.router, prefix="/exports", tags=["Export Jobs & Delivery"])
 api_router.include_router(templates.router, prefix="/templates", tags=["Templates & Column Mapping"])
 api_router.include_router(versions.router, tags=["Versioning & Step Diff"])
 api_router.include_router(sharing.router, tags=["Sharing & Access"])

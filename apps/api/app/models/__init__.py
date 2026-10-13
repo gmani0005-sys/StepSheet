@@ -6,6 +6,7 @@ from app.models.version import ProjectVersion
 from app.models.template import PipelineTemplate
 from app.models.share import ProjectShare
 from app.models.audit import AuditLog
+from app.models.export_job import ExportJob
 
 __all__ = [
     "User",
@@ -16,4 +17,5 @@ __all__ = [
     "PipelineTemplate",
     "ProjectShare",
     "AuditLog",
+    "ExportJob",
 ]

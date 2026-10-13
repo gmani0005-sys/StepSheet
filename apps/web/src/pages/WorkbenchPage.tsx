@@ -27,6 +27,9 @@ import { VersionHistoryModal } from '../components/versioning/VersionHistoryModa
 import { ShareModal } from '../components/collab/ShareModal';
 import { AuditModal } from '../components/audit/AuditModal';
 import { DashboardModal } from '../components/dashboard/DashboardModal';
+import { ExportShareModal } from '../components/export_share/ExportShareModal';
+import { exportShareApi } from '../api/exportShareApi';
+import { SHARE_EXPORT_ENABLED } from '../config/features';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -41,6 +44,9 @@ export const WorkbenchPage: React.FC = () => {
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [exportInitialTab, setExportInitialTab] = useState<'files' | 'code' | 'run'>('files');
+  const [isExportShareOpen, setIsExportShareOpen] = useState(false);
+  const [exportShareTab, setExportShareTab] = useState<'files' | 'link' | 'history'>('files');
+  const [exportShareFormat, setExportShareFormat] = useState<string>('xlsx_values');
   const [joinInitialRightId, setJoinInitialRightId] = useState<string | undefined>(undefined);
   const [joinInitialKeyPair, setJoinInitialKeyPair] = useState<{
     left_col: string;
@@ -64,6 +70,41 @@ export const WorkbenchPage: React.FC = () => {
     loadDatasets();
   }, []);
 
+  const handleOpenExportShare = (
+    tab: 'files' | 'link' | 'history' = 'files',
+    format: string = 'xlsx_values'
+  ) => {
+    setExportShareTab(tab);
+    setExportShareFormat(format);
+    setIsExportShareOpen(true);
+  };
+
+  const handleQuickDownload = async (format: 'xlsx_values' | 'csv') => {
+    if (!selectedDataset) {
+      alert('No dataset selected to download.');
+      return;
+    }
+    try {
+      const initial = await exportShareApi.createJob({
+        project_id: selectedDataset.project_id || 'default-project',
+        dataset_id: selectedDataset.id,
+        format,
+        row_scope: 'all',
+        steps,
+      });
+
+      const finished = await exportShareApi.pollJobUntilDone(initial.job_id);
+      if (finished.files && finished.files.length > 0) {
+        const file = finished.files[0];
+        await exportShareApi.downloadFile(finished.job_id, file.file_id, file.filename);
+      }
+    } catch (err: any) {
+      console.error('Quick download failed:', err);
+      // Fallback: open unified dialog with error or manual download
+      handleOpenExportShare('files', format);
+    }
+  };
+
   return (
     <div className="excel-theme flex flex-col h-screen w-screen overflow-hidden bg-[#F3F3F3] text-[#212121]">
       {/* Top Application Bar */}
@@ -84,6 +125,8 @@ export const WorkbenchPage: React.FC = () => {
         onOpenShare={() => setIsShareOpen(true)}
         onOpenAudit={() => setIsAuditOpen(true)}
         onOpenDashboard={() => setIsDashboardOpen(true)}
+        onOpenExportShare={handleOpenExportShare}
+        onQuickDownload={handleQuickDownload}
       />
 
       {/* Main 3-Panel Layout */}
@@ -231,6 +274,18 @@ export const WorkbenchPage: React.FC = () => {
         isOpen={isDashboardOpen}
         onClose={() => setIsDashboardOpen(false)}
       />
+
+      {SHARE_EXPORT_ENABLED && (
+        <ExportShareModal
+          isOpen={isExportShareOpen}
+          onClose={() => setIsExportShareOpen(false)}
+          dataset={selectedDataset}
+          columns={columns}
+          steps={steps}
+          initialTab={exportShareTab}
+          initialFormat={exportShareFormat}
+        />
+      )}
     </div>
   );
 };

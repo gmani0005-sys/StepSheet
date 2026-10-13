@@ -14,6 +14,16 @@ async def lifespan(app: FastAPI):
     # Initialize SQLite / PostgreSQL tables
     Base.metadata.create_all(bind=engine)
 
+    # Safe auto-migration for newly added columns in SQLite
+    try:
+        with engine.connect() as conn:
+            result = conn.exec_driver_sql("PRAGMA table_info(project_shares)")
+            cols = [row[1] for row in result.fetchall()]
+            if cols and "passcode_hash" not in cols:
+                conn.exec_driver_sql("ALTER TABLE project_shares ADD COLUMN passcode_hash VARCHAR(255)")
+    except Exception:
+        pass
+
     # Seed demo user if not present
     db = SessionLocal()
     try:

@@ -11,8 +11,10 @@ from app.models.share import ProjectShare
 from app.schemas.share import (
     ShareCreate,
     ShareResponse,
+    ShareVerifyRequest,
     ShareAccessResponse,
 )
+from app.core.security import hash_password, verify_password
 from app.services.audit_service import audit_service
 
 router = APIRouter()
@@ -43,6 +45,8 @@ def create_project_share(
     if req.expires_in_days:
         expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=req.expires_in_days)
 
+    passcode_hash = hash_password(req.passcode) if req.passcode else None
+
     share = ProjectShare(
         id=str(secrets.token_hex(16)),
         project_id=project_id,
@@ -50,6 +54,7 @@ def create_project_share(
         role=req.role,
         created_by=author_email,
         expires_at=expires_at,
+        passcode_hash=passcode_hash,
     )
     db.add(share)
     db.commit()
@@ -61,7 +66,7 @@ def create_project_share(
         project_id=project_id,
         actor_email=author_email,
         resource_type="share",
-        details={"role": req.role, "token_prefix": token[:8]},
+        details={"role": req.role, "token_prefix": token[:8], "has_passcode": bool(passcode_hash)},
     )
 
     share_url = f"/share/{token}"
@@ -74,6 +79,7 @@ def create_project_share(
         created_at=share.created_at,
         expires_at=share.expires_at,
         share_url=share_url,
+        has_passcode=bool(share.passcode_hash),
     )
 
 
@@ -96,6 +102,7 @@ def list_project_shares(
                 created_at=s.created_at,
                 expires_at=s.expires_at,
                 share_url=f"/share/{s.token}",
+                has_passcode=bool(s.passcode_hash),
             )
         )
     return results
@@ -135,10 +142,12 @@ def revoke_project_share(
 @router.get("/share/{token}", response_model=ShareAccessResponse)
 def access_shared_project(
     token: str,
+    passcode: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """
     Validates a shared link token and returns the project context and permitted capabilities.
+    If the link is passcode-protected, verifies the supplied passcode or signals requires_passcode.
     """
     share = db.query(ProjectShare).filter(ProjectShare.token == token).first()
     if not share:
@@ -156,6 +165,32 @@ def access_shared_project(
     if not project:
         raise HTTPException(status_code=404, detail="Associated project not found")
 
+    if share.passcode_hash:
+        if passcode:
+            if not verify_password(passcode, share.passcode_hash):
+                raise HTTPException(status_code=401, detail="Invalid passcode")
+            return ShareAccessResponse(
+                valid=True,
+                project_id=project.id,
+                project_title=project.title,
+                role=share.role,
+                can_edit=(share.role == "editor"),
+                created_by=share.created_by,
+                requires_passcode=False,
+                has_passcode=True,
+            )
+        else:
+            return ShareAccessResponse(
+                valid=False,
+                project_id=project.id,
+                project_title=project.title,
+                role=share.role,
+                can_edit=False,
+                created_by=share.created_by,
+                requires_passcode=True,
+                has_passcode=True,
+            )
+
     return ShareAccessResponse(
         valid=True,
         project_id=project.id,
@@ -163,4 +198,58 @@ def access_shared_project(
         role=share.role,
         can_edit=(share.role == "editor"),
         created_by=share.created_by,
+        requires_passcode=False,
+        has_passcode=False,
+    )
+
+
+@router.post("/share/{token}/verify", response_model=ShareAccessResponse)
+def verify_shared_project_passcode(
+    token: str,
+    req: ShareVerifyRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Verifies the passcode for a protected share token.
+    """
+    share = db.query(ProjectShare).filter(ProjectShare.token == token).first()
+    if not share:
+        raise HTTPException(status_code=404, detail="Invalid or expired share link")
+
+    if share.expires_at:
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        exp = share.expires_at
+        if exp.tzinfo is None:
+            now_utc = datetime.datetime.utcnow()
+        if exp < now_utc:
+            raise HTTPException(status_code=410, detail="Share link has expired")
+
+    project = db.query(Project).filter(Project.id == share.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Associated project not found")
+
+    if not share.passcode_hash:
+        return ShareAccessResponse(
+            valid=True,
+            project_id=project.id,
+            project_title=project.title,
+            role=share.role,
+            can_edit=(share.role == "editor"),
+            created_by=share.created_by,
+            requires_passcode=False,
+            has_passcode=False,
+        )
+
+    if not verify_password(req.passcode, share.passcode_hash):
+        raise HTTPException(status_code=401, detail="Invalid passcode")
+
+    return ShareAccessResponse(
+        valid=True,
+        project_id=project.id,
+        project_title=project.title,
+        role=share.role,
+        can_edit=(share.role == "editor"),
+        created_by=share.created_by,
+        requires_passcode=False,
+        has_passcode=True,
     )

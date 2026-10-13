@@ -656,19 +656,45 @@ export const api = {
   async createShare(
     projectId: string,
     role: string = 'viewer',
-    expiresInDays?: number
+    expiresInDays?: number | null,
+    passcode?: string
   ): Promise<any> {
     return withFallback(
       async () => {
+        const body: any = { role };
+        if (expiresInDays !== undefined && expiresInDays !== null && expiresInDays > 0) {
+          body.expires_in_days = expiresInDays;
+        }
+        if (passcode) {
+          body.passcode = passcode;
+        }
         const res = await fetch(`${API_BASE}/projects/${projectId}/shares`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-          body: JSON.stringify({ role, expires_in_days: expiresInDays }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error('Failed to create share link');
         return res.json();
       },
-      () => localEngine.createShare(projectId, role, expiresInDays)
+      () => localEngine.createShare(projectId, role, expiresInDays || undefined, passcode)
+    );
+  },
+
+  async verifySharePasscode(token: string, passcode: string): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/share/${token}/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passcode }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Invalid passcode');
+        }
+        return res.json();
+      },
+      () => localEngine.getShareAccess(token)
     );
   },
 

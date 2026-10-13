@@ -43,6 +43,7 @@ import {
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { useAuthStore } from '../../store/authStore';
 import { StepType } from '../../types/steps';
+import { SHARE_EXPORT_ENABLED } from '../../config/features';
 
 interface TopBarProps {
   onOpenAuthModal?: () => void;
@@ -55,6 +56,8 @@ interface TopBarProps {
   onOpenShare?: () => void;
   onOpenAudit?: () => void;
   onOpenDashboard?: () => void;
+  onOpenExportShare?: (tab?: 'files' | 'link' | 'history', format?: string) => void;
+  onQuickDownload?: (format: 'xlsx_values' | 'csv') => void;
 }
 
 type RibbonTabId = 'Home' | 'Formulas' | 'Data' | 'Join' | 'Quality' | 'View' | 'Help';
@@ -86,6 +89,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenShare,
   onOpenAudit,
   onOpenDashboard,
+  onOpenExportShare,
+  onQuickDownload,
 }) => {
   const {
     selectedDataset,
@@ -108,6 +113,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   const { user, isAuthenticated, logout } = useAuthStore();
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTabId>('Home');
   const [isRibbonCollapsed, setIsRibbonCollapsed] = useState(false);
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
+  const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
   const topFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleTabClick = (tab: RibbonTabId) => {
@@ -694,15 +701,93 @@ export const TopBar: React.FC<TopBarProps> = ({
               <span>Import</span>
             </button>
 
-            <button
-              type="button"
-              onClick={onOpenExport}
-              title="Download / Export Workbook (.xlsx, .csv, .parquet, SQL)"
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-white text-[#217346] hover:bg-[#E6F2EB] border border-white rounded-[2px] transition-colors shadow-sm"
-            >
-              <Download size={16} className="shrink-0 stroke-[2.2]" />
-              <span>Download</span>
-            </button>
+            {SHARE_EXPORT_ENABLED ? (
+              <div className="relative flex items-center">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenExportShare ? onOpenExportShare('files') : onOpenExport?.()
+                  }
+                  title="Download / Export Workbook (.xlsx, .csv, .parquet, PDF, PPTX)"
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-white text-[#217346] hover:bg-[#E6F2EB] border-y border-l border-white rounded-l-[2px] transition-colors shadow-sm"
+                >
+                  <Download size={15} className="shrink-0 stroke-[2.2]" />
+                  <span>Download</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsDownloadMenuOpen(!isDownloadMenuOpen);
+                    setIsShareMenuOpen(false);
+                  }}
+                  title="Download options"
+                  aria-label="Download options"
+                  className="px-1 py-1 text-xs font-bold bg-white text-[#217346] hover:bg-[#E6F2EB] border border-white rounded-r-[2px] transition-colors shadow-sm"
+                >
+                  <ChevronDown size={12} />
+                </button>
+
+                {isDownloadMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setIsDownloadMenuOpen(false)}
+                    />
+                    <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded shadow-lg z-50 py-1 text-xs text-gray-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDownloadMenuOpen(false);
+                          if (onQuickDownload) onQuickDownload('xlsx_values');
+                          else if (onOpenExportShare) onOpenExportShare('files', 'xlsx_values');
+                          else onOpenExport?.();
+                        }}
+                        className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                      >
+                        <span className="font-medium">Download as XLSX</span>
+                        <span className="text-[10px] text-gray-400">values, instant</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDownloadMenuOpen(false);
+                          if (onQuickDownload) onQuickDownload('csv');
+                          else if (onOpenExportShare) onOpenExportShare('files', 'csv');
+                          else onOpenExport?.();
+                        }}
+                        className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                      >
+                        <span className="font-medium">Download as CSV</span>
+                        <span className="text-[10px] text-gray-400">instant</span>
+                      </button>
+                      <div className="border-t border-gray-100 my-1" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDownloadMenuOpen(false);
+                          if (onOpenExportShare) onOpenExportShare('files');
+                          else onOpenExport?.();
+                        }}
+                        className="w-full text-left px-3 py-1.5 hover:bg-gray-100 font-semibold text-[#217346]"
+                      >
+                        More options…
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenExport}
+                title="Download / Export Workbook (.xlsx, .csv, .parquet, SQL)"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-white text-[#217346] hover:bg-[#E6F2EB] border border-white rounded-[2px] transition-colors shadow-sm"
+              >
+                <Download size={16} className="shrink-0 stroke-[2.2]" />
+                <span>Download</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -735,15 +820,152 @@ export const TopBar: React.FC<TopBarProps> = ({
             <span> Visuals</span>
           </button>
 
-          <button
-            type="button"
-            onClick={onOpenShare}
-            title="Share project with role-based links"
-            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-[#185C37] hover:bg-[#124629] text-white border border-white/25 rounded-[2px] whitespace-nowrap shrink-0 transition-colors"
-          >
-            <Share2 size={14} className="shrink-0" />
-            <span>Share</span>
-          </button>
+          {SHARE_EXPORT_ENABLED ? (
+            <div className="relative flex items-center">
+              <button
+                type="button"
+                onClick={() =>
+                  onOpenExportShare ? onOpenExportShare('link') : onOpenShare?.()
+                }
+                title="Share project with role-based links or deliverables"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-[#185C37] hover:bg-[#124629] text-white border-y border-l border-white/25 rounded-l-[2px] whitespace-nowrap shrink-0 transition-colors"
+              >
+                <Share2 size={14} className="shrink-0" />
+                <span>Share</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsShareMenuOpen(!isShareMenuOpen);
+                  setIsDownloadMenuOpen(false);
+                }}
+                title="Share options"
+                aria-label="Share options"
+                className="px-1 py-1 text-xs font-medium bg-[#185C37] hover:bg-[#124629] text-white border border-white/25 rounded-r-[2px] whitespace-nowrap shrink-0 transition-colors"
+              >
+                <ChevronDown size={12} />
+              </button>
+
+              {isShareMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsShareMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded shadow-lg z-50 py-1 text-xs text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('link');
+                        else onOpenShare?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 font-semibold text-[#217346] flex items-center justify-between"
+                    >
+                      <span>Share link…</span>
+                      <span className="text-[10px] text-gray-400">interactive</span>
+                    </button>
+                    <div className="border-t border-gray-100 my-1" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('files', 'xlsx_values');
+                        else onOpenExport?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                    >
+                      <span>Packaged workbook</span>
+                      <span className="text-[10px] font-mono text-gray-400">.xlsx</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('files', 'pdf');
+                        else onOpenExport?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                    >
+                      <span>PDF</span>
+                      <span className="text-[10px] font-mono text-gray-400">.pdf</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('files', 'pptx');
+                        else onOpenExport?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                    >
+                      <span>PowerPoint, interactive</span>
+                      <span className="text-[10px] font-mono text-gray-400">.pptx</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('files', 'csv');
+                        else onOpenExport?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                    >
+                      <span>CSV / Parquet / JSON</span>
+                      <span className="text-[10px] text-gray-400">data files</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('files', 'powerbi_starter');
+                        else onOpenExport?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                    >
+                      <span>Power BI starter pack</span>
+                      <span className="text-[10px] font-mono text-gray-400">.zip</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('files', 'share_pack');
+                        else onOpenExport?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 flex items-center justify-between"
+                    >
+                      <span>Share pack</span>
+                      <span className="text-[10px] text-gray-400">all formats, .zip</span>
+                    </button>
+                    <div className="border-t border-gray-100 my-1" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsShareMenuOpen(false);
+                        if (onOpenExportShare) onOpenExportShare('files');
+                        else onOpenExport?.();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-100 text-gray-600 font-medium"
+                    >
+                      More options…
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenShare}
+              title="Share project with role-based links"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-[#185C37] hover:bg-[#124629] text-white border border-white/25 rounded-[2px] whitespace-nowrap shrink-0 transition-colors"
+            >
+              <Share2 size={14} className="shrink-0" />
+              <span>Share</span>
+            </button>
+          )}
 
           {isAuthenticated && user ? (
             <div className="flex items-center gap-1.5 text-xs text-white bg-[#185C37] px-2 py-0.5 rounded-[2px] border border-white/20 whitespace-nowrap shrink-0">

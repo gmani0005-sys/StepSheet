@@ -2985,7 +2985,8 @@ export const localEngine = {
   async createShare(
     projectId: string,
     role: string = 'viewer',
-    expiresInDays?: number
+    expiresInDays?: number,
+    passcode?: string
   ): Promise<any> {
     const shares = await this.listShares(projectId);
     const token = `stpsht_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
@@ -3002,13 +3003,14 @@ export const localEngine = {
       is_active: true,
       expires_in_days: expiresInDays,
       expires_at: expiresAt,
+      has_passcode: Boolean(passcode),
       created_at: new Date().toISOString(),
     };
     const next = [created, ...shares];
     try {
       localStorage.setItem(LOCAL_SHARES_KEY, JSON.stringify(next));
     } catch {}
-    logAudit('share_created', { role, expires_in_days: expiresInDays || 'never' }, 'share');
+    logAudit('share_created', { role, expires_in_days: expiresInDays || 'never', has_passcode: Boolean(passcode) }, 'share');
     return created;
   },
 

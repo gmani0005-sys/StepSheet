@@ -129,6 +129,8 @@ export interface DashboardVisualConfig {
   x?: number;
   y?: number;
   zIndex?: number;
+  locked?: boolean;
+  hidden?: boolean;
   customWidth?: number;
   customHeight?: number;
   paletteId?: PaletteId;
@@ -393,11 +395,16 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   const [paletteId, setPaletteId] = useState<PaletteId>('classic');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
 
-  // Canvas Snapping, Alignment Guides & Undo/Redo History
+  // Canvas Snapping, Zoom, Alignment Guides & Undo/Redo History
   const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
   const snapToGridRef = useRef<boolean>(true);
   snapToGridRef.current = snapToGrid;
 
+  const [canvasZoom, setCanvasZoom] = useState<number>(100);
+  const canvasZoomRef = useRef<number>(100);
+  canvasZoomRef.current = canvasZoom;
+
+  const [ariaAnnouncement, setAriaAnnouncement] = useState<string>('');
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
   const [undoStack, setUndoStack] = useState<DashboardVisualConfig[][]>([]);
   const [redoStack, setRedoStack] = useState<DashboardVisualConfig[][]>([]);
@@ -755,6 +762,23 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           nextH = resizeSess.startH + (resizeSess.startTop - nextTop);
         }
 
+        // Shift on corner handles preserves aspect ratio
+        if (e.shiftKey && ['nw', 'ne', 'se', 'sw'].includes(dir)) {
+          const ratio = resizeSess.startW / Math.max(1, resizeSess.startH);
+          nextH = Math.round(Math.max(220, Math.min(900, nextW / ratio)));
+          if (dir.includes('n')) {
+            nextTop = Math.max(0, resizeSess.startTop + (resizeSess.startH - nextH));
+          }
+        }
+
+        // Alt resizes symmetrically from center
+        if (e.altKey) {
+          const cx = resizeSess.startLeft + resizeSess.startW / 2;
+          const cy = resizeSess.startTop + resizeSess.startH / 2;
+          nextLeft = Math.max(0, Math.round(cx - nextW / 2));
+          nextTop = Math.max(0, Math.round(cy - nextH / 2));
+        }
+
         // Emit alignment guides when resized edges align with other visuals
         const guides: AlignmentGuide[] = [];
         for (const other of visualsRef.current) {
@@ -859,6 +883,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       if (resizeSessionRef.current) {
         if (resizeSessionRef.current.hasMoved) {
           pushUndoSnapshot(resizeSessionRef.current.snapshot);
+          const resizedVis = visualsRef.current.find(
+            (v) => v.id === resizeSessionRef.current?.visId
+          );
+          if (resizedVis) {
+            setAriaAnnouncement(
+              `${resizedVis.title} resized to W ${resizedVis.customWidth ?? DEFAULT_TILE_W}, H ${resizedVis.customHeight ?? DEFAULT_TILE_H}`
+            );
+          }
         }
         resizeSessionRef.current = null;
         setResizingVisId(null);
@@ -866,6 +898,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       if (dragSessionRef.current) {
         if (dragSessionRef.current.hasMoved) {
           pushUndoSnapshot(dragSessionRef.current.snapshot);
+          const movedVis = visualsRef.current.find(
+            (v) => v.id === dragSessionRef.current?.primaryVisId
+          );
+          if (movedVis) {
+            setAriaAnnouncement(
+              `${movedVis.title} moved to X ${movedVis.x ?? 16}, Y ${movedVis.y ?? 16}`
+            );
+          }
         }
         dragSessionRef.current = null;
       }
@@ -875,6 +915,30 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     };
 
     const handleWindowKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (dragSessionRef.current) {
+          e.preventDefault();
+          const snap = dragSessionRef.current.snapshot;
+          dragSessionRef.current = null;
+          setVisuals(snap);
+          setHoverDragVisId(null);
+          setHoverTargetVisId(null);
+          setAlignmentGuides([]);
+          setAriaAnnouncement('Move cancelled');
+          return;
+        }
+        if (resizeSessionRef.current) {
+          e.preventDefault();
+          const snap = resizeSessionRef.current.snapshot;
+          resizeSessionRef.current = null;
+          setResizingVisId(null);
+          setVisuals(snap);
+          setAlignmentGuides([]);
+          setAriaAnnouncement('Resize cancelled');
+          return;
+        }
+      }
+
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -883,6 +947,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           target.tagName === 'SELECT' ||
           target.isContentEditable)
       ) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setSelectedVisualIds(visualsRef.current.map((v) => v.id));
         return;
       }
 
@@ -919,7 +989,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         const activeSet = new Set(activeIds);
         setVisuals((prev) =>
           prev.map((v) =>
-            activeSet.has(v.id)
+            activeSet.has(v.id) && !v.locked
               ? {
                   ...v,
                   x: Math.max(0, (v.x ?? 16) + dx),
@@ -928,6 +998,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               : v
           )
         );
+        const primaryVis = visualsRef.current.find((v) => v.id === activeIds[0]);
+        if (primaryVis && !primaryVis.locked) {
+          setAriaAnnouncement(
+            `${primaryVis.title} moved to X ${Math.max(0, (primaryVis.x ?? 16) + dx)}, Y ${Math.max(0, (primaryVis.y ?? 16) + dy)}`
+          );
+        }
       }
     };
 
@@ -1465,6 +1541,40 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     );
   };
 
+  const handleToggleLockVisual = (
+    e: React.MouseEvent<HTMLElement>,
+    visId: string
+  ) => {
+    e.stopPropagation();
+    pushUndoSnapshot(visuals);
+    setVisuals((prev) =>
+      prev.map((v) => (v.id === visId ? { ...v, locked: !v.locked } : v))
+    );
+  };
+
+  const handleZOrderChange = (
+    e: React.MouseEvent<HTMLElement>,
+    visId: string,
+    mode: 'front' | 'back'
+  ) => {
+    e.stopPropagation();
+    pushUndoSnapshot(visuals);
+    setVisuals((prev) => {
+      const zs = prev.map((v, idx) => v.zIndex ?? idx + 1);
+      const maxZ = Math.max(1, ...zs);
+      const minZ = Math.min(1, ...zs);
+      return prev.map((v, idx) => {
+        if (v.id !== visId) {
+          return mode === 'back' ? { ...v, zIndex: (v.zIndex ?? idx + 1) + 1 } : v;
+        }
+        return {
+          ...v,
+          zIndex: mode === 'front' ? maxZ + 1 : Math.max(1, minZ),
+        };
+      });
+    });
+  };
+
   const handleVisualMouseDown = (
     e: React.MouseEvent<HTMLElement>,
     visId: string,
@@ -1499,9 +1609,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     setSelectedVisualId(visId);
     setSelectedKpiId(null);
 
+    const targetVis = visualsRef.current.find((v) => v.id === visId);
+    if (targetVis?.locked) {
+      return;
+    }
+
     const initialRects: Record<string, { x: number; y: number; w: number; h: number }> = {};
     visualsRef.current.forEach((v, idx) => {
-      if (movingIds.includes(v.id)) {
+      if (movingIds.includes(v.id) && !v.locked) {
         const col = idx % 2;
         const row = Math.floor(idx / 2);
         initialRects[v.id] = {
@@ -1547,6 +1662,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   ) => {
     e.stopPropagation();
     e.preventDefault();
+    if (vis.locked) return;
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -3309,10 +3425,34 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                 >
                   Tidy Grid
                 </button>
+
+                <span className="h-4 w-px bg-[#D4D4D4] mx-0.5" />
+
+                <select
+                  aria-label="Canvas Zoom"
+                  data-testid="canvas-zoom-select"
+                  value={canvasZoom}
+                  onChange={(e) => setCanvasZoom(Number(e.target.value))}
+                  className="px-2 py-1 rounded-md text-[11px] font-semibold bg-white text-[#212121] border border-[#D4D4D4]"
+                >
+                  <option value={50}>Zoom: 50%</option>
+                  <option value={75}>Zoom: 75%</option>
+                  <option value={100}>Zoom: 100% (16:9)</option>
+                  <option value={150}>Zoom: 150%</option>
+                  <option value={200}>Zoom: 200%</option>
+                </select>
               </div>
 
               <div className="text-[10px] text-[#605E5C] font-medium">
-                Hold &amp; Drag to Move • 8-Way Resize • Ctrl+Click Multi-Select • Arrow Keys Nudge
+                Hold &amp; Drag to Move • 8-Way Resize (Shift=Ratio, Alt=Center) • Esc=Cancel • Arrow Keys Nudge
+              </div>
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="canvas-aria-live"
+                className="sr-only"
+              >
+                {ariaAnnouncement}
               </div>
             </div>
 
@@ -3333,6 +3473,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                   ? 'radial-gradient(#CBD5E1 1.2px, transparent 1.2px)'
                   : undefined,
                 backgroundSize: '16px 16px',
+                transform: canvasZoom !== 100 ? `scale(${canvasZoom / 100})` : undefined,
+                transformOrigin: 'top left',
               }}
               className="relative w-full rounded-xl border border-[#D4D4D4] bg-[#F8FAFC] overflow-x-auto overflow-y-visible"
             >
@@ -3410,6 +3552,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                     data-visual-id={vis.id}
                     data-hover-dragging={isHoverDragging ? 'true' : 'false'}
                     data-selected={isMultiSelected ? 'true' : 'false'}
+                    data-locked={vis.locked ? 'true' : 'false'}
                     onMouseDown={(e) => handleVisualMouseDown(e, vis.id, false)}
                     onMouseEnter={() => handleVisualMouseEnter(vis.id)}
                     onClick={(e) => handleSelectVisualTile(e, vis.id)}
@@ -3549,6 +3692,28 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                           className="px-1.5 py-0.5 rounded bg-[#F3F3F3] hover:bg-[#E6E6E6] text-[9px] font-mono font-semibold text-[#605E5C]"
                         >
                           {tileX},{tileY} • {tileW}×{tileH}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`lock-visual-btn-${vis.id}`}
+                          onClick={(e) => handleToggleLockVisual(e, vis.id)}
+                          title={vis.locked ? 'Unlock visual position & size' : 'Lock visual position & size'}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors ${
+                            vis.locked
+                              ? 'bg-[#FEF3C7] text-[#B45309] border-[#F59E0B]'
+                              : 'bg-white text-[#605E5C] border-[#D4D4D4] hover:bg-[#F3F3F3]'
+                          }`}
+                        >
+                          {vis.locked ? '🔒' : '🔓'}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`bring-front-btn-${vis.id}`}
+                          onClick={(e) => handleZOrderChange(e, vis.id, 'front')}
+                          title="Bring visual to front (Z-order)"
+                          className="px-1 py-0.5 rounded text-[10px] font-bold bg-white hover:bg-[#F3F3F3] text-[#605E5C] border border-[#D4D4D4]"
+                        >
+                          ⇪
                         </button>
                         <button
                           type="button"
@@ -3840,6 +4005,96 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                           </button>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  {/* Layout & Geometry (Exact X, Y, Width, Height in Logical Units) */}
+                  <div className="space-y-2 pt-2 border-t border-[#D4D4D4]">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121]">
+                        Position &amp; Size (Logical px)
+                      </label>
+                      <span className="text-[10px] font-mono text-[#605E5C]">
+                        {activeVisual.locked ? '🔒 Locked' : 'Editable'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <div>
+                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
+                          X
+                        </label>
+                        <input
+                          type="number"
+                          aria-label="Visual X Position"
+                          data-testid="layout-input-x"
+                          disabled={!!activeVisual.locked}
+                          value={activeVisual.x ?? 16}
+                          onChange={(e) => {
+                            pushUndoSnapshot(visuals);
+                            updateActiveVisual({
+                              x: Math.max(0, Number(e.target.value) || 0),
+                            });
+                          }}
+                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
+                          Y
+                        </label>
+                        <input
+                          type="number"
+                          aria-label="Visual Y Position"
+                          data-testid="layout-input-y"
+                          disabled={!!activeVisual.locked}
+                          value={activeVisual.y ?? 16}
+                          onChange={(e) => {
+                            pushUndoSnapshot(visuals);
+                            updateActiveVisual({
+                              y: Math.max(0, Number(e.target.value) || 0),
+                            });
+                          }}
+                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
+                          W
+                        </label>
+                        <input
+                          type="number"
+                          aria-label="Visual Width"
+                          data-testid="layout-input-w"
+                          disabled={!!activeVisual.locked}
+                          value={activeVisual.customWidth ?? DEFAULT_TILE_W}
+                          onChange={(e) => {
+                            pushUndoSnapshot(visuals);
+                            updateActiveVisual({
+                              customWidth: Math.max(260, Number(e.target.value) || DEFAULT_TILE_W),
+                            });
+                          }}
+                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
+                          H
+                        </label>
+                        <input
+                          type="number"
+                          aria-label="Visual Height"
+                          data-testid="layout-input-h"
+                          disabled={!!activeVisual.locked}
+                          value={activeVisual.customHeight ?? DEFAULT_TILE_H}
+                          onChange={(e) => {
+                            pushUndoSnapshot(visuals);
+                            updateActiveVisual({
+                              customHeight: Math.max(220, Number(e.target.value) || DEFAULT_TILE_H),
+                            });
+                          }}
+                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
+                        />
+                      </div>
                     </div>
                   </div>
 

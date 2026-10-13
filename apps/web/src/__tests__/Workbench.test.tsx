@@ -812,6 +812,28 @@ describe('StepSheet Workbench', () => {
     expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('520px');
     fireEvent.click(screen.getByTestId('canvas-redo-btn'));
     expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('16px');
+
+    // Verify Escape during drag cancels and restores pre-drag coordinates
+    const tile2ForEsc = screen.getByTestId('visual-tile-vis_2') as HTMLElement;
+    fireEvent.mouseDown(tile2ForEsc, { button: 0, clientX: 50, clientY: 50 });
+    fireEvent.mouseMove(window, { clientX: 250, clientY: 200 });
+    expect(tile2ForEsc.style.left).not.toBe('16px');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(tile2ForEsc.style.left).toBe('16px');
+
+    // Verify Lock toggle prevents moving a locked visual
+    fireEvent.click(screen.getByTestId('lock-visual-btn-vis_2'));
+    expect(tile2ForEsc.getAttribute('data-locked')).toBe('true');
+    fireEvent.mouseDown(tile2ForEsc, { button: 0, clientX: 50, clientY: 50 });
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 250 });
+    fireEvent.mouseUp(window);
+    expect(tile2ForEsc.style.left).toBe('16px');
+    // Unlock visual and verify exact X input in Visualizations Pane
+    fireEvent.click(screen.getByTestId('lock-visual-btn-vis_2'));
+    expect(tile2ForEsc.getAttribute('data-locked')).toBe('false');
+    const layoutInputX = screen.getByTestId('layout-input-x') as HTMLInputElement;
+    fireEvent.change(layoutInputX, { target: { value: '144' } });
+    expect(tile2ForEsc.style.left).toBe('144px');
   });
 });
 

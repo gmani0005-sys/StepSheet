@@ -779,8 +779,12 @@ describe('StepSheet Workbench', () => {
     expect(orderedTiles[0].getAttribute('data-visual-id')).toBe('vis_2');
     expect(orderedTiles[1].getAttribute('data-visual-id')).toBe('vis_1');
 
+    // Verify Canvas Interaction Toolbar & Position/Size details are removed while Zoom is in the top header
+    expect(screen.queryByTestId('canvas-undo-btn')).toBeNull();
+    expect(screen.queryByTestId('layout-input-x')).toBeNull();
+    expect(screen.getByTestId('canvas-zoom-select')).toBeDefined();
+
     // Verify Press-and-Hold Left Mouse Freeform Drag on Canvas with Snapping & Alignment Guides
-    fireEvent.click(screen.getByTestId('auto-arrange-btn'));
     const tile2 = screen.getByTestId('visual-tile-vis_2') as HTMLElement;
     expect(tile2.style.left).toBe('16px');
     expect(tile2.style.top).toBe('16px');
@@ -799,27 +803,19 @@ describe('StepSheet Workbench', () => {
     fireEvent.keyDown(window, { key: 'ArrowDown' });
     expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.top).toBe('104px');
 
-    // Verify Multi-Select & Group Alignment + Undo/Redo
-    fireEvent.click(screen.getByTestId('select-all-visuals-btn'));
-    expect(screen.getByTestId('visual-tile-vis_1').getAttribute('data-selected')).toBe('true');
-    expect(screen.getByTestId('visual-tile-vis_2').getAttribute('data-selected')).toBe('true');
-
-    fireEvent.click(screen.getByTestId('align-left-btn'));
-    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('16px');
-
-    // Undo restores previous position (520px), Redo re-applies Align Left (16px)
-    fireEvent.click(screen.getByTestId('canvas-undo-btn'));
-    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('520px');
-    fireEvent.click(screen.getByTestId('canvas-redo-btn'));
-    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('16px');
+    // Verify Keyboard Undo (Ctrl+Z) & Redo (Ctrl+Y)
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.top).toBe('96px');
+    fireEvent.keyDown(window, { key: 'y', ctrlKey: true });
+    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.top).toBe('104px');
 
     // Verify Escape during drag cancels and restores pre-drag coordinates
     const tile2ForEsc = screen.getByTestId('visual-tile-vis_2') as HTMLElement;
     fireEvent.mouseDown(tile2ForEsc, { button: 0, clientX: 50, clientY: 50 });
     fireEvent.mouseMove(window, { clientX: 250, clientY: 200 });
-    expect(tile2ForEsc.style.left).not.toBe('16px');
+    expect(tile2ForEsc.style.left).not.toBe('520px');
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(tile2ForEsc.style.left).toBe('16px');
+    expect(tile2ForEsc.style.left).toBe('520px');
 
     // Verify Lock toggle prevents moving a locked visual
     fireEvent.click(screen.getByTestId('lock-visual-btn-vis_2'));
@@ -827,13 +823,32 @@ describe('StepSheet Workbench', () => {
     fireEvent.mouseDown(tile2ForEsc, { button: 0, clientX: 50, clientY: 50 });
     fireEvent.mouseMove(window, { clientX: 300, clientY: 250 });
     fireEvent.mouseUp(window);
-    expect(tile2ForEsc.style.left).toBe('16px');
-    // Unlock visual and verify exact X input in Visualizations Pane
+    expect(tile2ForEsc.style.left).toBe('520px');
     fireEvent.click(screen.getByTestId('lock-visual-btn-vis_2'));
     expect(tile2ForEsc.getAttribute('data-locked')).toBe('false');
-    const layoutInputX = screen.getByTestId('layout-input-x') as HTMLInputElement;
-    fireEvent.change(layoutInputX, { target: { value: '144' } });
-    expect(tile2ForEsc.style.left).toBe('144px');
+
+    // Verify Multi-Page Dashboards: Bottom Pages Bar, + Add Page, Inline Rename, and Top Page Selector Dropdown
+    expect(screen.getByTestId('dashboard-pages-bar')).toBeDefined();
+    expect(screen.getByTestId('page-tab-page_1').getAttribute('data-active')).toBe('true');
+
+    // Click "+ Add Page" to create Page 2 and switch to it
+    fireEvent.click(screen.getByTestId('add-dashboard-page-btn'));
+    expect(screen.getByTestId('page-tab-page_2').getAttribute('data-active')).toBe('true');
+    expect((screen.getByTestId('top-page-select') as HTMLSelectElement).value).toBe('page_2');
+
+    // Rename Page 2 inline
+    fireEvent.click(screen.getByTestId('edit-page-name-btn-page_2'));
+    const renameInput = screen.getByTestId('rename-page-input-page_2') as HTMLInputElement;
+    fireEvent.change(renameInput, { target: { value: 'Regional Overview' } });
+    fireEvent.click(screen.getByTestId('save-page-name-btn-page_2'));
+    expect(screen.getByTestId('page-tab-page_2').textContent).toContain('Regional Overview');
+
+    // Switch back to Page 1 using the Top Page Dropdown
+    fireEvent.change(screen.getByTestId('top-page-select'), { target: { value: 'page_1' } });
+    expect(screen.getByTestId('page-tab-page_1').getAttribute('data-active')).toBe('true');
+    expect((screen.getByLabelText('Dashboard Title') as HTMLInputElement).value).toBe(
+      'Q4 Revenue Performance Dashboard'
+    );
   });
 });
 

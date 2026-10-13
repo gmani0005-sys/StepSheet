@@ -140,6 +140,16 @@ export interface DashboardVisualConfig {
   conditionalFormatting?: ConditionalFormattingConfig;
 }
 
+export interface DashboardPageConfig {
+  id: string;
+  name: string;
+  dashboardTitle: string;
+  visuals: DashboardVisualConfig[];
+  kpiCards: DashboardKpiConfig[];
+  slicerColumns: string[];
+  paletteId: PaletteId;
+}
+
 interface DashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -394,6 +404,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   const [selectedKpiId, setSelectedKpiId] = useState<string | null>(null);
   const [paletteId, setPaletteId] = useState<PaletteId>('classic');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
+
+  // Multi-Page Dashboard State (Page 1, Page 2, ... with inline rename & top dropdown)
+  const [pages, setPages] = useState<DashboardPageConfig[]>([]);
+  const [activePageId, setActivePageId] = useState<string>('page_1');
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const [editingPageNameDraft, setEditingPageNameDraft] = useState<string>('');
 
   // Canvas Snapping, Zoom, Alignment Guides & Undo/Redo History
   const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
@@ -650,6 +666,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     const dsKey = selectedDataset?.id || 'default';
     const colNames = columns.map((c) => c.name);
     const { cat1, cat2 } = getSmartDefaults();
+    const defaultSlicers = [cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 
     try {
       const raw = localStorage.getItem(STORAGE_KEY_DASHBOARDS);
@@ -664,31 +681,80 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             colNames.includes(v.categoryCol) || colNames.includes(v.valueCol)
         )
       ) {
-        if (saved.paletteId && COLOR_PALETTES[saved.paletteId as PaletteId]) {
-          setPaletteId(saved.paletteId as PaletteId);
-        }
-        setDashboardTitle(
+        const loadedPalette: PaletteId =
+          saved.paletteId && COLOR_PALETTES[saved.paletteId as PaletteId]
+            ? (saved.paletteId as PaletteId)
+            : 'classic';
+        const loadedTitle =
           typeof saved.dashboardTitle === 'string'
             ? saved.dashboardTitle
-            : `${selectedDataset?.name || 'Executive'} Dashboard`
-        );
+            : `${selectedDataset?.name || 'Executive'} Dashboard`;
         const normalizedVisuals = ensureVisualCanvasCoords(saved.visuals);
-        setVisuals(normalizedVisuals);
-        setUndoStack([]);
-        setRedoStack([]);
-        setKpiCards(
+        const loadedKpis =
           Array.isArray(saved.kpiCards) && saved.kpiCards.length > 0
             ? saved.kpiCards
-            : buildDefaultKpiCards()
-        );
-        setSlicerColumns(
+            : buildDefaultKpiCards();
+        const loadedSlicers =
           Array.isArray(saved.slicerColumns) && saved.slicerColumns.length > 0
             ? saved.slicerColumns.filter((c: string) => colNames.includes(c))
-            : [cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i)
-        );
-        const firstId = normalizedVisuals[0]?.id || null;
-        setSelectedVisualId(firstId);
-        setSelectedVisualIds(firstId ? [firstId] : []);
+            : defaultSlicers;
+
+        if (Array.isArray(saved.pages) && saved.pages.length > 0) {
+          const sanitizedPages: DashboardPageConfig[] = saved.pages.map(
+            (p: DashboardPageConfig, idx: number) => ({
+              id: p.id || `page_${idx + 1}`,
+              name: p.name || `Page ${idx + 1}`,
+              dashboardTitle: p.dashboardTitle || loadedTitle,
+              visuals: ensureVisualCanvasCoords(
+                Array.isArray(p.visuals) && p.visuals.length > 0 ? p.visuals : normalizedVisuals
+              ),
+              kpiCards:
+                Array.isArray(p.kpiCards) && p.kpiCards.length > 0 ? p.kpiCards : loadedKpis,
+              slicerColumns:
+                Array.isArray(p.slicerColumns) && p.slicerColumns.length > 0
+                  ? p.slicerColumns.filter((c: string) => colNames.includes(c))
+                  : loadedSlicers,
+              paletteId:
+                p.paletteId && COLOR_PALETTES[p.paletteId as PaletteId]
+                  ? p.paletteId
+                  : loadedPalette,
+            })
+          );
+          const targetPage =
+            sanitizedPages.find((p) => p.id === saved.activePageId) || sanitizedPages[0];
+          setPages(sanitizedPages);
+          setActivePageId(targetPage.id);
+          setPaletteId(targetPage.paletteId);
+          setDashboardTitle(targetPage.dashboardTitle);
+          setVisuals(targetPage.visuals);
+          setKpiCards(targetPage.kpiCards);
+          setSlicerColumns(targetPage.slicerColumns);
+          const firstId = targetPage.visuals[0]?.id || null;
+          setSelectedVisualId(firstId);
+          setSelectedVisualIds(firstId ? [firstId] : []);
+        } else {
+          const page1: DashboardPageConfig = {
+            id: 'page_1',
+            name: 'Page 1',
+            dashboardTitle: loadedTitle,
+            visuals: normalizedVisuals,
+            kpiCards: loadedKpis,
+            slicerColumns: loadedSlicers,
+            paletteId: loadedPalette,
+          };
+          setPages([page1]);
+          setActivePageId('page_1');
+          setPaletteId(loadedPalette);
+          setDashboardTitle(loadedTitle);
+          setVisuals(normalizedVisuals);
+          setKpiCards(loadedKpis);
+          setSlicerColumns(loadedSlicers);
+          const firstId = normalizedVisuals[0]?.id || null;
+          setSelectedVisualId(firstId);
+          setSelectedVisualIds(firstId ? [firstId] : []);
+        }
+        setUndoStack([]);
+        setRedoStack([]);
         setSelectedKpiId(null);
         return;
       }
@@ -698,12 +764,24 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
 
     const defaultVisuals = buildDefaultVisuals();
     const defaultKpis = buildDefaultKpiCards();
-    setDashboardTitle(`${selectedDataset?.name || 'Executive'} Dashboard`);
+    const defaultTitle = `${selectedDataset?.name || 'Executive'} Dashboard`;
+    const initialPage: DashboardPageConfig = {
+      id: 'page_1',
+      name: 'Page 1',
+      dashboardTitle: defaultTitle,
+      visuals: defaultVisuals,
+      kpiCards: defaultKpis,
+      slicerColumns: defaultSlicers,
+      paletteId: 'classic',
+    };
+    setPages([initialPage]);
+    setActivePageId('page_1');
+    setDashboardTitle(defaultTitle);
     setVisuals(defaultVisuals);
     setUndoStack([]);
     setRedoStack([]);
     setKpiCards(defaultKpis);
-    setSlicerColumns([cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i));
+    setSlicerColumns(defaultSlicers);
     setMultiSlicerSelections({});
     const firstId = defaultVisuals[0]?.id || null;
     setSelectedVisualId(firstId);
@@ -711,19 +789,64 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     setSelectedKpiId(null);
   }, [isOpen, selectedDataset?.id, columns]);
 
-  // Persist dashboard state
+  // Sync active page state into pages array & persist dashboard state
   useEffect(() => {
     if (!isOpen || visuals.length === 0) return;
     const dsKey = selectedDataset?.id || 'default';
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_DASHBOARDS);
-      const parsed = raw ? JSON.parse(raw) : {};
-      parsed[dsKey] = { visuals, kpiCards, slicerColumns, paletteId, dashboardTitle };
-      localStorage.setItem(STORAGE_KEY_DASHBOARDS, JSON.stringify(parsed));
-    } catch {
-      // ignore
-    }
-  }, [visuals, kpiCards, slicerColumns, paletteId, dashboardTitle, selectedDataset?.id, isOpen]);
+    setPages((prevPages) => {
+      const updatedPages =
+        prevPages.length === 0
+          ? [
+              {
+                id: activePageId || 'page_1',
+                name: 'Page 1',
+                dashboardTitle,
+                visuals,
+                kpiCards,
+                slicerColumns,
+                paletteId,
+              },
+            ]
+          : prevPages.map((p) =>
+              p.id === activePageId
+                ? {
+                    ...p,
+                    dashboardTitle,
+                    visuals,
+                    kpiCards,
+                    slicerColumns,
+                    paletteId,
+                  }
+                : p
+            );
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_DASHBOARDS);
+        const parsed = raw ? JSON.parse(raw) : {};
+        parsed[dsKey] = {
+          pages: updatedPages,
+          activePageId,
+          visuals,
+          kpiCards,
+          slicerColumns,
+          paletteId,
+          dashboardTitle,
+        };
+        localStorage.setItem(STORAGE_KEY_DASHBOARDS, JSON.stringify(parsed));
+      } catch {
+        // ignore
+      }
+      return updatedPages;
+    });
+  }, [
+    visuals,
+    kpiCards,
+    slicerColumns,
+    paletteId,
+    dashboardTitle,
+    activePageId,
+    selectedDataset?.id,
+    isOpen,
+  ]);
 
   // Global mousemove, mouseup & keydown handler for 8-way resize, freeform drag with snapping/guides, keyboard nudge & undo/redo
   useEffect(() => {
@@ -1422,6 +1545,118 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     setSelectedVisualId(firstId);
     setSelectedVisualIds(firstId ? [firstId] : []);
     setSelectedKpiId(null);
+  };
+
+  const handleSelectPage = (targetPageId: string) => {
+    if (targetPageId === activePageId) return;
+    const targetPage = pages.find((p) => p.id === targetPageId);
+    if (!targetPage) return;
+
+    setPages((prev) =>
+      prev.map((p) =>
+        p.id === activePageId
+          ? {
+              ...p,
+              dashboardTitle,
+              visuals,
+              kpiCards,
+              slicerColumns,
+              paletteId,
+            }
+          : p
+      )
+    );
+
+    setActivePageId(targetPage.id);
+    setDashboardTitle(targetPage.dashboardTitle);
+    setVisuals(targetPage.visuals);
+    setKpiCards(targetPage.kpiCards);
+    setSlicerColumns(targetPage.slicerColumns);
+    setPaletteId(targetPage.paletteId || 'classic');
+    setUndoStack([]);
+    setRedoStack([]);
+    const firstId = targetPage.visuals[0]?.id || null;
+    setSelectedVisualId(firstId);
+    setSelectedVisualIds(firstId ? [firstId] : []);
+    setSelectedKpiId(null);
+    setEditingPageId(null);
+  };
+
+  const handleAddPage = () => {
+    let nextNum = pages.length + 1;
+    while (pages.some((p) => p.id === `page_${nextNum}`)) {
+      nextNum += 1;
+    }
+    const newPageId = `page_${nextNum}`;
+    const newPageName = `Page ${nextNum}`;
+    const newVisuals = buildDefaultVisuals();
+    const newKpis = buildDefaultKpiCards();
+    const { cat1, cat2 } = getSmartDefaults();
+    const newSlicers = [cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+    const newTitle = `${selectedDataset?.name || 'Executive'} Dashboard - ${newPageName}`;
+
+    const newPage: DashboardPageConfig = {
+      id: newPageId,
+      name: newPageName,
+      dashboardTitle: newTitle,
+      visuals: newVisuals,
+      kpiCards: newKpis,
+      slicerColumns: newSlicers,
+      paletteId,
+    };
+
+    setPages((prev) => [
+      ...prev.map((p) =>
+        p.id === activePageId
+          ? { ...p, dashboardTitle, visuals, kpiCards, slicerColumns, paletteId }
+          : p
+      ),
+      newPage,
+    ]);
+    setActivePageId(newPageId);
+    setDashboardTitle(newTitle);
+    setVisuals(newVisuals);
+    setKpiCards(newKpis);
+    setSlicerColumns(newSlicers);
+    setUndoStack([]);
+    setRedoStack([]);
+    const firstId = newVisuals[0]?.id || null;
+    setSelectedVisualId(firstId);
+    setSelectedVisualIds(firstId ? [firstId] : []);
+    setSelectedKpiId(null);
+    setEditingPageId(null);
+  };
+
+  const handleRenamePage = (pageId: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setEditingPageId(null);
+      return;
+    }
+    setPages((prev) =>
+      prev.map((p) => (p.id === pageId ? { ...p, name: trimmed } : p))
+    );
+    setEditingPageId(null);
+  };
+
+  const handleDeletePage = (e: React.MouseEvent<HTMLElement>, pageId: string) => {
+    e.stopPropagation();
+    if (pages.length <= 1) return;
+    const remaining = pages.filter((p) => p.id !== pageId);
+    setPages(remaining);
+    if (activePageId === pageId) {
+      const fallback = remaining[0];
+      setActivePageId(fallback.id);
+      setDashboardTitle(fallback.dashboardTitle);
+      setVisuals(fallback.visuals);
+      setKpiCards(fallback.kpiCards);
+      setSlicerColumns(fallback.slicerColumns);
+      setPaletteId(fallback.paletteId || 'classic');
+      const firstId = fallback.visuals[0]?.id || null;
+      setSelectedVisualId(firstId);
+      setSelectedVisualIds(firstId ? [firstId] : []);
+      setSelectedKpiId(null);
+    }
   };
 
   const toggleCrossFilter = (column: string, value: string) => {
@@ -3063,7 +3298,37 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Active Page Selector Dropdown in Top Header */}
+            <select
+              aria-label="Active Dashboard Page"
+              data-testid="top-page-select"
+              value={activePageId}
+              onChange={(e) => handleSelectPage(e.target.value)}
+              className="bg-white border border-[#217346]/50 rounded-lg px-2.5 py-1.5 text-xs text-[#185C37] font-bold shadow-sm"
+            >
+              {pages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  Page: {p.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Canvas Zoom Dropdown near Global Theme */}
+            <select
+              aria-label="Canvas Zoom"
+              data-testid="canvas-zoom-select"
+              value={canvasZoom}
+              onChange={(e) => setCanvasZoom(Number(e.target.value))}
+              className="bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121] font-medium"
+            >
+              <option value={50}>Zoom: 50%</option>
+              <option value={75}>Zoom: 75%</option>
+              <option value={100}>Zoom: 100% (16:9)</option>
+              <option value={150}>Zoom: 150%</option>
+              <option value={200}>Zoom: 200%</option>
+            </select>
+
             <select
               aria-label="Dashboard Color Theme"
               value={paletteId}
@@ -3329,131 +3594,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               </div>
             </div>
 
-            {/* Canvas Interaction Toolbar: Undo/Redo, Snap-to-Grid, Multi-Select & Alignment */}
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white rounded-xl border border-[#D4D4D4] shadow-sm">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  data-testid="canvas-undo-btn"
-                  disabled={undoStack.length === 0}
-                  onClick={handleUndo}
-                  title="Undo layout change (Ctrl+Z)"
-                  className={`px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
-                    undoStack.length > 0
-                      ? 'bg-white hover:bg-[#F3F3F3] text-[#212121] border-[#D4D4D4]'
-                      : 'bg-[#F8F9FA] text-[#A19F9D] border-[#E1E1E1] cursor-not-allowed'
-                  }`}
-                >
-                  ↶ Undo ({undoStack.length})
-                </button>
-                <button
-                  type="button"
-                  data-testid="canvas-redo-btn"
-                  disabled={redoStack.length === 0}
-                  onClick={handleRedo}
-                  title="Redo layout change (Ctrl+Y)"
-                  className={`px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
-                    redoStack.length > 0
-                      ? 'bg-white hover:bg-[#F3F3F3] text-[#212121] border-[#D4D4D4]'
-                      : 'bg-[#F8F9FA] text-[#A19F9D] border-[#E1E1E1] cursor-not-allowed'
-                  }`}
-                >
-                  ↷ Redo ({redoStack.length})
-                </button>
-
-                <span className="h-4 w-px bg-[#D4D4D4] mx-0.5" />
-
-                <button
-                  type="button"
-                  data-testid="toggle-snap-grid"
-                  onClick={() => setSnapToGrid((prev) => !prev)}
-                  title="Toggle 8px Grid Snapping & Smart Alignment Guides"
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
-                    snapToGrid
-                      ? 'bg-[#E6F2EB] text-[#185C37] border-[#217346]'
-                      : 'bg-white text-[#605E5C] border-[#D4D4D4] hover:bg-[#F3F3F3]'
-                  }`}
-                >
-                  ⊞ Snap Grid: {snapToGrid ? 'ON' : 'OFF'}
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="select-all-visuals-btn"
-                  onClick={handleSelectAllVisuals}
-                  title="Select all visuals for group move, alignment, or keyboard nudging"
-                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
-                >
-                  ☑ Select All ({selectedVisualIds.length}/{visuals.length})
-                </button>
-
-                <span className="h-4 w-px bg-[#D4D4D4] mx-0.5" />
-
-                <button
-                  type="button"
-                  data-testid="align-left-btn"
-                  onClick={() => handleAlignSelectedVisuals('left')}
-                  title="Align selected visuals to left edge"
-                  className="px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
-                >
-                  Align Left
-                </button>
-                <button
-                  type="button"
-                  data-testid="align-top-btn"
-                  onClick={() => handleAlignSelectedVisuals('top')}
-                  title="Align selected visuals to top edge"
-                  className="px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
-                >
-                  Align Top
-                </button>
-                <button
-                  type="button"
-                  data-testid="match-size-btn"
-                  onClick={() => handleAlignSelectedVisuals('match_size')}
-                  title="Match width & height of selected visuals"
-                  className="px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
-                >
-                  Match Size
-                </button>
-                <button
-                  type="button"
-                  data-testid="auto-arrange-btn"
-                  onClick={() => handleAlignSelectedVisuals('auto_grid')}
-                  title="Auto-arrange all visuals into a clean 2-column grid"
-                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#217346] border border-[#217346]/30"
-                >
-                  Tidy Grid
-                </button>
-
-                <span className="h-4 w-px bg-[#D4D4D4] mx-0.5" />
-
-                <select
-                  aria-label="Canvas Zoom"
-                  data-testid="canvas-zoom-select"
-                  value={canvasZoom}
-                  onChange={(e) => setCanvasZoom(Number(e.target.value))}
-                  className="px-2 py-1 rounded-md text-[11px] font-semibold bg-white text-[#212121] border border-[#D4D4D4]"
-                >
-                  <option value={50}>Zoom: 50%</option>
-                  <option value={75}>Zoom: 75%</option>
-                  <option value={100}>Zoom: 100% (16:9)</option>
-                  <option value={150}>Zoom: 150%</option>
-                  <option value={200}>Zoom: 200%</option>
-                </select>
-              </div>
-
-              <div className="text-[10px] text-[#605E5C] font-medium">
-                Hold &amp; Drag to Move • 8-Way Resize (Shift=Ratio, Alt=Center) • Esc=Cancel • Arrow Keys Nudge
-              </div>
-              <div
-                role="status"
-                aria-live="polite"
-                data-testid="canvas-aria-live"
-                className="sr-only"
-              >
-                {ariaAnnouncement}
-              </div>
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="canvas-aria-live"
+              className="sr-only"
+            >
+              {ariaAnnouncement}
             </div>
 
             {/* Freeform 2D Visual Canvas (Supports Press & Hold Drag, Snapping, Alignment Guides, 8-Way Resize & Multi-Select) */}
@@ -3685,14 +3832,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                         className="flex items-center gap-1 shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <button
-                          type="button"
-                          onClick={(e) => handleResetVisualSize(e, vis.id)}
-                          title="Position (X,Y) & Size (W×H) — Click to reset size"
-                          className="px-1.5 py-0.5 rounded bg-[#F3F3F3] hover:bg-[#E6E6E6] text-[9px] font-mono font-semibold text-[#605E5C]"
-                        >
-                          {tileX},{tileY} • {tileW}×{tileH}
-                        </button>
                         <button
                           type="button"
                           data-testid={`lock-visual-btn-${vis.id}`}
@@ -4005,96 +4144,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                           </button>
                         );
                       })}
-                    </div>
-                  </div>
-
-                  {/* Layout & Geometry (Exact X, Y, Width, Height in Logical Units) */}
-                  <div className="space-y-2 pt-2 border-t border-[#D4D4D4]">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121]">
-                        Position &amp; Size (Logical px)
-                      </label>
-                      <span className="text-[10px] font-mono text-[#605E5C]">
-                        {activeVisual.locked ? '🔒 Locked' : 'Editable'}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      <div>
-                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
-                          X
-                        </label>
-                        <input
-                          type="number"
-                          aria-label="Visual X Position"
-                          data-testid="layout-input-x"
-                          disabled={!!activeVisual.locked}
-                          value={activeVisual.x ?? 16}
-                          onChange={(e) => {
-                            pushUndoSnapshot(visuals);
-                            updateActiveVisual({
-                              x: Math.max(0, Number(e.target.value) || 0),
-                            });
-                          }}
-                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
-                          Y
-                        </label>
-                        <input
-                          type="number"
-                          aria-label="Visual Y Position"
-                          data-testid="layout-input-y"
-                          disabled={!!activeVisual.locked}
-                          value={activeVisual.y ?? 16}
-                          onChange={(e) => {
-                            pushUndoSnapshot(visuals);
-                            updateActiveVisual({
-                              y: Math.max(0, Number(e.target.value) || 0),
-                            });
-                          }}
-                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
-                          W
-                        </label>
-                        <input
-                          type="number"
-                          aria-label="Visual Width"
-                          data-testid="layout-input-w"
-                          disabled={!!activeVisual.locked}
-                          value={activeVisual.customWidth ?? DEFAULT_TILE_W}
-                          onChange={(e) => {
-                            pushUndoSnapshot(visuals);
-                            updateActiveVisual({
-                              customWidth: Math.max(260, Number(e.target.value) || DEFAULT_TILE_W),
-                            });
-                          }}
-                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-[#605E5C] block mb-0.5">
-                          H
-                        </label>
-                        <input
-                          type="number"
-                          aria-label="Visual Height"
-                          data-testid="layout-input-h"
-                          disabled={!!activeVisual.locked}
-                          value={activeVisual.customHeight ?? DEFAULT_TILE_H}
-                          onChange={(e) => {
-                            pushUndoSnapshot(visuals);
-                            updateActiveVisual({
-                              customHeight: Math.max(220, Number(e.target.value) || DEFAULT_TILE_H),
-                            });
-                          }}
-                          className="w-full bg-white border border-[#D4D4D4] rounded px-1.5 py-1 text-xs font-mono text-[#212121]"
-                        />
-                      </div>
                     </div>
                   </div>
 
@@ -4617,6 +4666,118 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                 </>
               )
             )}
+          </div>
+        </div>
+
+        {/* Bottom Pages Bar (Power BI / Excel-style Multi-Page Tabs with Inline Rename & + Add Page) */}
+        <div
+          data-testid="dashboard-pages-bar"
+          className="px-4 py-2 bg-[#F3F3F3] border-t border-[#D4D4D4] flex items-center justify-between gap-3 shrink-0"
+        >
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#605E5C] mr-1 shrink-0">
+              Pages:
+            </span>
+            {pages.map((page) => {
+              const isActivePage = page.id === activePageId;
+              const isEditingThisPage = editingPageId === page.id;
+              return (
+                <div
+                  key={page.id}
+                  data-testid={`page-tab-${page.id}`}
+                  data-active={isActivePage ? 'true' : 'false'}
+                  onClick={() => handleSelectPage(page.id)}
+                  onDoubleClick={() => {
+                    setEditingPageId(page.id);
+                    setEditingPageNameDraft(page.name);
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-t-lg border text-xs font-semibold cursor-pointer transition-all shrink-0 ${
+                    isActivePage
+                      ? 'bg-white text-[#185C37] border-[#217346] border-b-2 shadow-sm font-bold'
+                      : 'bg-[#E6E6E6]/70 text-[#605E5C] border-[#D4D4D4] hover:bg-white hover:text-[#212121]'
+                  }`}
+                >
+                  {isEditingThisPage ? (
+                    <div
+                      className="flex items-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        aria-label={`Rename ${page.name}`}
+                        data-testid={`rename-page-input-${page.id}`}
+                        value={editingPageNameDraft}
+                        onChange={(e) => setEditingPageNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleRenamePage(page.id, editingPageNameDraft);
+                          } else if (e.key === 'Escape') {
+                            setEditingPageId(null);
+                          }
+                        }}
+                        className="w-28 bg-white border border-[#217346] rounded px-1.5 py-0.5 text-xs font-bold text-[#212121]"
+                      />
+                      <button
+                        type="button"
+                        data-testid={`save-page-name-btn-${page.id}`}
+                        onClick={() => handleRenamePage(page.id, editingPageNameDraft)}
+                        title="Save Page Name"
+                        className="p-0.5 bg-[#217346] text-white rounded"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span>{page.name}</span>
+                      <button
+                        type="button"
+                        data-testid={`edit-page-name-btn-${page.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingPageId(page.id);
+                          setEditingPageNameDraft(page.name);
+                        }}
+                        title="Rename Page"
+                        className="p-0.5 text-[#605E5C] hover:text-[#217346] rounded hover:bg-[#F3F3F3]"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      {pages.length > 1 && (
+                        <button
+                          type="button"
+                          data-testid={`delete-page-btn-${page.id}`}
+                          onClick={(e) => handleDeletePage(e, page.id)}
+                          title="Delete Page"
+                          className="p-0.5 text-[#605E5C] hover:text-[#C50F1F] rounded hover:bg-[#F3F3F3]"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              data-testid="add-dashboard-page-btn"
+              onClick={handleAddPage}
+              title="Create a new Dashboard Page"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#217346] border border-[#217346]/30 shrink-0 ml-1"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Page
+            </button>
+          </div>
+
+          <div className="text-[11px] text-[#605E5C] font-medium hidden sm:block shrink-0">
+            Active:{' '}
+            <strong className="text-[#217346]">
+              {pages.find((p) => p.id === activePageId)?.name || 'Page 1'}
+            </strong>{' '}
+            ({pages.length} {pages.length === 1 ? 'page' : 'pages'})
           </div>
         </div>
       </div>

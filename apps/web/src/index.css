@@ -246,3 +246,34 @@
   background-color: var(--accent-soft) !important;
   border-color: var(--accent) !important;
 }
+
+/* Power BI-Style Collapsed Pane Vertical Strip */
+.report-pane-strip {
+  width: 32px;
+  background-color: #F3F2F1;
+  border-left: 1px solid #E1DFDD;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.report-pane-strip:hover {
+  background-color: #EAE8E6;
+}
+.report-pane-strip:focus-visible {
+  outline: 2px solid #117865;
+  outline-offset: -2px;
+}
+.report-strip-text {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  font-weight: 700;
+  color: #201F1E;
+  letter-spacing: 0.04em;
+  padding: 12px 0;
+  text-transform: uppercase;
+}
+

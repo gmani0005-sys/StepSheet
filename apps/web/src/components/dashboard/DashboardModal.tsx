@@ -24,6 +24,10 @@ import {
   GripVertical,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
+import { DashboardPaneConfig } from './panes/DashboardPaneWrapper';
+import { DashboardFiltersPane } from './panes/DashboardFiltersPane';
+import { DashboardVisualizationsPane } from './panes/DashboardVisualizationsPane';
+import { DashboardDataPane } from './panes/DashboardDataPane';
 
 export type CustomVisualType =
   | 'bar'
@@ -416,6 +420,84 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   const [selectedKpiId, setSelectedKpiId] = useState<string | null>(null);
   const [paletteId, setPaletteId] = useState<PaletteId>('classic');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
+
+  // Power BI-Style Side Panes State (Filters | Visualizations | Data)
+  const [paneFilters, setPaneFilters] = useState<DashboardPaneConfig>(() => {
+    try {
+      const stored = localStorage.getItem('stepsheet_dashboard_panes_v2');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.filters) return parsed.filters;
+      }
+    } catch {}
+    return { state: 'open', w: 260 };
+  });
+
+  const [paneVisualizations, setPaneVisualizations] = useState<DashboardPaneConfig>(() => {
+    try {
+      const stored = localStorage.getItem('stepsheet_dashboard_panes_v2');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.visualizations) return parsed.visualizations;
+      }
+    } catch {}
+    return { state: 'open', w: 320 };
+  });
+
+  const [paneData, setPaneData] = useState<DashboardPaneConfig>(() => {
+    try {
+      const stored = localStorage.getItem('stepsheet_dashboard_panes_v2');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.data) return parsed.data;
+      }
+    } catch {}
+    return { state: 'open', w: 260 };
+  });
+
+  const [activeVisTab, setActiveVisTab] = useState<'build' | 'format' | 'theme'>('build');
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'stepsheet_dashboard_panes_v2',
+        JSON.stringify({
+          filters: paneFilters,
+          visualizations: paneVisualizations,
+          data: paneData,
+        })
+      );
+    } catch {}
+  }, [paneFilters, paneVisualizations, paneData]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey) {
+        if (e.key === '1') {
+          e.preventDefault();
+          setPaneFilters((prev) => ({
+            ...prev,
+            state: prev.state === 'open' ? 'collapsed' : 'open',
+          }));
+        } else if (e.key === '2') {
+          e.preventDefault();
+          setPaneVisualizations((prev) => ({
+            ...prev,
+            state: prev.state === 'open' ? 'collapsed' : 'open',
+          }));
+        } else if (e.key === '3') {
+          e.preventDefault();
+          setPaneData((prev) => ({
+            ...prev,
+            state: prev.state === 'open' ? 'collapsed' : 'open',
+          }));
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   // Multi-Page Dashboard State (Page 1, Page 2, ... with inline rename & top sheet/query selector)
   const [pages, setPages] = useState<DashboardPageConfig[]>([]);
@@ -4126,692 +4208,95 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             </div>
           </div>
 
-          {/* Right: Visualizations, Legend Colors & Conditional Formatting Inspector Pane */}
-          <div className="w-80 sm:w-96 border-l border-[#D4D4D4] bg-white p-4 overflow-y-auto space-y-5 shrink-0">
-            <div className="flex items-center justify-between border-b border-[#D4D4D4] pb-2.5 gap-2">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#217346]">
-                <SlidersHorizontal className="w-4 h-4 shrink-0" />
-                <span>Visualizations Pane</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleAddVisual(activeVisual?.type || 'column')}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#217346] hover:bg-[#185C37] text-white shadow-sm shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Visual
-              </button>
-            </div>
+          {/* Three Side Panes on the Right: Filters | Visualizations | Data */}
+          <div className="flex h-full shrink-0 z-10 border-l border-[#D4D4D4] bg-[#F3F2F1]">
+            <DashboardFiltersPane
+              config={paneFilters}
+              onToggleCollapse={() =>
+                setPaneFilters((prev) => ({
+                  ...prev,
+                  state: prev.state === 'open' ? 'collapsed' : 'open',
+                }))
+              }
+              onHide={() => setPaneFilters((prev) => ({ ...prev, state: 'hidden' }))}
+              onResize={(w) =>
+                setPaneFilters((prev) => ({
+                  ...prev,
+                  w: Math.min(480, Math.max(200, Math.round(w))),
+                }))
+              }
+              onResetWidth={() => setPaneFilters((prev) => ({ ...prev, w: 260 }))}
+              activeVisual={activeVisual}
+              slicerColumns={slicerColumns}
+              multiSlicerSelections={multiSlicerSelections}
+              onToggleSlicerValue={toggleSlicerValue}
+              onClearAllSlicers={() => setMultiSlicerSelections({})}
+              distinctValuesGetter={getDistinctValuesForColumn}
+            />
 
-            {activeKpi ? (
-              /* KPI CARD CONFIGURATION INSPECTOR */
-              <div className="space-y-4">
-                <div className="p-3 rounded-lg bg-[#E6F2EB] border border-[#217346]/30 flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#185C37]">KPI Card Settings</span>
-                  <button
-                    type="button"
-                    onClick={handleAddKpiCard}
-                    className="px-2 py-1 rounded bg-[#217346] text-white text-[11px] font-semibold"
-                  >
-                    + New KPI Card
-                  </button>
-                </div>
+            <DashboardVisualizationsPane
+              config={paneVisualizations}
+              onToggleCollapse={() =>
+                setPaneVisualizations((prev) => ({
+                  ...prev,
+                  state: prev.state === 'open' ? 'collapsed' : 'open',
+                }))
+              }
+              onResize={(w) =>
+                setPaneVisualizations((prev) => ({
+                  ...prev,
+                  w: Math.min(480, Math.max(200, Math.round(w))),
+                }))
+              }
+              onResetWidth={() => setPaneVisualizations((prev) => ({ ...prev, w: 320 }))}
+              activeVisTab={activeVisTab}
+              setActiveVisTab={setActiveVisTab}
+              visualTypes={VISUAL_TYPES}
+              activeVisual={activeVisual}
+              activeKpi={activeKpi}
+              columns={columns}
+              onAddVisual={handleAddVisual}
+              onUpdateActiveVisual={updateActiveVisual}
+              onUpdateActiveVisualCF={updateActiveVisualCF}
+              onAddKpiCard={handleAddKpiCard}
+              onUpdateActiveKpi={updateActiveKpi}
+              paletteId={paletteId}
+              onSelectPalette={(p) => {
+                setPaletteId(p);
+                setVisuals((prev) =>
+                  prev.map((v) => ({ ...v, paletteId: p, customColors: {} }))
+                );
+              }}
+              colorPalettes={COLOR_PALETTES}
+            />
 
-                <div>
-                  <label className="text-xs font-semibold text-[#212121] block mb-1">
-                    Edit KPI Card Title
-                  </label>
-                  <input
-                    type="text"
-                    value={activeKpi.title}
-                    onChange={(e) => updateActiveKpi({ title: e.target.value })}
-                    className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-[#212121] block mb-1">
-                    Metric Column
-                  </label>
-                  <select
-                    aria-label="KPI Metric Column"
-                    value={activeKpi.column}
-                    onChange={(e) => updateActiveKpi({ column: e.target.value })}
-                    className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
-                  >
-                    {columns.map((c) => (
-                      <option key={c.name} value={c.name}>
-                        {c.name} ({c.data_type})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-[#212121] block mb-1">
-                    Aggregation Function
-                  </label>
-                  <select
-                    aria-label="KPI Aggregation Function"
-                    value={activeKpi.aggFunc}
-                    onChange={(e) =>
-                      updateActiveKpi({ aggFunc: e.target.value as VisualAggType })
-                    }
-                    className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#212121]"
-                  >
-                    <option value="sum">SUM (Total)</option>
-                    <option value="avg">AVERAGE (Mean)</option>
-                    <option value="max">MAX (Peak)</option>
-                    <option value="min">MIN (Lowest)</option>
-                    <option value="count">COUNT (Rows)</option>
-                    <option value="distinct">DISTINCT COUNT (Unique)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-[#212121] block mb-1">
-                    KPI Value Color
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={activeKpi.accentColor || '#217346'}
-                      onChange={(e) => updateActiveKpi({ accentColor: e.target.value })}
-                      className="w-8 h-8 rounded border border-[#D4D4D4] cursor-pointer"
-                    />
-                    <div className="flex flex-wrap gap-1">
-                      {['#217346', '#0EA5E9', '#D97706', '#7C3AED', '#E11D48', '#1E293B'].map(
-                        (c) => (
-                          <button
-                            key={c}
-                            type="button"
-                            onClick={() => updateActiveKpi({ accentColor: c })}
-                            style={{ backgroundColor: c }}
-                            className="w-5 h-5 rounded-full border border-white shadow-sm"
-                          />
-                        )
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-[#212121] block mb-1">
-                    Subtitle / Description
-                  </label>
-                  <input
-                    type="text"
-                    value={activeKpi.subtitle}
-                    onChange={(e) => updateActiveKpi({ subtitle: e.target.value })}
-                    className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
-                  />
-                </div>
-              </div>
-            ) : (
-              activeVisual && (
-                <>
-                  {/* 1. Custom Visuals Gallery Grid (12 Visuals including Table & Matrix Table) */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] block">
-                      1. Choose Visual Type
-                    </label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {VISUAL_TYPES.map((vt) => {
-                        const isActive = activeVisual.type === vt.type;
-                        return (
-                          <button
-                            key={vt.type}
-                            type="button"
-                            onClick={() => updateActiveVisual({ type: vt.type })}
-                            title={vt.desc}
-                            className={`px-2.5 py-2 rounded-lg border text-left transition-all flex items-center gap-2 ${
-                              isActive
-                                ? 'bg-[#E6F2EB] border-[#217346] text-[#185C37] font-bold shadow-sm'
-                                : 'bg-[#F8F9FA] border-[#D4D4D4] text-[#212121] hover:bg-[#EFEFEF]'
-                            }`}
-                          >
-                            {vt.type.includes('bar') ? (
-                              <BarChartHorizontal className="w-4 h-4 text-[#217346] shrink-0" />
-                            ) : vt.type === 'donut' || vt.type === 'pie' ? (
-                              <PieChart className="w-4 h-4 text-[#0EA5E9] shrink-0" />
-                            ) : vt.type === 'line_area' ? (
-                              <TrendingUp className="w-4 h-4 text-[#2563EB] shrink-0" />
-                            ) : vt.type === 'treemap' ? (
-                              <LayoutGrid className="w-4 h-4 text-[#7C3AED] shrink-0" />
-                            ) : vt.type === 'histogram' ? (
-                              <Activity className="w-4 h-4 text-[#EC4899] shrink-0" />
-                            ) : vt.type === 'table' ? (
-                              <Table2 className="w-4 h-4 text-[#217346] shrink-0" />
-                            ) : vt.type === 'matrix' ? (
-                              <Grid className="w-4 h-4 text-[#D97706] shrink-0" />
-                            ) : (
-                              <BarChart3 className="w-4 h-4 text-[#217346] shrink-0" />
-                            )}
-                            <span className="text-xs truncate">{vt.shortLabel}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* 2. Edit Visual Title & Field Wells (Data Binding) */}
-                  <div className="space-y-3 pt-2 border-t border-[#D4D4D4]">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] block">
-                      2. Title &amp; Field Wells
-                    </label>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs font-semibold text-[#212121] flex items-center gap-1">
-                          <Pencil className="w-3 h-3 text-[#217346]" /> Edit Visual Title
-                        </label>
-                        {activeVisual.customTitle && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setVisuals((prev) =>
-                                prev.map((v) =>
-                                  v.id === activeVisual.id ? { ...v, customTitle: false } : v
-                                )
-                              )
-                            }
-                            className="text-[10px] text-[#217346] hover:underline"
-                          >
-                            Auto Title
-                          </button>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        aria-label="Edit Visual Title"
-                        value={activeVisual.title}
-                        onChange={(e) => updateActiveVisual({ title: e.target.value })}
-                        className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#212121]"
-                      />
-                    </div>
-
-                    {activeVisual.type !== 'histogram' && (
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          {activeVisual.type === 'matrix'
-                            ? 'Matrix Rows (Row Groups)'
-                            : activeVisual.type === 'table'
-                            ? 'Primary Group Column'
-                            : 'Category / Axis (X-Axis)'}
-                        </label>
-                        <select
-                          aria-label="Visual Category Axis"
-                          value={activeVisual.categoryCol}
-                          onChange={(e) => updateActiveVisual({ categoryCol: e.target.value })}
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
-                        >
-                          {columns.map((c) => (
-                            <option key={c.name} value={c.name}>
-                              {c.name} ({c.data_type})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {(activeVisual.type === 'clustered_bar' ||
-                      activeVisual.type === 'clustered_column' ||
-                      activeVisual.type === 'stacked_column' ||
-                      activeVisual.type === 'matrix' ||
-                      activeVisual.type === 'table') && (
-                      <div>
-                        <label className="text-xs font-semibold text-[#217346] block mb-1">
-                          {activeVisual.type === 'matrix'
-                            ? 'Matrix Columns (Pivot Header)'
-                            : activeVisual.type === 'table'
-                            ? 'Secondary Detail Column'
-                            : 'Legend / Series (Cluster / Stack By)'}
-                        </label>
-                        <select
-                          aria-label="Visual Legend Series"
-                          value={activeVisual.seriesCol}
-                          onChange={(e) => updateActiveVisual({ seriesCol: e.target.value })}
-                          className="w-full bg-white border border-[#217346] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
-                        >
-                          {columns.map((c) => (
-                            <option key={c.name} value={c.name}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          Values (Metric)
-                        </label>
-                        <select
-                          aria-label="Visual Value Column"
-                          value={activeVisual.valueCol}
-                          onChange={(e) => updateActiveVisual({ valueCol: e.target.value })}
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
-                        >
-                          {columns.map((c) => (
-                            <option key={c.name} value={c.name}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          Aggregation
-                        </label>
-                        <select
-                          aria-label="Visual Aggregation"
-                          value={activeVisual.aggFunc}
-                          onChange={(e) =>
-                            updateActiveVisual({ aggFunc: e.target.value as VisualAggType })
-                          }
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121] font-semibold"
-                        >
-                          <option value="sum">SUM</option>
-                          <option value="count">COUNT</option>
-                          <option value="avg">AVERAGE</option>
-                          <option value="min">MIN</option>
-                          <option value="max">MAX</option>
-                          <option value="distinct">DISTINCT COUNT</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {activeVisual.type === 'histogram' && (
-                      <div>
-                        <label className="text-xs font-semibold text-[#212121] block mb-1">
-                          Number of Histogram Bins: <strong>{activeVisual.bins}</strong>
-                        </label>
-                        <input
-                          type="range"
-                          min={4}
-                          max={20}
-                          value={activeVisual.bins}
-                          onChange={(e) => updateActiveVisual({ bins: Number(e.target.value) })}
-                          className="w-full accent-[#217346]"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 3. Edit Legend & Color Palettes */}
-                  <div className="space-y-3 pt-2 border-t border-[#D4D4D4]">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] flex items-center gap-1.5">
-                        <Palette className="w-3.5 h-3.5 text-[#217346]" />
-                        3. Edit Legend &amp; Colors
-                      </label>
-                      {((activeVisual.customColors &&
-                        Object.keys(activeVisual.customColors).length > 0) ||
-                        (activeVisual.customLegendLabels &&
-                          Object.keys(activeVisual.customLegendLabels).length > 0)) && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateActiveVisual({ customColors: {}, customLegendLabels: {} })
-                          }
-                          className="text-[10px] text-[#C50F1F] hover:underline"
-                        >
-                          Reset Colors
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          Visual Color Palette
-                        </label>
-                        <select
-                          aria-label="Visual Color Palette"
-                          value={activeVisual.paletteId || paletteId}
-                          onChange={(e) =>
-                            updateActiveVisual({ paletteId: e.target.value as PaletteId })
-                          }
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
-                        >
-                          {Object.entries(COLOR_PALETTES).map(([id, p]) => (
-                            <option key={id} value={id}>
-                              {p.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          Legend Position
-                        </label>
-                        <select
-                          aria-label="Legend Position"
-                          value={activeVisual.legendPosition || 'top_left'}
-                          onChange={(e) =>
-                            updateActiveVisual({
-                              legendPosition: e.target.value as LegendPositionType,
-                            })
-                          }
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
-                        >
-                          <option value="top_left">Top Left</option>
-                          <option value="top">Top Center</option>
-                          <option value="top_right">Top Right</option>
-                          <option value="left">Left</option>
-                          <option value="left_center">Left Center</option>
-                          <option value="right">Right</option>
-                          <option value="right_center">Right Center</option>
-                          <option value="bottom_left">Bottom Left</option>
-                          <option value="bottom">Bottom Center</option>
-                          <option value="bottom_right">Bottom Right</option>
-                          <option value="hide">Hide Legend</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Palette Swatches Preview */}
-                    <div className="flex items-center gap-1 p-1.5 bg-[#F8F9FA] rounded-lg border border-[#E1E1E1]">
-                      {getVisualPalette(activeVisual).map((hex, i) => (
-                        <div
-                          key={i}
-                          style={{ backgroundColor: hex }}
-                          className="flex-1 h-4 rounded-sm"
-                          title={hex}
-                        />
-                      ))}
-                    </div>
-
-                    {/* Per-Series / Category Legend Label & Color Picker */}
-                    {activeVisualLegendItems.length > 0 && (
-                      <div className="space-y-1.5 max-h-40 overflow-y-auto p-2 bg-[#F8F9FA] border border-[#E1E1E1] rounded-lg">
-                        <div className="text-[10px] font-semibold text-[#605E5C] uppercase tracking-wider mb-1">
-                          Customize Series / Category Colors &amp; Labels
-                        </div>
-                        {activeVisualLegendItems.map((itemKey, idx) => {
-                          const currentColor = getItemColor(activeVisual, itemKey, idx);
-                          const currentLabel =
-                            activeVisual.customLegendLabels?.[itemKey] ?? itemKey;
-                          return (
-                            <div key={itemKey} className="flex items-center gap-2">
-                              <input
-                                type="color"
-                                aria-label={`Color for ${itemKey}`}
-                                value={currentColor}
-                                onChange={(e) =>
-                                  updateActiveVisual({
-                                    customColors: {
-                                      ...(activeVisual.customColors || {}),
-                                      [itemKey]: e.target.value,
-                                    },
-                                  })
-                                }
-                                className="w-6 h-6 rounded border border-[#D4D4D4] cursor-pointer shrink-0"
-                              />
-                              <input
-                                type="text"
-                                value={currentLabel}
-                                onChange={(e) =>
-                                  updateActiveVisual({
-                                    customLegendLabels: {
-                                      ...(activeVisual.customLegendLabels || {}),
-                                      [itemKey]: e.target.value,
-                                    },
-                                  })
-                                }
-                                className="flex-1 bg-white border border-[#D4D4D4] rounded px-2 py-1 text-xs text-[#212121]"
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 4. Conditional Formatting */}
-                  <div className="space-y-3 pt-2 border-t border-[#D4D4D4]">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-[#217346]" />
-                      4. Conditional Formatting
-                    </label>
-
-                    <div>
-                      <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                        Formatting Mode
-                      </label>
-                      <select
-                        aria-label="Conditional Formatting Mode"
-                        value={activeVisual.conditionalFormatting?.mode || 'none'}
-                        onChange={(e) =>
-                          updateActiveVisualCF({
-                            mode: e.target.value as ConditionalFormatMode,
-                          })
-                        }
-                        className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#212121]"
-                      >
-                        <option value="none">None (Standard Palette)</option>
-                        <option value="color_scale">Color Scale (Gradient Heatmap)</option>
-                        <option value="data_bars">Data Bars (In-Cell Fill Bars)</option>
-                        <option value="rules">Threshold Rules (High / Mid / Low)</option>
-                      </select>
-                    </div>
-
-                    {activeVisual.conditionalFormatting?.mode === 'color_scale' && (
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          Color Scale Gradient
-                        </label>
-                        <select
-                          aria-label="Color Scale Preset"
-                          value={
-                            activeVisual.conditionalFormatting?.scalePreset || 'red_yellow_green'
-                          }
-                          onChange={(e) =>
-                            updateActiveVisualCF({
-                              scalePreset: e.target.value as ColorScalePreset,
-                            })
-                          }
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
-                        >
-                          <option value="red_yellow_green">Red → Yellow → Green (High = Good)</option>
-                          <option value="green_yellow_red">Green → Yellow → Red (Low = Good)</option>
-                          <option value="white_emerald">White → Emerald Green</option>
-                          <option value="white_blue">White → Ocean Blue</option>
-                          <option value="blue_white_red">Blue → White → Red (Diverging)</option>
-                        </select>
-                      </div>
-                    )}
-
-                    {activeVisual.conditionalFormatting?.mode === 'data_bars' && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-[#605E5C]">Data Bar Fill Color</span>
-                        <input
-                          type="color"
-                          value={activeVisual.conditionalFormatting?.dataBarColor || '#217346'}
-                          onChange={(e) =>
-                            updateActiveVisualCF({ dataBarColor: e.target.value })
-                          }
-                          className="w-8 h-7 rounded border border-[#D4D4D4] cursor-pointer"
-                        />
-                      </div>
-                    )}
-
-                    {activeVisual.conditionalFormatting?.mode === 'rules' && (
-                      <div className="space-y-2 p-2.5 bg-[#F8F9FA] border border-[#E1E1E1] rounded-lg">
-                        <div className="grid grid-cols-2 gap-2 items-center">
-                          <div>
-                            <label className="text-[10px] font-semibold text-[#212121] block">
-                              High Threshold (&gt;=)
-                            </label>
-                            <input
-                              type="number"
-                              value={activeVisual.conditionalFormatting?.highThreshold ?? 500}
-                              onChange={(e) =>
-                                updateActiveVisualCF({ highThreshold: Number(e.target.value) })
-                              }
-                              className="w-full bg-white border border-[#D4D4D4] rounded px-2 py-1 text-xs"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-semibold text-[#212121] block">
-                              High Color (▲)
-                            </label>
-                            <input
-                              type="color"
-                              value={activeVisual.conditionalFormatting?.highColor || '#107C10'}
-                              onChange={(e) =>
-                                updateActiveVisualCF({ highColor: e.target.value })
-                              }
-                              className="w-full h-7 rounded border border-[#D4D4D4] cursor-pointer"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 items-center">
-                          <div>
-                            <label className="text-[10px] font-semibold text-[#212121] block">
-                              Low Threshold (&lt;=)
-                            </label>
-                            <input
-                              type="number"
-                              value={activeVisual.conditionalFormatting?.lowThreshold ?? 100}
-                              onChange={(e) =>
-                                updateActiveVisualCF({ lowThreshold: Number(e.target.value) })
-                              }
-                              className="w-full bg-white border border-[#D4D4D4] rounded px-2 py-1 text-xs"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-semibold text-[#212121] block">
-                              Low Color (▼)
-                            </label>
-                            <input
-                              type="color"
-                              value={activeVisual.conditionalFormatting?.lowColor || '#C50F1F'}
-                              onChange={(e) =>
-                                updateActiveVisualCF({ lowColor: e.target.value })
-                              }
-                              className="w-full h-7 rounded border border-[#D4D4D4] cursor-pointer"
-                            />
-                          </div>
-                        </div>
-
-                        <label className="flex items-center gap-2 text-xs text-[#212121] cursor-pointer pt-1">
-                          <input
-                            type="checkbox"
-                            checked={activeVisual.conditionalFormatting?.showIcons ?? true}
-                            onChange={(e) =>
-                              updateActiveVisualCF({ showIcons: e.target.checked })
-                            }
-                            className="rounded border-[#D4D4D4] text-[#217346]"
-                          />
-                          <span>Show Rule Status Icons (▲ / ● / ▼)</span>
-                        </label>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 5. Data Labels & Sorting */}
-                  <div className="space-y-3 pt-2 border-t border-[#D4D4D4]">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] block">
-                      5. Data Labels &amp; Sorting
-                    </label>
-
-                    <label className="flex items-center gap-2 text-xs text-[#212121] font-semibold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={activeVisual.showDataLabels}
-                        onChange={(e) => updateActiveVisual({ showDataLabels: e.target.checked })}
-                        className="rounded border-[#D4D4D4] text-[#217346]"
-                      />
-                      <span>Show Data Labels</span>
-                    </label>
-
-                    {activeVisual.showDataLabels && (
-                      <div className="grid grid-cols-2 gap-2 p-2.5 rounded-lg bg-[#F8F9FA] border border-[#D4D4D4]">
-                        <div>
-                          <label className="text-[11px] font-semibold text-[#212121] block mb-1">
-                            Label Position
-                          </label>
-                          <select
-                            aria-label="Data Label Position"
-                            value={activeVisual.dataLabelPosition || 'outside_end'}
-                            onChange={(e) =>
-                              updateActiveVisual({
-                                dataLabelPosition: e.target.value as DataLabelPositionType,
-                              })
-                            }
-                            className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
-                          >
-                            <option value="inside_end">Inside End</option>
-                            <option value="outside_end">Outside End</option>
-                            <option value="inside_center">Inside Center</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[11px] font-semibold text-[#212121] block mb-1">
-                            Label Content
-                          </label>
-                          <select
-                            aria-label="Data Label Format"
-                            value={activeVisual.dataLabelContent || 'totals_only'}
-                            onChange={(e) =>
-                              updateActiveVisual({
-                                dataLabelContent: e.target.value as DataLabelContentType,
-                              })
-                            }
-                            className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
-                          >
-                            <option value="totals_only">Only Totals</option>
-                            <option value="totals_and_percentage">Totals and Percentage</option>
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          Sort Order
-                        </label>
-                        <select
-                          value={activeVisual.sortBy}
-                          onChange={(e) =>
-                            updateActiveVisual({
-                              sortBy: e.target.value as DashboardVisualConfig['sortBy'],
-                            })
-                          }
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
-                        >
-                          <option value="value_desc">Value (High → Low)</option>
-                          <option value="value_asc">Value (Low → High)</option>
-                          <option value="category_asc">Category (A → Z)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-[#605E5C] block mb-1">
-                          Top N Categories
-                        </label>
-                        <select
-                          value={activeVisual.topN}
-                          onChange={(e) => updateActiveVisual({ topN: Number(e.target.value) })}
-                          className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2 py-1.5 text-xs text-[#212121]"
-                        >
-                          <option value={5}>Top 5</option>
-                          <option value={8}>Top 8</option>
-                          <option value={10}>Top 10</option>
-                          <option value={15}>Top 15</option>
-                          <option value={25}>Top 25</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )
-            )}
+            <DashboardDataPane
+              config={paneData}
+              onToggleCollapse={() =>
+                setPaneData((prev) => ({
+                  ...prev,
+                  state: prev.state === 'open' ? 'collapsed' : 'open',
+                }))
+              }
+              onResize={(w) =>
+                setPaneData((prev) => ({
+                  ...prev,
+                  w: Math.min(480, Math.max(200, Math.round(w))),
+                }))
+              }
+              onResetWidth={() => setPaneData((prev) => ({ ...prev, w: 260 }))}
+              datasets={datasets}
+              queries={queries}
+              selectedDataset={selectedDataset}
+              columns={columns}
+              activeVisual={activeVisual}
+              onBindFieldToVisual={(colName, role) => {
+                if (!activeVisual) return;
+                if (role === 'category') updateActiveVisual({ categoryCol: colName });
+                else if (role === 'value') updateActiveVisual({ valueCol: colName });
+                else if (role === 'series') updateActiveVisual({ seriesCol: colName });
+              }}
+            />
           </div>
         </div>
 

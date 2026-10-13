@@ -22,12 +22,25 @@ import {
   Palette,
   Sparkles,
   GripVertical,
+  Download,
+  Share2,
+  ChevronDown,
+  FileSpreadsheet,
+  FileText,
+  Presentation,
+  Database,
+  Archive,
+  Clock,
+  Mail,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { DashboardPaneConfig } from './panes/DashboardPaneWrapper';
 import { DashboardFiltersPane } from './panes/DashboardFiltersPane';
 import { DashboardVisualizationsPane } from './panes/DashboardVisualizationsPane';
 import { DashboardDataPane } from './panes/DashboardDataPane';
+import { SHARE_EXPORT_ENABLED } from '../../config/features';
+import { ExportShareModal } from '../export_share/ExportShareModal';
+import { exportShareApi } from '../../api/exportShareApi';
 
 export type CustomVisualType =
   | 'bar'
@@ -156,9 +169,10 @@ export interface DashboardPageConfig {
   paletteId: PaletteId;
 }
 
-interface DashboardModalProps {
+export interface DashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenExportShare?: (tab?: 'files' | 'link' | 'history', format?: string) => void;
 }
 
 const COLOR_PALETTES: Record<PaletteId, { name: string; colors: string[] }> = {
@@ -400,7 +414,11 @@ const computeSnapAndGuides = (
   };
 };
 
-export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose }) => {
+export const DashboardModal: React.FC<DashboardModalProps> = ({
+  isOpen,
+  onClose,
+  onOpenExportShare,
+}) => {
   const {
     datasets,
     selectedDataset,
@@ -411,6 +429,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     columns,
     rows,
     allRows,
+    steps,
   } = useWorkbenchStore();
 
   const [visuals, setVisuals] = useState<DashboardVisualConfig[]>([]);
@@ -420,6 +439,66 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   const [selectedKpiId, setSelectedKpiId] = useState<string | null>(null);
   const [paletteId, setPaletteId] = useState<PaletteId>('classic');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
+
+  // Export & Share State inside Dashboard
+  const [isExportShareOpen, setIsExportShareOpen] = useState(false);
+  const [exportShareTab, setExportShareTab] = useState<'files' | 'link' | 'history'>('files');
+  const [exportShareFormat, setExportShareFormat] = useState<string>('xlsx_values');
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
+  const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
+  const [copiedLinkFeedback, setCopiedLinkFeedback] = useState(false);
+  const downloadMenuRef = useRef<HTMLDivElement>(null);
+  const shareMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(e.target as Node)) {
+        setIsDownloadMenuOpen(false);
+      }
+      if (shareMenuRef.current && !shareMenuRef.current.contains(e.target as Node)) {
+        setIsShareMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const handleOpenExport = (tab: 'files' | 'link' | 'history' = 'files', format: string = 'xlsx_values') => {
+    setIsDownloadMenuOpen(false);
+    setIsShareMenuOpen(false);
+    if (onOpenExportShare) {
+      onOpenExportShare(tab, format);
+    } else {
+      setExportShareTab(tab);
+      setExportShareFormat(format);
+      setIsExportShareOpen(true);
+    }
+  };
+
+  const handleQuickDownload = async (format: string = 'xlsx_values') => {
+    setIsDownloadMenuOpen(false);
+    if (!selectedDataset) {
+      handleOpenExport('files', format);
+      return;
+    }
+    try {
+      const res = await exportShareApi.createJob({
+        project_id: selectedDataset.project_id || 'default-project',
+        dataset_id: selectedDataset.id,
+        format: format,
+        row_scope: 'all',
+        include_visuals: true,
+        steps: steps || [],
+      });
+      if (res && res.files && res.files.length > 0) {
+        exportShareApi.downloadFile(res.job_id, res.files[0].file_id, res.files[0].filename);
+      } else {
+        handleOpenExport('files', format);
+      }
+    } catch {
+      handleOpenExport('files', format);
+    }
+  };
 
   // Power BI-Style Side Panes State (Filters | Visualizations | Data)
   const [paneFilters, setPaneFilters] = useState<DashboardPaneConfig>(() => {
@@ -3580,6 +3659,174 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               ))}
             </select>
 
+            {/* DOWNLOAD SPLIT BUTTON */}
+            {SHARE_EXPORT_ENABLED && (
+              <div className="relative inline-flex items-center shadow-sm rounded-md" ref={downloadMenuRef}>
+                <button
+                  type="button"
+                  data-testid="dashboard-download-btn"
+                  onClick={() => handleQuickDownload('xlsx_values')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#217346] hover:bg-[#185C37] text-white text-xs font-bold rounded-l-md transition-colors"
+                  title="Download Packaged Workbook (.xlsx)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="dashboard-download-dropdown-btn"
+                  onClick={() => {
+                    setIsDownloadMenuOpen(!isDownloadMenuOpen);
+                    setIsShareMenuOpen(false);
+                  }}
+                  className="p-1.5 bg-[#185C37] hover:bg-[#104227] text-white border-l border-[#2e8b55] rounded-r-md transition-colors"
+                  title="More download and deliverable options"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+
+                {isDownloadMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-gray-200 rounded-lg shadow-xl py-1.5 z-[100] text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenExport('files', 'xlsx_values')}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 font-semibold text-gray-800"
+                    >
+                      <Download className="w-4 h-4 text-[#217346]" />
+                      <div>
+                        <div>Export &amp; Share Studio...</div>
+                        <div className="text-[10px] text-gray-500 font-normal">Custom row scope, exclusions, all formats</div>
+                      </div>
+                    </button>
+                    <div className="border-t border-gray-100 my-1" />
+                    <button
+                      type="button"
+                      onClick={() => handleQuickDownload('xlsx_values')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-green-700" />
+                      <span>Packaged Workbook (.xlsx)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenExport('files', 'pdf')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                    >
+                      <FileText className="w-4 h-4 text-red-600" />
+                      <span>PDF Executive Report (.pdf)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenExport('files', 'pptx')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                    >
+                      <Presentation className="w-4 h-4 text-orange-600" />
+                      <span>Interactive PowerPoint (.pptx)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickDownload('csv')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                    >
+                      <Database className="w-4 h-4 text-blue-600" />
+                      <span>CSV Data File (.csv)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenExport('files', 'powerbi_starter')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                    >
+                      <Archive className="w-4 h-4 text-amber-600" />
+                      <span>Power BI Starter Pack (.zip)</span>
+                    </button>
+                    <div className="border-t border-gray-100 my-1" />
+                    <button
+                      type="button"
+                      onClick={() => handleOpenExport('history')}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-600"
+                    >
+                      <Clock className="w-4 h-4 text-gray-500" />
+                      <span>Export History...</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SHARE SPLIT BUTTON */}
+            {SHARE_EXPORT_ENABLED && (
+              <div className="relative inline-flex items-center shadow-sm rounded-md" ref={shareMenuRef}>
+                <button
+                  type="button"
+                  data-testid="dashboard-share-btn"
+                  onClick={() => handleOpenExport('link')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 text-xs font-bold rounded-l-md transition-colors"
+                  title="Share Dashboard & Project Link"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-[#217346]" />
+                  <span>Share</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="dashboard-share-dropdown-btn"
+                  onClick={() => {
+                    setIsShareMenuOpen(!isShareMenuOpen);
+                    setIsDownloadMenuOpen(false);
+                  }}
+                  className="p-1.5 bg-white hover:bg-gray-50 text-gray-600 border border-l-0 border-gray-300 rounded-r-md transition-colors"
+                  title="More share options"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+
+                {isShareMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-60 bg-white border border-gray-200 rounded-lg shadow-xl py-1.5 z-[100] text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenExport('link')}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 font-semibold text-gray-800"
+                    >
+                      <Share2 className="w-4 h-4 text-[#217346]" />
+                      <div>
+                        <div>Shareable Link &amp; Access...</div>
+                        <div className="text-[10px] text-gray-500 font-normal">Generate links with roles &amp; passcode</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const currentUrl = window.location.href;
+                        await navigator.clipboard.writeText(currentUrl);
+                        setCopiedLinkFeedback(true);
+                        setTimeout(() => setCopiedLinkFeedback(false), 2000);
+                        setIsShareMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                    >
+                      <Copy className="w-4 h-4 text-gray-500" />
+                      <span>{copiedLinkFeedback ? 'Copied to Clipboard!' : 'Copy Dashboard Link'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const title = selectedDataset?.name || 'Dashboard';
+                        const subject = encodeURIComponent(`StepSheet Dashboard: ${title}`);
+                        const body = encodeURIComponent(
+                          `Hi,\n\nCheck out the StepSheet visual dashboard for "${title}".\n\nLink: ${window.location.href}`
+                        );
+                        window.location.href = `mailto:?subject=${subject}&body=${body}`;
+                        setIsShareMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                    >
+                      <Mail className="w-4 h-4 text-gray-500" />
+                      <span>Email Dashboard (Mailto)...</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               type="button"
               onClick={handleResetDashboard}
@@ -4412,6 +4659,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           </div>
         </div>
       </div>
+
+      {SHARE_EXPORT_ENABLED && isExportShareOpen && (
+        <ExportShareModal
+          isOpen={isExportShareOpen}
+          onClose={() => setIsExportShareOpen(false)}
+          dataset={selectedDataset}
+          columns={columns}
+          steps={steps || []}
+          initialTab={exportShareTab}
+          initialFormat={exportShareFormat}
+        />
+      )}
     </div>
   );
 };

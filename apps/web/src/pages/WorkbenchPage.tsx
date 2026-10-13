@@ -273,6 +273,7 @@ export const WorkbenchPage: React.FC = () => {
       <DashboardModal
         isOpen={isDashboardOpen}
         onClose={() => setIsDashboardOpen(false)}
+        onOpenExportShare={handleOpenExportShare}
       />
 
       {SHARE_EXPORT_ENABLED && (

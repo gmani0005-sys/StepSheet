@@ -107,4 +107,27 @@ describe('DashboardModal Power BI-Style Panes (Filters | Visualizations | Data)'
     fireEvent.keyDown(window, { key: '3', altKey: true });
     expect(screen.getByTestId('pane-strip-data')).toBeDefined();
   });
+
+  it('renders Download and Share buttons in the dashboard portion and opens dropdowns', () => {
+    render(<DashboardModal isOpen={true} onClose={() => {}} />);
+
+    // 1. Verify Download and Share buttons exist in the dashboard header
+    const downloadBtn = screen.getByTestId('dashboard-download-btn');
+    const shareBtn = screen.getByTestId('dashboard-share-btn');
+    expect(downloadBtn).toBeDefined();
+    expect(shareBtn).toBeDefined();
+
+    // 2. Click Download dropdown chevron to open options
+    const downloadDropdownBtn = screen.getByTestId('dashboard-download-dropdown-btn');
+    fireEvent.click(downloadDropdownBtn);
+    expect(screen.getByText('Export & Share Studio...')).toBeDefined();
+    expect(screen.getByText('Packaged Workbook (.xlsx)')).toBeDefined();
+    expect(screen.getByText('PDF Executive Report (.pdf)')).toBeDefined();
+
+    // 3. Click Share dropdown chevron to open share options
+    const shareDropdownBtn = screen.getByTestId('dashboard-share-dropdown-btn');
+    fireEvent.click(shareDropdownBtn);
+    expect(screen.getByText('Shareable Link & Access...')).toBeDefined();
+    expect(screen.getByText('Copy Dashboard Link')).toBeDefined();
+  });
 });

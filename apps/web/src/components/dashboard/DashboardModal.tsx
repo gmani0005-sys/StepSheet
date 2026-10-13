@@ -40,7 +40,12 @@ import { DashboardVisualizationsPane } from './panes/DashboardVisualizationsPane
 import { DashboardDataPane } from './panes/DashboardDataPane';
 import { SHARE_EXPORT_ENABLED } from '../../config/features';
 import { ExportShareModal } from '../export_share/ExportShareModal';
-import { exportShareApi } from '../../api/exportShareApi';
+import {
+  exportShareApi,
+  DashboardExportData,
+  DashboardExportKpi,
+  DashboardExportVisual,
+} from '../../api/exportShareApi';
 
 export type CustomVisualType =
   | 'bar'
@@ -475,27 +480,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     }
   };
 
-  const handleQuickDownload = async (format: string = 'xlsx_values') => {
-    setIsDownloadMenuOpen(false);
-    const targetDataset = selectedDataset || useWorkbenchStore.getState().selectedDataset;
-    try {
-      const res = await exportShareApi.createJob({
-        project_id: targetDataset?.project_id || 'default-project',
-        dataset_id: targetDataset?.id || 'default',
-        format: format,
-        row_scope: 'all',
-        include_visuals: true,
-        steps: steps || [],
-      });
-      if (res && res.files && res.files.length > 0) {
-        await exportShareApi.downloadFile(res.job_id, res.files[0].file_id, res.files[0].filename);
-      } else {
-        handleOpenExport('files', format);
-      }
-    } catch {
-      handleOpenExport('files', format);
-    }
-  };
+
 
   // Power BI-Style Side Panes State (Filters | Visualizations | Data)
   const [paneFilters, setPaneFilters] = useState<DashboardPaneConfig>(() => {
@@ -1585,6 +1570,137 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     if (fn === 'min') return Math.min(...nums);
     if (fn === 'max') return Math.max(...nums);
     return Number(sum.toFixed(2));
+  };
+
+  const getDashboardExportData = (): DashboardExportData => {
+    const dsName = selectedDataset?.name || 'Executive';
+
+    const exportKpis: DashboardExportKpi[] = kpiCards.map((kpi) => {
+      const val = computeMetric(filteredRows, kpi.column, kpi.aggFunc);
+      return {
+        title: kpi.title,
+        value: val,
+        formattedValue: formatNum(val),
+        aggFunc: kpi.aggFunc,
+        subtitle: kpi.subtitle,
+        column: kpi.column,
+      };
+    });
+
+    const exportVisuals: DashboardExportVisual[] = visuals.map((vis) => {
+      if (vis.type === 'histogram') {
+        const nums = filteredRows
+          .map((r) => Number(r[vis.valueCol]))
+          .filter((n) => !Number.isNaN(n));
+        const minVal = nums.length > 0 ? Math.min(...nums) : 0;
+        const maxVal = nums.length > 0 ? Math.max(...nums) : 1;
+        const binCount = Math.max(3, Math.min(25, vis.bins || 8));
+        const span = maxVal === minVal ? 1 : maxVal - minVal;
+        const step = span / binCount;
+        const buckets = Array.from({ length: binCount }, (_, idx) => {
+          const low = minVal + idx * step;
+          const high = idx === binCount - 1 ? maxVal : minVal + (idx + 1) * step;
+          return {
+            category: `${formatNum(low)}–${formatNum(high)}`,
+            value: 0,
+            count: 0,
+          };
+        });
+        nums.forEach((n) => {
+          const idx = Math.min(binCount - 1, Math.max(0, Math.floor((n - minVal) / step)));
+          buckets[idx].count += 1;
+          buckets[idx].value += 1;
+        });
+        const total = nums.length || 1;
+        return {
+          id: vis.id,
+          title: vis.title,
+          type: vis.type,
+          categoryCol: vis.categoryCol || vis.valueCol,
+          valueCol: vis.valueCol,
+          aggFunc: 'count',
+          items: buckets.map((b) => ({
+            category: b.category,
+            value: b.value,
+            percentage: `${((b.count / total) * 100).toFixed(1)}%`,
+            count: b.count,
+          })),
+        };
+      }
+
+      // Group rows for standard visuals
+      const catMap = new Map<string, Record<string, any>[]>();
+      filteredRows.forEach((r) => {
+        const raw = r[vis.categoryCol];
+        const key =
+          raw === null || raw === undefined || String(raw).trim() === '' ? '(Blank)' : String(raw);
+        if (!catMap.has(key)) catMap.set(key, []);
+        catMap.get(key)!.push(r);
+      });
+
+      let items = Array.from(catMap.entries()).map(([category, groupRows]) => ({
+        category,
+        value: computeMetric(groupRows, vis.valueCol, vis.aggFunc),
+        count: groupRows.length,
+      }));
+
+      if (vis.sortBy === 'value_desc') items.sort((a, b) => b.value - a.value);
+      else if (vis.sortBy === 'value_asc') items.sort((a, b) => a.value - b.value);
+      else items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
+
+      items = items.slice(0, vis.topN || 12);
+      const sumVal = items.reduce((acc, x) => acc + Math.max(0, x.value), 0) || 1;
+
+      return {
+        id: vis.id,
+        title: vis.title,
+        type: vis.type,
+        categoryCol: vis.categoryCol,
+        valueCol: vis.valueCol,
+        aggFunc: vis.aggFunc,
+        items: items.map((it) => ({
+          category: it.category,
+          value: it.value,
+          percentage: `${((Math.max(0, it.value) / sumVal) * 100).toFixed(1)}%`,
+          count: it.count,
+        })),
+      };
+    });
+
+    const colNames =
+      columns && columns.length > 0
+        ? columns.map((c) => c.name)
+        : filteredRows.length > 0
+        ? Object.keys(filteredRows[0])
+        : [];
+
+    return {
+      title: dashboardTitle,
+      datasetName: dsName,
+      kpis: exportKpis,
+      visuals: exportVisuals,
+      filteredRowCount: filteredRows.length,
+      totalRowCount: selectedDataset?.row_count || filteredRows.length,
+      rows: filteredRows,
+      columns: colNames,
+      steps: steps || [],
+    };
+  };
+
+  const handlePrintDashboard = () => {
+    setIsDownloadMenuOpen(false);
+    window.print();
+  };
+
+  const handleQuickDownload = async (format: string = 'xlsx_values') => {
+    setIsDownloadMenuOpen(false);
+    try {
+      const dData = getDashboardExportData();
+      await exportShareApi.downloadDashboard(dData, format);
+    } catch (err) {
+      console.error('Quick download failed:', err);
+      handleOpenExport('files', format);
+    }
   };
 
   // KPI Card Actions
@@ -3699,42 +3815,79 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     <button
                       type="button"
                       onClick={() => handleQuickDownload('xlsx_values')}
-                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
                     >
-                      <FileSpreadsheet className="w-4 h-4 text-green-700" />
-                      <span>Packaged Workbook (.xlsx)</span>
+                      <FileSpreadsheet className="w-4 h-4 text-green-700 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">Packaged Workbook (.xlsx)</div>
+                        <div className="text-[10px] text-gray-500">Dashboard summary, KPIs, visual tables &amp; raw data</div>
+                      </div>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickDownload('pdf')}
-                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
                     >
-                      <FileText className="w-4 h-4 text-red-600" />
-                      <span>PDF Executive Report (.pdf)</span>
+                      <FileText className="w-4 h-4 text-red-600 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">PDF Executive Dashboard (.pdf)</div>
+                        <div className="text-[10px] text-gray-500">Multi-page report with KPIs, chart breakdowns &amp; metrics</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePrintDashboard}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
+                    >
+                      <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">Print / Save as PDF (Browser Print)</div>
+                        <div className="text-[10px] text-gray-500">Native browser print dialog on graphical canvas</div>
+                      </div>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickDownload('pptx')}
-                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
                     >
-                      <Presentation className="w-4 h-4 text-orange-600" />
-                      <span>Interactive PowerPoint (.pptx)</span>
+                      <Presentation className="w-4 h-4 text-orange-600 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">Interactive PowerPoint (.pptx)</div>
+                        <div className="text-[10px] text-gray-500">Presentation deck slides for KPIs and each chart visual</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickDownload('html')}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
+                    >
+                      <Activity className="w-4 h-4 text-teal-600 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">Standalone HTML Dashboard (.html)</div>
+                        <div className="text-[10px] text-gray-500">Single-file interactive offline dashboard with charts</div>
+                      </div>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickDownload('csv')}
-                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
                     >
-                      <Database className="w-4 h-4 text-blue-600" />
-                      <span>CSV Data File (.csv)</span>
+                      <Database className="w-4 h-4 text-blue-600 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">CSV Data File (.csv)</div>
+                        <div className="text-[10px] text-gray-500">Filtered data rows matching active dashboard</div>
+                      </div>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickDownload('powerbi_starter')}
-                      className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
                     >
-                      <Archive className="w-4 h-4 text-amber-600" />
-                      <span>Power BI Starter Pack (.zip)</span>
+                      <Archive className="w-4 h-4 text-amber-600 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">Power BI Starter Pack (.zip)</div>
+                        <div className="text-[10px] text-gray-500">CSV, Power Query M script &amp; data model notes</div>
+                      </div>
                     </button>
                     <div className="border-t border-gray-100 my-1" />
                     <button
@@ -4666,6 +4819,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           steps={steps || []}
           initialTab={exportShareTab}
           initialFormat={exportShareFormat}
+          dashboardData={getDashboardExportData()}
         />
       )}
     </div>

@@ -277,3 +277,14 @@
   text-transform: uppercase;
 }
 
+/* Print / Save-as-PDF styling for Dashboard Canvas */
+@media print {
+  nav, header, aside, .no-print, [data-resize-handle], [data-testid="pane-strip-filters"], [data-testid="pane-strip-visualizations"], [data-testid="pane-strip-data"] {
+    display: none !important;
+  }
+  body, #root {
+    overflow: visible !important;
+    background: white !important;
+  }
+}
+

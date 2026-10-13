@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { Dataset } from '../../types';
 import { StepDefinition } from '../../types/steps';
-import { exportShareApi, ExportJobStatus } from '../../api/exportShareApi';
+import { exportShareApi, ExportJobStatus, DashboardExportData } from '../../api/exportShareApi';
 import { api } from '../../api/client';
 
 export interface ExportShareModalProps {
@@ -36,6 +36,7 @@ export interface ExportShareModalProps {
   steps: StepDefinition[];
   initialTab?: 'files' | 'link' | 'history';
   initialFormat?: string;
+  dashboardData?: DashboardExportData;
 }
 
 type TabType = 'files' | 'link' | 'history';
@@ -137,6 +138,7 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
   steps,
   initialTab = 'files',
   initialFormat = 'xlsx_values',
+  dashboardData,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [selectedFormat, setSelectedFormat] = useState<string>(initialFormat);
@@ -335,6 +337,7 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
       options: {
         csv_delimiter: csvDelimiter,
         csv_encoding: csvEncoding,
+        dashboardData,
       },
       steps,
     };
@@ -358,6 +361,12 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
 
   const handleDownload = async () => {
     try {
+      if (dashboardData) {
+        setStatusMessage('Downloading generated dashboard deliverable...');
+        await exportShareApi.downloadDashboard(dashboardData, selectedFormat);
+        setStatusMessage('Download complete!');
+        return;
+      }
       const job = await runExportJob();
       if (job.files && job.files.length > 0) {
         setStatusMessage('Downloading generated file...');

@@ -123,7 +123,7 @@ describe('DashboardModal Power BI-Style Panes (Filters | Visualizations | Data)'
     fireEvent.click(downloadDropdownBtn);
     expect(screen.getByText('Export & Share Studio...')).toBeDefined();
     expect(screen.getByText('Packaged Workbook (.xlsx)')).toBeDefined();
-    expect(screen.getByText('PDF Executive Report (.pdf)')).toBeDefined();
+    expect(screen.getByText('PDF Executive Dashboard (.pdf)')).toBeDefined();
 
     // 3. Click Share dropdown chevron to open share options
     const shareDropdownBtn = screen.getByTestId('dashboard-share-dropdown-btn');
@@ -133,7 +133,7 @@ describe('DashboardModal Power BI-Style Panes (Filters | Visualizations | Data)'
   });
 
   it('triggers deliverable generation and download when clicking Download button', async () => {
-    const downloadSpy = vi.spyOn(exportShareApi, 'downloadFile').mockResolvedValue(undefined);
+    const downloadSpy = vi.spyOn(exportShareApi, 'downloadDashboard').mockResolvedValue(undefined);
     render(<DashboardModal isOpen={true} onClose={() => {}} />);
     const downloadBtn = screen.getByTestId('dashboard-download-btn');
     fireEvent.click(downloadBtn);

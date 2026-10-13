@@ -143,6 +143,8 @@ export interface DashboardVisualConfig {
 export interface DashboardPageConfig {
   id: string;
   name: string;
+  datasetId?: string;
+  queryId?: string | null;
   dashboardTitle: string;
   visuals: DashboardVisualConfig[];
   kpiCards: DashboardKpiConfig[];
@@ -395,7 +397,17 @@ const computeSnapAndGuides = (
 };
 
 export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose }) => {
-  const { selectedDataset, columns, rows, allRows } = useWorkbenchStore();
+  const {
+    datasets,
+    selectedDataset,
+    selectDataset,
+    queries,
+    activeQueryId,
+    selectConnectionQuery,
+    columns,
+    rows,
+    allRows,
+  } = useWorkbenchStore();
 
   const [visuals, setVisuals] = useState<DashboardVisualConfig[]>([]);
   const [kpiCards, setKpiCards] = useState<DashboardKpiConfig[]>([]);
@@ -405,11 +417,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   const [paletteId, setPaletteId] = useState<PaletteId>('classic');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
 
-  // Multi-Page Dashboard State (Page 1, Page 2, ... with inline rename & top dropdown)
+  // Multi-Page Dashboard State (Page 1, Page 2, ... with inline rename & top sheet/query selector)
   const [pages, setPages] = useState<DashboardPageConfig[]>([]);
   const [activePageId, setActivePageId] = useState<string>('page_1');
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
   const [editingPageNameDraft, setEditingPageNameDraft] = useState<string>('');
+  const pendingSheetSwitchForPageRef = useRef<string | null>(null);
+  const switchingToPageRef = useRef<string | null>(null);
 
   // Canvas Snapping, Zoom, Alignment Guides & Undo/Redo History
   const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
@@ -663,10 +677,64 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
   useEffect(() => {
     if (!isOpen || columns.length === 0) return;
 
+    // If we switched dataset/query because the user switched between Page 1 / Page 2 tabs,
+    // keep the target page's visuals & pages array intact.
+    if (switchingToPageRef.current) {
+      switchingToPageRef.current = null;
+      return;
+    }
+
     const dsKey = selectedDataset?.id || 'default';
     const colNames = columns.map((c) => c.name);
     const { cat1, cat2 } = getSmartDefaults();
     const defaultSlicers = [cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+
+    // If the user explicitly changed the Active Sheet or Connection/Query dropdown on the current page,
+    // bind the newly selected sheet/query to the active page while preserving all other pages.
+    if (pendingSheetSwitchForPageRef.current) {
+      const targetPageId = pendingSheetSwitchForPageRef.current;
+      pendingSheetSwitchForPageRef.current = null;
+      const defaultVisuals = buildDefaultVisuals();
+      const defaultKpis = buildDefaultKpiCards();
+      const activeQueryObj = queries.find((q) => q.id === activeQueryId);
+      const sourceLabel = activeQueryObj
+        ? activeQueryObj.name
+        : selectedDataset?.name || 'Executive';
+      const currentPageObj = pages.find((p) => p.id === targetPageId);
+      const nextTitle =
+        currentPageObj && currentPageObj.id !== 'page_1'
+          ? `${sourceLabel} Dashboard - ${currentPageObj.name}`
+          : `${sourceLabel} Dashboard`;
+
+      setPages((prev) =>
+        prev.map((p) =>
+          p.id === targetPageId
+            ? {
+                ...p,
+                datasetId: selectedDataset?.id,
+                queryId: activeQueryId,
+                dashboardTitle: nextTitle,
+                visuals: defaultVisuals,
+                kpiCards: defaultKpis,
+                slicerColumns: defaultSlicers,
+              }
+            : p
+        )
+      );
+      setDashboardTitle(nextTitle);
+      setVisuals(defaultVisuals);
+      setKpiCards(defaultKpis);
+      setSlicerColumns(defaultSlicers);
+      setMultiSlicerSelections({});
+      setCrossFilter(null);
+      setUndoStack([]);
+      setRedoStack([]);
+      const firstId = defaultVisuals[0]?.id || null;
+      setSelectedVisualId(firstId);
+      setSelectedVisualIds(firstId ? [firstId] : []);
+      setSelectedKpiId(null);
+      return;
+    }
 
     try {
       const raw = localStorage.getItem(STORAGE_KEY_DASHBOARDS);
@@ -704,6 +772,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             (p: DashboardPageConfig, idx: number) => ({
               id: p.id || `page_${idx + 1}`,
               name: p.name || `Page ${idx + 1}`,
+              datasetId: p.datasetId || selectedDataset?.id,
+              queryId: p.queryId ?? activeQueryId,
               dashboardTitle: p.dashboardTitle || loadedTitle,
               visuals: ensureVisualCanvasCoords(
                 Array.isArray(p.visuals) && p.visuals.length > 0 ? p.visuals : normalizedVisuals
@@ -736,6 +806,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           const page1: DashboardPageConfig = {
             id: 'page_1',
             name: 'Page 1',
+            datasetId: selectedDataset?.id,
+            queryId: activeQueryId,
             dashboardTitle: loadedTitle,
             visuals: normalizedVisuals,
             kpiCards: loadedKpis,
@@ -768,6 +840,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     const initialPage: DashboardPageConfig = {
       id: 'page_1',
       name: 'Page 1',
+      datasetId: selectedDataset?.id,
+      queryId: activeQueryId,
       dashboardTitle: defaultTitle,
       visuals: defaultVisuals,
       kpiCards: defaultKpis,
@@ -800,6 +874,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               {
                 id: activePageId || 'page_1',
                 name: 'Page 1',
+                datasetId: selectedDataset?.id,
+                queryId: activeQueryId,
                 dashboardTitle,
                 visuals,
                 kpiCards,
@@ -811,6 +887,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               p.id === activePageId
                 ? {
                     ...p,
+                    datasetId: p.datasetId || selectedDataset?.id,
+                    queryId: p.queryId !== undefined ? p.queryId : activeQueryId,
                     dashboardTitle,
                     visuals,
                     kpiCards,
@@ -1547,6 +1625,20 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     setSelectedKpiId(null);
   };
 
+  const handleSwitchSheetOrQuery = async (value: string) => {
+    if (!value) return;
+    pendingSheetSwitchForPageRef.current = activePageId;
+    if (value.startsWith('query:')) {
+      const qId = value.replace('query:', '');
+      await selectConnectionQuery(qId);
+    } else if (value.startsWith('sheet:')) {
+      const dsId = value.replace('sheet:', '');
+      await selectDataset(dsId);
+    } else {
+      await selectDataset(value);
+    }
+  };
+
   const handleSelectPage = (targetPageId: string) => {
     if (targetPageId === activePageId) return;
     const targetPage = pages.find((p) => p.id === targetPageId);
@@ -1557,6 +1649,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         p.id === activePageId
           ? {
               ...p,
+              datasetId: p.datasetId || selectedDataset?.id,
+              queryId: p.queryId !== undefined ? p.queryId : activeQueryId,
               dashboardTitle,
               visuals,
               kpiCards,
@@ -1566,6 +1660,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
           : p
       )
     );
+
+    if (targetPage.queryId && targetPage.queryId !== activeQueryId) {
+      switchingToPageRef.current = targetPage.id;
+      void selectConnectionQuery(targetPage.queryId);
+    } else if (targetPage.datasetId && targetPage.datasetId !== selectedDataset?.id) {
+      switchingToPageRef.current = targetPage.id;
+      void selectDataset(targetPage.datasetId);
+    }
 
     setActivePageId(targetPage.id);
     setDashboardTitle(targetPage.dashboardTitle);
@@ -1598,6 +1700,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     const newPage: DashboardPageConfig = {
       id: newPageId,
       name: newPageName,
+      datasetId: selectedDataset?.id,
+      queryId: activeQueryId,
       dashboardTitle: newTitle,
       visuals: newVisuals,
       kpiCards: newKpis,
@@ -1608,7 +1712,16 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     setPages((prev) => [
       ...prev.map((p) =>
         p.id === activePageId
-          ? { ...p, dashboardTitle, visuals, kpiCards, slicerColumns, paletteId }
+          ? {
+              ...p,
+              datasetId: p.datasetId || selectedDataset?.id,
+              queryId: p.queryId !== undefined ? p.queryId : activeQueryId,
+              dashboardTitle,
+              visuals,
+              kpiCards,
+              slicerColumns,
+              paletteId,
+            }
           : p
       ),
       newPage,
@@ -3290,11 +3403,44 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                   Interactive Canvas
                 </span>
               </div>
-              <p className="text-xs text-[#605E5C]">
-                Active Sheet:{' '}
-                <strong className="text-[#212121]">{selectedDataset?.name || 'Dataset'}</strong> •
-                Multi-select slicers, dynamic KPI cards, Table &amp; Matrix visuals, and conditional formatting
-              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <span className="text-xs font-semibold text-[#605E5C]">
+                  Active Sheet / Query:
+                </span>
+                <select
+                  aria-label="Active Sheet or Query"
+                  data-testid="active-sheet-query-select"
+                  value={
+                    activeQueryId
+                      ? `query:${activeQueryId}`
+                      : `sheet:${selectedDataset?.id || ''}`
+                  }
+                  onChange={(e) => {
+                    void handleSwitchSheetOrQuery(e.target.value);
+                  }}
+                  className="bg-white border border-[#217346]/60 hover:border-[#217346] rounded-md px-2.5 py-1 text-xs font-bold text-[#185C37] shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#217346]/30"
+                >
+                  <optgroup label="Sheets & Tables">
+                    {datasets.map((ds) => (
+                      <option key={`sheet:${ds.id}`} value={`sheet:${ds.id}`}>
+                        📄 {ds.name} ({ds.row_count} rows)
+                      </option>
+                    ))}
+                  </optgroup>
+                  {queries.length > 0 && (
+                    <optgroup label="Connections & Queries">
+                      {queries.map((q) => (
+                        <option key={`query:${q.id}`} value={`query:${q.id}`}>
+                          🔗 {q.name} ({q.steps.length} steps)
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+                <span className="text-xs text-[#605E5C] hidden xl:inline">
+                  • Multi-select slicers, dynamic KPI cards, Table &amp; Matrix visuals
+                </span>
+              </div>
             </div>
           </div>
 

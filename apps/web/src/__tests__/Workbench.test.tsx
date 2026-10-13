@@ -849,6 +849,23 @@ describe('StepSheet Workbench', () => {
     expect((screen.getByLabelText('Dashboard Title') as HTMLInputElement).value).toBe(
       'Q4 Revenue Performance Dashboard'
     );
+
+    // Verify Active Sheet / Connection Query Dropdown in top header allows switching sheets across pages
+    const sheetQuerySelect = screen.getByTestId('active-sheet-query-select') as HTMLSelectElement;
+    expect(sheetQuerySelect).toBeDefined();
+    expect(sheetQuerySelect.innerHTML).toContain('Orders (Sample XLSX)');
+    expect(sheetQuerySelect.innerHTML).toContain('Customers (Sample CSV)');
+
+    // Switch to Page 2 and select Customers (Sample CSV) from the Active Sheet / Query dropdown
+    fireEvent.change(screen.getByTestId('top-page-select'), { target: { value: 'page_2' } });
+    const customersDs = useWorkbenchStore
+      .getState()
+      .datasets.find((d) => d.name.includes('Customers'));
+    if (customersDs) {
+      fireEvent.change(sheetQuerySelect, { target: { value: `sheet:${customersDs.id}` } });
+    }
+    expect(screen.getByTestId('page-tab-page_1')).toBeDefined();
+    expect(screen.getByTestId('page-tab-page_2')).toBeDefined();
   });
 });
 

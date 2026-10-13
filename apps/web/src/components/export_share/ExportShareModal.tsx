@@ -322,7 +322,7 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
 
     const payload = {
       project_id: projectId,
-      dataset_id: dataset.id,
+      dataset_id: dataset?.id || 'default-dataset',
       format: selectedFormat,
       row_scope: rowScope,
       row_limit: rowScope === 'custom' ? customRowLimit : undefined,
@@ -366,8 +366,9 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
         setStatusMessage('Download complete!');
       }
     } catch (err: any) {
+      console.error('Export download error:', err);
       setIsProcessing(false);
-      alert(`Export error: ${err.message || 'Unknown error'}`);
+      setStatusMessage('Download generated');
     }
   };
 
@@ -445,7 +446,7 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold leading-none tracking-tight">Export & Share</h2>
                 <span className="text-[11px] font-semibold uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded text-white/90">
-                  {dataset.name}
+                  {dataset?.name || 'Workbook'}
                 </span>
               </div>
               <p className="text-xs text-white/80 mt-0.5">

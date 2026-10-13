@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { DashboardModal } from '../components/dashboard/DashboardModal';
 import { useWorkbenchStore } from '../store/workbenchStore';
+import { exportShareApi } from '../api/exportShareApi';
 
 describe('DashboardModal Power BI-Style Panes (Filters | Visualizations | Data)', () => {
   beforeEach(() => {
@@ -129,5 +130,16 @@ describe('DashboardModal Power BI-Style Panes (Filters | Visualizations | Data)'
     fireEvent.click(shareDropdownBtn);
     expect(screen.getByText('Shareable Link & Access...')).toBeDefined();
     expect(screen.getByText('Copy Dashboard Link')).toBeDefined();
+  });
+
+  it('triggers deliverable generation and download when clicking Download button', async () => {
+    const downloadSpy = vi.spyOn(exportShareApi, 'downloadFile').mockResolvedValue(undefined);
+    render(<DashboardModal isOpen={true} onClose={() => {}} />);
+    const downloadBtn = screen.getByTestId('dashboard-download-btn');
+    fireEvent.click(downloadBtn);
+    await waitFor(() => {
+      expect(downloadSpy).toHaveBeenCalled();
+    });
+    downloadSpy.mockRestore();
   });
 });

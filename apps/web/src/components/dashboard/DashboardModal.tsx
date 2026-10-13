@@ -477,21 +477,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
   const handleQuickDownload = async (format: string = 'xlsx_values') => {
     setIsDownloadMenuOpen(false);
-    if (!selectedDataset) {
-      handleOpenExport('files', format);
-      return;
-    }
+    const targetDataset = selectedDataset || useWorkbenchStore.getState().selectedDataset;
     try {
       const res = await exportShareApi.createJob({
-        project_id: selectedDataset.project_id || 'default-project',
-        dataset_id: selectedDataset.id,
+        project_id: targetDataset?.project_id || 'default-project',
+        dataset_id: targetDataset?.id || 'default',
         format: format,
         row_scope: 'all',
         include_visuals: true,
         steps: steps || [],
       });
       if (res && res.files && res.files.length > 0) {
-        exportShareApi.downloadFile(res.job_id, res.files[0].file_id, res.files[0].filename);
+        await exportShareApi.downloadFile(res.job_id, res.files[0].file_id, res.files[0].filename);
       } else {
         handleOpenExport('files', format);
       }
@@ -3709,7 +3706,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleOpenExport('files', 'pdf')}
+                      onClick={() => handleQuickDownload('pdf')}
                       className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                     >
                       <FileText className="w-4 h-4 text-red-600" />
@@ -3717,7 +3714,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleOpenExport('files', 'pptx')}
+                      onClick={() => handleQuickDownload('pptx')}
                       className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                     >
                       <Presentation className="w-4 h-4 text-orange-600" />
@@ -3733,7 +3730,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleOpenExport('files', 'powerbi_starter')}
+                      onClick={() => handleQuickDownload('powerbi_starter')}
                       className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                     >
                       <Archive className="w-4 h-4 text-amber-600" />

@@ -98,6 +98,17 @@ export type DataLabelPositionType = 'inside_end' | 'outside_end' | 'inside_cente
 
 export type DataLabelContentType = 'totals_only' | 'totals_and_percentage';
 
+export type ResizeDirection = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+export interface AlignmentGuide {
+  id: string;
+  orientation: 'vertical' | 'horizontal';
+  position: number;
+  start: number;
+  end: number;
+  label?: string;
+}
+
 export interface DashboardVisualConfig {
   id: string;
   title: string;
@@ -115,6 +126,9 @@ export interface DashboardVisualConfig {
   dataLabelPosition?: DataLabelPositionType;
   dataLabelContent?: DataLabelContentType;
   span: 1 | 2;
+  x?: number;
+  y?: number;
+  zIndex?: number;
   customWidth?: number;
   customHeight?: number;
   paletteId?: PaletteId;
@@ -258,34 +272,174 @@ const DEFAULT_CF: ConditionalFormattingConfig = {
 
 const STORAGE_KEY_DASHBOARDS = 'stepsheet_dashboards_v3';
 
+const DEFAULT_TILE_W = 480;
+const DEFAULT_TILE_H = 320;
+const DEFAULT_TILE_GAP = 16;
+const CANVAS_GRID_SIZE = 8;
+const SNAP_GUIDE_THRESHOLD = 6;
+
+const ensureVisualCanvasCoords = (
+  list: DashboardVisualConfig[]
+): DashboardVisualConfig[] => {
+  return list.map((v, idx) => {
+    const col = idx % 2;
+    const row = Math.floor(idx / 2);
+    const defaultX = 16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP);
+    const defaultY = 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP);
+    return {
+      ...v,
+      x: typeof v.x === 'number' && Number.isFinite(v.x) ? Math.max(0, v.x) : defaultX,
+      y: typeof v.y === 'number' && Number.isFinite(v.y) ? Math.max(0, v.y) : defaultY,
+      zIndex: typeof v.zIndex === 'number' && Number.isFinite(v.zIndex) ? v.zIndex : idx + 1,
+    };
+  });
+};
+
+const computeSnapAndGuides = (
+  rawX: number,
+  rawY: number,
+  w: number,
+  h: number,
+  movingIds: string[],
+  allVisuals: DashboardVisualConfig[],
+  snapGridEnabled: boolean
+): { x: number; y: number; guides: AlignmentGuide[] } => {
+  let snappedX = snapGridEnabled
+    ? Math.round(rawX / CANVAS_GRID_SIZE) * CANVAS_GRID_SIZE
+    : Math.round(rawX);
+  let snappedY = snapGridEnabled
+    ? Math.round(rawY / CANVAS_GRID_SIZE) * CANVAS_GRID_SIZE
+    : Math.round(rawY);
+
+  const guides: AlignmentGuide[] = [];
+  const movingSet = new Set(movingIds);
+  const others = allVisuals.filter((v) => !movingSet.has(v.id));
+
+  let snappedXByGuide = false;
+  let snappedYByGuide = false;
+
+  for (const other of others) {
+    const ox = other.x ?? 16;
+    const oy = other.y ?? 16;
+    const ow = other.customWidth || (other.span === 2 ? 976 : DEFAULT_TILE_W);
+    const oh = other.customHeight || DEFAULT_TILE_H;
+
+    const otherXPoints = [ox, ox + ow / 2, ox + ow];
+    const movingXOffsets = [0, w / 2, w];
+
+    if (!snappedXByGuide) {
+      for (const op of otherXPoints) {
+        for (const mOff of movingXOffsets) {
+          const candidateX = op - mOff;
+          if (Math.abs(rawX - candidateX) <= SNAP_GUIDE_THRESHOLD) {
+            snappedX = Math.round(candidateX);
+            snappedXByGuide = true;
+            guides.push({
+              id: `v-${other.id}-${Math.round(op)}`,
+              orientation: 'vertical',
+              position: Math.round(op),
+              start: Math.max(0, Math.min(snappedY, oy) - 12),
+              end: Math.max(snappedY + h, oy + oh) + 12,
+              label: `${Math.round(op)}px`,
+            });
+            break;
+          }
+        }
+        if (snappedXByGuide) break;
+      }
+    }
+
+    const otherYPoints = [oy, oy + oh / 2, oy + oh];
+    const movingYOffsets = [0, h / 2, h];
+
+    if (!snappedYByGuide) {
+      for (const op of otherYPoints) {
+        for (const mOff of movingYOffsets) {
+          const candidateY = op - mOff;
+          if (Math.abs(rawY - candidateY) <= SNAP_GUIDE_THRESHOLD) {
+            snappedY = Math.round(candidateY);
+            snappedYByGuide = true;
+            guides.push({
+              id: `h-${other.id}-${Math.round(op)}`,
+              orientation: 'horizontal',
+              position: Math.round(op),
+              start: Math.max(0, Math.min(snappedX, ox) - 12),
+              end: Math.max(snappedX + w, ox + ow) + 12,
+              label: `${Math.round(op)}px`,
+            });
+            break;
+          }
+        }
+        if (snappedYByGuide) break;
+      }
+    }
+  }
+
+  return {
+    x: Math.max(0, snappedX),
+    y: Math.max(0, snappedY),
+    guides,
+  };
+};
+
 export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose }) => {
   const { selectedDataset, columns, rows, allRows } = useWorkbenchStore();
 
   const [visuals, setVisuals] = useState<DashboardVisualConfig[]>([]);
   const [kpiCards, setKpiCards] = useState<DashboardKpiConfig[]>([]);
   const [selectedVisualId, setSelectedVisualId] = useState<string | null>(null);
+  const [selectedVisualIds, setSelectedVisualIds] = useState<string[]>([]);
   const [selectedKpiId, setSelectedKpiId] = useState<string | null>(null);
   const [paletteId, setPaletteId] = useState<PaletteId>('classic');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
+
+  // Canvas Snapping, Alignment Guides & Undo/Redo History
+  const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
+  const snapToGridRef = useRef<boolean>(true);
+  snapToGridRef.current = snapToGrid;
+
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [undoStack, setUndoStack] = useState<DashboardVisualConfig[][]>([]);
+  const [redoStack, setRedoStack] = useState<DashboardVisualConfig[][]>([]);
+
+  const visualsRef = useRef<DashboardVisualConfig[]>([]);
+  visualsRef.current = visuals;
+  const selectedVisualIdsRef = useRef<string[]>([]);
+  selectedVisualIdsRef.current = selectedVisualIds;
+  const selectedVisualIdRef = useRef<string | null>(null);
+  selectedVisualIdRef.current = selectedVisualId;
 
   // Inline Title Editing State on Canvas Cards
   const [editingTitleVisId, setEditingTitleVisId] = useState<string | null>(null);
   const [editingTitleDraft, setEditingTitleDraft] = useState<string>('');
 
-  // Diagonal Mouse Resize State & Refs
+  // 8-Way Mouse Resize State & Refs
   const [resizingVisId, setResizingVisId] = useState<string | null>(null);
   const resizeSessionRef = useRef<{
     visId: string;
+    dir: ResizeDirection;
     startX: number;
     startY: number;
+    startLeft: number;
+    startTop: number;
     startW: number;
     startH: number;
+    hasMoved: boolean;
+    snapshot: DashboardVisualConfig[];
   } | null>(null);
 
-  // Long-Press Hover & Place/Align State & Refs
+  // Press-and-Hold Canvas Drag & Place/Align State & Refs
   const [hoverDragVisId, setHoverDragVisId] = useState<string | null>(null);
   const [hoverTargetVisId, setHoverTargetVisId] = useState<string | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragSessionRef = useRef<{
+    primaryVisId: string;
+    startClientX: number;
+    startClientY: number;
+    hasMoved: boolean;
+    initialRects: Record<string, { x: number; y: number; w: number; h: number }>;
+    snapshot: DashboardVisualConfig[];
+  } | null>(null);
 
   // Multi-Slicer State: array of active slicer columns + map of column -> selected values
   const [slicerColumns, setSlicerColumns] = useState<string[]>([]);
@@ -372,9 +526,41 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     ];
   };
 
+  const pushUndoSnapshot = (snapshot: DashboardVisualConfig[]) => {
+    const copy = JSON.parse(JSON.stringify(snapshot)) as DashboardVisualConfig[];
+    setUndoStack((prev) => [...prev.slice(-29), copy]);
+    setRedoStack([]);
+  };
+
+  const handleUndo = () => {
+    setUndoStack((prevUndo) => {
+      if (prevUndo.length === 0) return prevUndo;
+      const previousState = prevUndo[prevUndo.length - 1];
+      const currentSnapshot = JSON.parse(
+        JSON.stringify(visualsRef.current)
+      ) as DashboardVisualConfig[];
+      setRedoStack((prevRedo) => [...prevRedo, currentSnapshot]);
+      setVisuals(previousState);
+      return prevUndo.slice(0, -1);
+    });
+  };
+
+  const handleRedo = () => {
+    setRedoStack((prevRedo) => {
+      if (prevRedo.length === 0) return prevRedo;
+      const nextState = prevRedo[prevRedo.length - 1];
+      const currentSnapshot = JSON.parse(
+        JSON.stringify(visualsRef.current)
+      ) as DashboardVisualConfig[];
+      setUndoStack((prevUndo) => [...prevUndo.slice(-29), currentSnapshot]);
+      setVisuals(nextState);
+      return prevRedo.slice(0, -1);
+    });
+  };
+
   const buildDefaultVisuals = (): DashboardVisualConfig[] => {
     const { cat1, cat2, val1 } = getSmartDefaults();
-    return [
+    return ensureVisualCanvasCoords([
       {
         id: 'vis_1',
         title: `${val1 || 'Value'} by ${cat1 || 'Category'} (Column Chart)`,
@@ -447,7 +633,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         customLegendLabels: {},
         conditionalFormatting: { ...DEFAULT_CF },
       },
-    ];
+    ]);
   };
 
   // Load or initialize dashboard when dataset or columns change
@@ -479,7 +665,10 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             ? saved.dashboardTitle
             : `${selectedDataset?.name || 'Executive'} Dashboard`
         );
-        setVisuals(saved.visuals);
+        const normalizedVisuals = ensureVisualCanvasCoords(saved.visuals);
+        setVisuals(normalizedVisuals);
+        setUndoStack([]);
+        setRedoStack([]);
         setKpiCards(
           Array.isArray(saved.kpiCards) && saved.kpiCards.length > 0
             ? saved.kpiCards
@@ -490,7 +679,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
             ? saved.slicerColumns.filter((c: string) => colNames.includes(c))
             : [cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i)
         );
-        setSelectedVisualId(saved.visuals[0]?.id || null);
+        const firstId = normalizedVisuals[0]?.id || null;
+        setSelectedVisualId(firstId);
+        setSelectedVisualIds(firstId ? [firstId] : []);
         setSelectedKpiId(null);
         return;
       }
@@ -502,10 +693,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     const defaultKpis = buildDefaultKpiCards();
     setDashboardTitle(`${selectedDataset?.name || 'Executive'} Dashboard`);
     setVisuals(defaultVisuals);
+    setUndoStack([]);
+    setRedoStack([]);
     setKpiCards(defaultKpis);
     setSlicerColumns([cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i));
     setMultiSlicerSelections({});
-    setSelectedVisualId(defaultVisuals[0]?.id || null);
+    const firstId = defaultVisuals[0]?.id || null;
+    setSelectedVisualId(firstId);
+    setSelectedVisualIds(firstId ? [firstId] : []);
     setSelectedKpiId(null);
   }, [isOpen, selectedDataset?.id, columns]);
 
@@ -523,7 +718,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     }
   }, [visuals, kpiCards, slicerColumns, paletteId, dashboardTitle, selectedDataset?.id, isOpen]);
 
-  // Global mousemove & mouseup handler for diagonal resizing and long-press hover placement
+  // Global mousemove, mouseup & keydown handler for 8-way resize, freeform drag with snapping/guides, keyboard nudge & undo/redo
   useEffect(() => {
     if (!isOpen) return;
 
@@ -532,14 +727,126 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       if (resizeSess) {
         const deltaX = e.clientX - resizeSess.startX;
         const deltaY = e.clientY - resizeSess.startY;
-        const nextW = Math.round(Math.max(280, Math.min(1400, resizeSess.startW + deltaX)));
-        const nextH = Math.round(Math.max(240, Math.min(900, resizeSess.startH + deltaY)));
+        if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
+          resizeSess.hasMoved = true;
+        }
+        let nextLeft = resizeSess.startLeft;
+        let nextTop = resizeSess.startTop;
+        let nextW = resizeSess.startW;
+        let nextH = resizeSess.startH;
+
+        const dir = resizeSess.dir;
+        if (dir.includes('e')) {
+          nextW = Math.round(Math.max(260, Math.min(1400, resizeSess.startW + deltaX)));
+        }
+        if (dir.includes('s')) {
+          nextH = Math.round(Math.max(220, Math.min(900, resizeSess.startH + deltaY)));
+        }
+        if (dir.includes('w')) {
+          const rawW = resizeSess.startW - deltaX;
+          const clampedW = Math.round(Math.max(260, Math.min(1400, rawW)));
+          nextLeft = Math.max(0, resizeSess.startLeft + (resizeSess.startW - clampedW));
+          nextW = resizeSess.startW + (resizeSess.startLeft - nextLeft);
+        }
+        if (dir.includes('n')) {
+          const rawH = resizeSess.startH - deltaY;
+          const clampedH = Math.round(Math.max(220, Math.min(900, rawH)));
+          nextTop = Math.max(0, resizeSess.startTop + (resizeSess.startH - clampedH));
+          nextH = resizeSess.startH + (resizeSess.startTop - nextTop);
+        }
+
+        // Emit alignment guides when resized edges align with other visuals
+        const guides: AlignmentGuide[] = [];
+        for (const other of visualsRef.current) {
+          if (other.id === resizeSess.visId) continue;
+          const ox = other.x ?? 16;
+          const oy = other.y ?? 16;
+          const ow = other.customWidth || (other.span === 2 ? 976 : DEFAULT_TILE_W);
+          const oh = other.customHeight || DEFAULT_TILE_H;
+          if (Math.abs(nextLeft + nextW - (ox + ow)) <= 4) {
+            guides.push({
+              id: `rv-${other.id}`,
+              orientation: 'vertical',
+              position: ox + ow,
+              start: Math.min(nextTop, oy) - 8,
+              end: Math.max(nextTop + nextH, oy + oh) + 8,
+              label: `${ox + ow}px`,
+            });
+          }
+          if (Math.abs(nextTop + nextH - (oy + oh)) <= 4) {
+            guides.push({
+              id: `rh-${other.id}`,
+              orientation: 'horizontal',
+              position: oy + oh,
+              start: Math.min(nextLeft, ox) - 8,
+              end: Math.max(nextLeft + nextW, ox + ow) + 8,
+              label: `${oy + oh}px`,
+            });
+          }
+        }
+        setAlignmentGuides(guides);
+
         setVisuals((prev) =>
           prev.map((v) =>
             v.id === resizeSess.visId
-              ? { ...v, customWidth: nextW, customHeight: nextH }
+              ? {
+                  ...v,
+                  x: nextLeft,
+                  y: nextTop,
+                  customWidth: nextW,
+                  customHeight: nextH,
+                }
               : v
           )
+        );
+        return;
+      }
+
+      const dragSess = dragSessionRef.current;
+      if (dragSess) {
+        const deltaX = e.clientX - dragSess.startClientX;
+        const deltaY = e.clientY - dragSess.startClientY;
+        if (!dragSess.hasMoved && Math.hypot(deltaX, deltaY) < 3) {
+          return;
+        }
+        dragSess.hasMoved = true;
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        setHoverDragVisId(dragSess.primaryVisId);
+
+        const primaryInit = dragSess.initialRects[dragSess.primaryVisId];
+        if (!primaryInit) return;
+
+        const rawPrimaryX = Math.max(0, primaryInit.x + deltaX);
+        const rawPrimaryY = Math.max(0, primaryInit.y + deltaY);
+        const movingIds = Object.keys(dragSess.initialRects);
+
+        const { x: snappedX, y: snappedY, guides } = computeSnapAndGuides(
+          rawPrimaryX,
+          rawPrimaryY,
+          primaryInit.w,
+          primaryInit.h,
+          movingIds,
+          visualsRef.current,
+          snapToGridRef.current && !e.altKey
+        );
+
+        const effDX = snappedX - primaryInit.x;
+        const effDY = snappedY - primaryInit.y;
+        setAlignmentGuides(guides);
+
+        setVisuals((prev) =>
+          prev.map((v) => {
+            const initRect = dragSess.initialRects[v.id];
+            if (!initRect) return v;
+            return {
+              ...v,
+              x: Math.max(0, Math.round(initRect.x + effDX)),
+              y: Math.max(0, Math.round(initRect.y + effDY)),
+            };
+          })
         );
       }
     };
@@ -550,18 +857,87 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         longPressTimerRef.current = null;
       }
       if (resizeSessionRef.current) {
+        if (resizeSessionRef.current.hasMoved) {
+          pushUndoSnapshot(resizeSessionRef.current.snapshot);
+        }
         resizeSessionRef.current = null;
         setResizingVisId(null);
       }
+      if (dragSessionRef.current) {
+        if (dragSessionRef.current.hasMoved) {
+          pushUndoSnapshot(dragSessionRef.current.snapshot);
+        }
+        dragSessionRef.current = null;
+      }
       setHoverDragVisId(null);
       setHoverTargetVisId(null);
+      setAlignmentGuides([]);
+    };
+
+    const handleWindowKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        const activeIds =
+          selectedVisualIdsRef.current.length > 0
+            ? selectedVisualIdsRef.current
+            : selectedVisualIdRef.current
+            ? [selectedVisualIdRef.current]
+            : [];
+        if (activeIds.length === 0) return;
+
+        e.preventDefault();
+        const step = e.shiftKey ? 24 : e.altKey ? 1 : CANVAS_GRID_SIZE;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+
+        pushUndoSnapshot(visualsRef.current);
+        const activeSet = new Set(activeIds);
+        setVisuals((prev) =>
+          prev.map((v) =>
+            activeSet.has(v.id)
+              ? {
+                  ...v,
+                  x: Math.max(0, (v.x ?? 16) + dx),
+                  y: Math.max(0, (v.y ?? 16) + dy),
+                }
+              : v
+          )
+        );
+      }
     };
 
     window.addEventListener('mousemove', handleWindowMouseMove);
     window.addEventListener('mouseup', handleWindowMouseUp);
+    window.addEventListener('keydown', handleWindowKeyDown);
     return () => {
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
+      window.removeEventListener('keydown', handleWindowKeyDown);
     };
   }, [isOpen]);
 
@@ -882,6 +1258,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     const { cat1, cat2, val1 } = getSmartDefaults();
     const newId = `vis_${Date.now()}`;
     const typeMeta = VISUAL_TYPES.find((t) => t.type === type);
+    const idx = visuals.length;
+    const col = idx % 2;
+    const row = Math.floor(idx / 2);
     const newVis: DashboardVisualConfig = {
       id: newId,
       title:
@@ -900,6 +1279,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       sortBy: 'value_desc',
       showDataLabels: true,
       span: type === 'matrix' || type === 'table' ? 2 : 1,
+      x: 16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP),
+      y: 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP),
+      zIndex: visuals.length + 1,
       legendPosition: 'top',
       customColors: {},
       customLegendLabels: {},
@@ -908,8 +1290,10 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
         mode: type === 'matrix' || type === 'table' ? 'color_scale' : 'none',
       },
     };
+    pushUndoSnapshot(visuals);
     setVisuals((prev) => [...prev, newVis]);
     setSelectedVisualId(newId);
+    setSelectedVisualIds([newId]);
     setSelectedKpiId(null);
   };
 
@@ -920,17 +1304,27 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       id: copyId,
       title: `${vis.title} (Copy)`,
       customTitle: true,
+      x: (vis.x ?? 16) + 24,
+      y: (vis.y ?? 16) + 24,
+      zIndex: visuals.length + 1,
     };
+    pushUndoSnapshot(visuals);
     setVisuals((prev) => [...prev, copy]);
     setSelectedVisualId(copyId);
+    setSelectedVisualIds([copyId]);
     setSelectedKpiId(null);
   };
 
   const handleRemoveVisual = (id: string) => {
+    pushUndoSnapshot(visuals);
     setVisuals((prev) => {
       const next = prev.filter((v) => v.id !== id);
       if (selectedVisualId === id) {
-        setSelectedVisualId(next[0]?.id || null);
+        const fallbackId = next[0]?.id || null;
+        setSelectedVisualId(fallbackId);
+        setSelectedVisualIds(fallbackId ? [fallbackId] : []);
+      } else {
+        setSelectedVisualIds((prevSel) => prevSel.filter((sid) => sid !== id));
       }
       return next;
     });
@@ -942,11 +1336,15 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     const { cat1, cat2 } = getSmartDefaults();
     setDashboardTitle(`${selectedDataset?.name || 'Executive'} Dashboard`);
     setVisuals(defaults);
+    setUndoStack([]);
+    setRedoStack([]);
     setKpiCards(defaultKpis);
     setSlicerColumns([cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i));
     setMultiSlicerSelections({});
     setCrossFilter(null);
-    setSelectedVisualId(defaults[0]?.id || null);
+    const firstId = defaults[0]?.id || null;
+    setSelectedVisualId(firstId);
+    setSelectedVisualIds(firstId ? [firstId] : []);
     setSelectedKpiId(null);
   };
 
@@ -959,15 +1357,112 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
 
   const reorderVisuals = (sourceId: string, targetId: string) => {
     if (!sourceId || !targetId || sourceId === targetId) return;
+    pushUndoSnapshot(visualsRef.current);
     setVisuals((prev) => {
       const fromIdx = prev.findIndex((v) => v.id === sourceId);
       const toIdx = prev.findIndex((v) => v.id === targetId);
       if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
       const copy = [...prev];
+      const srcX = copy[fromIdx].x;
+      const srcY = copy[fromIdx].y;
+      const dstX = copy[toIdx].x;
+      const dstY = copy[toIdx].y;
+      copy[fromIdx] = { ...copy[fromIdx], x: dstX, y: dstY };
+      copy[toIdx] = { ...copy[toIdx], x: srcX, y: srcY };
       const [moved] = copy.splice(fromIdx, 1);
       copy.splice(toIdx, 0, moved);
       return copy;
     });
+  };
+
+  const handleSelectVisualTile = (
+    e: React.MouseEvent<HTMLElement>,
+    visId: string
+  ) => {
+    setSelectedKpiId(null);
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      setSelectedVisualIds((prev) => {
+        const exists = prev.includes(visId);
+        const next = exists ? prev.filter((id) => id !== visId) : [...prev, visId];
+        return next.length > 0 ? next : [visId];
+      });
+      setSelectedVisualId(visId);
+    } else {
+      setSelectedVisualId(visId);
+      setSelectedVisualIds((prev) => (prev.length > 1 && prev.includes(visId) ? prev : [visId]));
+    }
+  };
+
+  const handleToggleMultiSelectVisual = (
+    e: React.MouseEvent<HTMLElement>,
+    visId: string
+  ) => {
+    e.stopPropagation();
+    setSelectedKpiId(null);
+    setSelectedVisualIds((prev) => {
+      const exists = prev.includes(visId);
+      const next = exists ? prev.filter((id) => id !== visId) : [...prev, visId];
+      return next.length > 0 ? next : [visId];
+    });
+    setSelectedVisualId(visId);
+  };
+
+  const handleSelectAllVisuals = () => {
+    const allIds = visuals.map((v) => v.id);
+    setSelectedVisualIds(allIds);
+    if (allIds.length > 0 && !selectedVisualId) {
+      setSelectedVisualId(allIds[0]);
+    }
+    setSelectedKpiId(null);
+  };
+
+  const handleAlignSelectedVisuals = (
+    mode: 'left' | 'top' | 'match_size' | 'auto_grid'
+  ) => {
+    pushUndoSnapshot(visuals);
+    if (mode === 'auto_grid') {
+      setVisuals((prev) =>
+        prev.map((v, idx) => {
+          const col = idx % 2;
+          const row = Math.floor(idx / 2);
+          return {
+            ...v,
+            x: 16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP),
+            y: 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP),
+            customWidth: DEFAULT_TILE_W,
+            customHeight: DEFAULT_TILE_H,
+          };
+        })
+      );
+      return;
+    }
+
+    const activeIds =
+      selectedVisualIds.length > 1
+        ? selectedVisualIds
+        : visuals.map((v) => v.id);
+    const activeSet = new Set(activeIds);
+    const targetVisuals = visuals.filter((v) => activeSet.has(v.id));
+    if (targetVisuals.length === 0) return;
+
+    const minX = Math.min(...targetVisuals.map((v) => v.x ?? 16));
+    const minY = Math.min(...targetVisuals.map((v) => v.y ?? 16));
+    const refW =
+      targetVisuals[0]?.customWidth ||
+      (targetVisuals[0]?.span === 2 ? 976 : DEFAULT_TILE_W);
+    const refH = targetVisuals[0]?.customHeight || DEFAULT_TILE_H;
+
+    setVisuals((prev) =>
+      prev.map((v) => {
+        if (!activeSet.has(v.id)) return v;
+        if (mode === 'left') return { ...v, x: minX };
+        if (mode === 'top') return { ...v, y: minY };
+        if (mode === 'match_size') {
+          return { ...v, customWidth: refW, customHeight: refH };
+        }
+        return v;
+      })
+    );
   };
 
   const handleVisualMouseDown = (
@@ -989,30 +1484,66 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+
+    // Determine which visuals move together (multi-select group or single visual)
+    let movingIds = selectedVisualIdsRef.current;
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      if (!movingIds.includes(visId)) {
+        movingIds = [...movingIds, visId];
+        setSelectedVisualIds(movingIds);
+      }
+    } else if (!movingIds.includes(visId)) {
+      movingIds = [visId];
+      setSelectedVisualIds([visId]);
+    }
+    setSelectedVisualId(visId);
+    setSelectedKpiId(null);
+
+    const initialRects: Record<string, { x: number; y: number; w: number; h: number }> = {};
+    visualsRef.current.forEach((v, idx) => {
+      if (movingIds.includes(v.id)) {
+        const col = idx % 2;
+        const row = Math.floor(idx / 2);
+        initialRects[v.id] = {
+          x: v.x ?? 16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP),
+          y: v.y ?? 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP),
+          w: v.customWidth || (v.span === 2 ? 976 : DEFAULT_TILE_W),
+          h: v.customHeight || DEFAULT_TILE_H,
+        };
+      }
+    });
+
+    dragSessionRef.current = {
+      primaryVisId: visId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      hasMoved: false,
+      initialRects,
+      snapshot: JSON.parse(JSON.stringify(visualsRef.current)) as DashboardVisualConfig[],
+    };
+
     if (immediate) {
       e.stopPropagation();
-      setSelectedVisualId(visId);
-      setSelectedKpiId(null);
       setHoverDragVisId(visId);
       return;
     }
     longPressTimerRef.current = setTimeout(() => {
-      setSelectedVisualId(visId);
-      setSelectedKpiId(null);
       setHoverDragVisId(visId);
       longPressTimerRef.current = null;
-    }, 200);
+    }, 180);
   };
 
   const handleVisualMouseEnter = (targetVisId: string) => {
     if (!hoverDragVisId || hoverDragVisId === targetVisId) return;
+    if (dragSessionRef.current?.hasMoved) return;
     setHoverTargetVisId(targetVisId);
     reorderVisuals(hoverDragVisId, targetVisId);
   };
 
   const handleStartResize = (
     e: React.MouseEvent<HTMLElement>,
-    vis: DashboardVisualConfig
+    vis: DashboardVisualConfig,
+    dir: ResizeDirection = 'se'
   ) => {
     e.stopPropagation();
     e.preventDefault();
@@ -1020,23 +1551,34 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+    dragSessionRef.current = null;
     setHoverDragVisId(null);
     setSelectedVisualId(vis.id);
+    if (!selectedVisualIdsRef.current.includes(vis.id)) {
+      setSelectedVisualIds([vis.id]);
+    }
     setSelectedKpiId(null);
 
     const tileEl = e.currentTarget.closest('[data-visual-tile="true"]') as HTMLElement | null;
     const rect = tileEl ? tileEl.getBoundingClientRect() : null;
     const startW =
-      rect && rect.width > 50 ? Math.round(rect.width) : vis.customWidth || 480;
+      vis.customWidth ||
+      (rect && rect.width > 50 ? Math.round(rect.width) : DEFAULT_TILE_W);
     const startH =
-      rect && rect.height > 50 ? Math.round(rect.height) : vis.customHeight || 320;
+      vis.customHeight ||
+      (rect && rect.height > 50 ? Math.round(rect.height) : DEFAULT_TILE_H);
 
     resizeSessionRef.current = {
       visId: vis.id,
+      dir,
       startX: e.clientX,
       startY: e.clientY,
+      startLeft: vis.x ?? 16,
+      startTop: vis.y ?? 16,
       startW,
       startH,
+      hasMoved: false,
+      snapshot: JSON.parse(JSON.stringify(visualsRef.current)) as DashboardVisualConfig[],
     };
     setResizingVisId(vis.id);
   };
@@ -1046,6 +1588,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
     visId: string
   ) => {
     e.stopPropagation();
+    pushUndoSnapshot(visuals);
     setVisuals((prev) =>
       prev.map((v) =>
         v.id === visId
@@ -2670,22 +3213,194 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
               </div>
             </div>
 
-            {/* Visual Tiles Grid (Supports Diagonal Mouse Resize & Long-Press Hover Reorder/Align) */}
+            {/* Canvas Interaction Toolbar: Undo/Redo, Snap-to-Grid, Multi-Select & Alignment */}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white rounded-xl border border-[#D4D4D4] shadow-sm">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  data-testid="canvas-undo-btn"
+                  disabled={undoStack.length === 0}
+                  onClick={handleUndo}
+                  title="Undo layout change (Ctrl+Z)"
+                  className={`px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
+                    undoStack.length > 0
+                      ? 'bg-white hover:bg-[#F3F3F3] text-[#212121] border-[#D4D4D4]'
+                      : 'bg-[#F8F9FA] text-[#A19F9D] border-[#E1E1E1] cursor-not-allowed'
+                  }`}
+                >
+                  ↶ Undo ({undoStack.length})
+                </button>
+                <button
+                  type="button"
+                  data-testid="canvas-redo-btn"
+                  disabled={redoStack.length === 0}
+                  onClick={handleRedo}
+                  title="Redo layout change (Ctrl+Y)"
+                  className={`px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
+                    redoStack.length > 0
+                      ? 'bg-white hover:bg-[#F3F3F3] text-[#212121] border-[#D4D4D4]'
+                      : 'bg-[#F8F9FA] text-[#A19F9D] border-[#E1E1E1] cursor-not-allowed'
+                  }`}
+                >
+                  ↷ Redo ({redoStack.length})
+                </button>
+
+                <span className="h-4 w-px bg-[#D4D4D4] mx-0.5" />
+
+                <button
+                  type="button"
+                  data-testid="toggle-snap-grid"
+                  onClick={() => setSnapToGrid((prev) => !prev)}
+                  title="Toggle 8px Grid Snapping & Smart Alignment Guides"
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
+                    snapToGrid
+                      ? 'bg-[#E6F2EB] text-[#185C37] border-[#217346]'
+                      : 'bg-white text-[#605E5C] border-[#D4D4D4] hover:bg-[#F3F3F3]'
+                  }`}
+                >
+                  ⊞ Snap Grid: {snapToGrid ? 'ON' : 'OFF'}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="select-all-visuals-btn"
+                  onClick={handleSelectAllVisuals}
+                  title="Select all visuals for group move, alignment, or keyboard nudging"
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
+                >
+                  ☑ Select All ({selectedVisualIds.length}/{visuals.length})
+                </button>
+
+                <span className="h-4 w-px bg-[#D4D4D4] mx-0.5" />
+
+                <button
+                  type="button"
+                  data-testid="align-left-btn"
+                  onClick={() => handleAlignSelectedVisuals('left')}
+                  title="Align selected visuals to left edge"
+                  className="px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
+                >
+                  Align Left
+                </button>
+                <button
+                  type="button"
+                  data-testid="align-top-btn"
+                  onClick={() => handleAlignSelectedVisuals('top')}
+                  title="Align selected visuals to top edge"
+                  className="px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
+                >
+                  Align Top
+                </button>
+                <button
+                  type="button"
+                  data-testid="match-size-btn"
+                  onClick={() => handleAlignSelectedVisuals('match_size')}
+                  title="Match width & height of selected visuals"
+                  className="px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-[#F3F3F3] text-[#212121] border border-[#D4D4D4]"
+                >
+                  Match Size
+                </button>
+                <button
+                  type="button"
+                  data-testid="auto-arrange-btn"
+                  onClick={() => handleAlignSelectedVisuals('auto_grid')}
+                  title="Auto-arrange all visuals into a clean 2-column grid"
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#217346] border border-[#217346]/30"
+                >
+                  Tidy Grid
+                </button>
+              </div>
+
+              <div className="text-[10px] text-[#605E5C] font-medium">
+                Hold &amp; Drag to Move • 8-Way Resize • Ctrl+Click Multi-Select • Arrow Keys Nudge
+              </div>
+            </div>
+
+            {/* Freeform 2D Visual Canvas (Supports Press & Hold Drag, Snapping, Alignment Guides, 8-Way Resize & Multi-Select) */}
             <div
               data-testid="visuals-canvas-grid"
-              className="flex flex-wrap items-stretch gap-4"
+              style={{
+                minHeight: `${Math.max(
+                  740,
+                  ...visuals.map(
+                    (v, idx) =>
+                      (v.y ?? 16 + Math.floor(idx / 2) * (DEFAULT_TILE_H + DEFAULT_TILE_GAP)) +
+                      (v.customHeight || DEFAULT_TILE_H) +
+                      48
+                  )
+                )}px`,
+                backgroundImage: snapToGrid
+                  ? 'radial-gradient(#CBD5E1 1.2px, transparent 1.2px)'
+                  : undefined,
+                backgroundSize: '16px 16px',
+              }}
+              className="relative w-full rounded-xl border border-[#D4D4D4] bg-[#F8FAFC] overflow-x-auto overflow-y-visible"
             >
-              {visuals.map((vis) => {
+              {/* Smart Alignment Guide Lines Overlay */}
+              {alignmentGuides.map((g) =>
+                g.orientation === 'vertical' ? (
+                  <div
+                    key={g.id}
+                    data-testid="alignment-guide-vertical"
+                    style={{
+                      position: 'absolute',
+                      left: `${g.position}px`,
+                      top: `${g.start}px`,
+                      height: `${Math.max(24, g.end - g.start)}px`,
+                      zIndex: 60,
+                    }}
+                    className="pointer-events-none border-l-2 border-dashed border-[#E11D48]"
+                  >
+                    {g.label && (
+                      <span className="px-1 py-0.5 rounded bg-[#E11D48] text-white text-[9px] font-mono font-bold shadow ml-1">
+                        {g.label}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    key={g.id}
+                    data-testid="alignment-guide-horizontal"
+                    style={{
+                      position: 'absolute',
+                      top: `${g.position}px`,
+                      left: `${g.start}px`,
+                      width: `${Math.max(24, g.end - g.start)}px`,
+                      zIndex: 60,
+                    }}
+                    className="pointer-events-none border-t-2 border-dashed border-[#E11D48]"
+                  >
+                    {g.label && (
+                      <span className="px-1 py-0.5 rounded bg-[#E11D48] text-white text-[9px] font-mono font-bold shadow mt-1 inline-block">
+                        {g.label}
+                      </span>
+                    )}
+                  </div>
+                )
+              )}
+
+              {visuals.map((vis, idx) => {
                 const isSelected = !selectedKpiId && vis.id === activeVisual?.id;
+                const isMultiSelected = !selectedKpiId && selectedVisualIds.includes(vis.id);
                 const typeMeta = VISUAL_TYPES.find((t) => t.type === vis.type);
                 const isEditingTitle = editingTitleVisId === vis.id;
-                const isHoverDragging = hoverDragVisId === vis.id;
+                const isHoverDragging =
+                  hoverDragVisId === vis.id ||
+                  (hoverDragVisId !== null &&
+                    selectedVisualIds.includes(hoverDragVisId) &&
+                    selectedVisualIds.includes(vis.id));
                 const isHoverTarget =
                   hoverTargetVisId === vis.id &&
                   hoverDragVisId !== null &&
                   hoverDragVisId !== vis.id;
                 const isResizing = resizingVisId === vis.id;
-                const hasCustomSize = Boolean(vis.customWidth || vis.customHeight);
+
+                const col = idx % 2;
+                const row = Math.floor(idx / 2);
+                const tileX = vis.x ?? 16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP);
+                const tileY = vis.y ?? 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP);
+                const tileW = vis.customWidth || (vis.span === 2 ? 976 : DEFAULT_TILE_W);
+                const tileH = vis.customHeight || DEFAULT_TILE_H;
 
                 return (
                   <div
@@ -2694,42 +3409,50 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                     data-visual-tile="true"
                     data-visual-id={vis.id}
                     data-hover-dragging={isHoverDragging ? 'true' : 'false'}
+                    data-selected={isMultiSelected ? 'true' : 'false'}
                     onMouseDown={(e) => handleVisualMouseDown(e, vis.id, false)}
                     onMouseEnter={() => handleVisualMouseEnter(vis.id)}
-                    onClick={() => {
-                      setSelectedVisualId(vis.id);
-                      setSelectedKpiId(null);
-                    }}
+                    onClick={(e) => handleSelectVisualTile(e, vis.id)}
                     style={{
-                      width: vis.customWidth ? `${vis.customWidth}px` : undefined,
-                      maxWidth: '100%',
-                      height: vis.customHeight ? `${vis.customHeight}px` : undefined,
-                      minHeight: vis.customHeight ? `${vis.customHeight}px` : '260px',
+                      position: 'absolute',
+                      left: `${tileX}px`,
+                      top: `${tileY}px`,
+                      width: `${tileW}px`,
+                      height: `${tileH}px`,
+                      zIndex: isHoverDragging || isResizing ? 50 : isSelected || isMultiSelected ? 20 : vis.zIndex || idx + 1,
                     }}
-                    className={`relative bg-white rounded-xl border transition-shadow p-4 flex flex-col justify-between select-none ${
-                      !vis.customWidth
-                        ? vis.span === 2
-                          ? 'w-full'
-                          : 'w-full lg:w-[calc(50%-0.5rem)]'
-                        : ''
-                    } ${
+                    className={`bg-white rounded-xl border transition-shadow p-4 flex flex-col justify-between select-none ${
                       isHoverDragging
-                        ? 'border-[#217346] ring-4 ring-[#217346]/30 shadow-2xl scale-[1.01] z-20 cursor-grabbing bg-[#F8FDFB]'
+                        ? 'border-[#217346] ring-4 ring-[#217346]/30 shadow-2xl cursor-grabbing bg-[#F8FDFB]'
                         : isHoverTarget
                         ? 'border-[#217346] border-dashed ring-2 ring-[#217346]/40 shadow-lg'
-                        : isSelected
-                        ? 'border-[#217346] ring-2 ring-[#217346]/25 shadow-md cursor-pointer'
-                        : 'border-[#D4D4D4] hover:border-[#217346]/60 shadow-sm cursor-pointer'
+                        : isSelected || isMultiSelected
+                        ? 'border-[#217346] ring-2 ring-[#217346]/25 shadow-md cursor-grab'
+                        : 'border-[#D4D4D4] hover:border-[#217346]/60 shadow-sm cursor-grab'
                     }`}
                   >
-                    {/* Tile Header with Drag Grip & Inline Edit Title Option */}
+                    {/* Tile Header with Multi-Select Toggle, Drag Grip & Inline Edit Title Option */}
                     <div className="flex items-center justify-between gap-2 pb-3 mb-2 border-b border-[#E1E1E1]">
                       <div className="min-w-0 flex-1 flex items-center gap-1.5">
                         <button
                           type="button"
+                          data-testid={`multi-select-btn-${vis.id}`}
+                          onClick={(e) => handleToggleMultiSelectVisual(e, vis.id)}
+                          title="Toggle Multi-Select on this visual (or Ctrl+Click tile)"
+                          className={`w-4 h-4 rounded border flex items-center justify-center text-[9px] font-bold shrink-0 transition-colors ${
+                            isMultiSelected && selectedVisualIds.length > 1
+                              ? 'bg-[#217346] border-[#217346] text-white'
+                              : 'bg-white border-[#D4D4D4] text-transparent hover:border-[#217346]'
+                          }`}
+                        >
+                          ✓
+                        </button>
+
+                        <button
+                          type="button"
                           data-testid={`drag-grip-${vis.id}`}
                           onMouseDown={(e) => handleVisualMouseDown(e, vis.id, true)}
-                          title="Long-press visual or drag grip to hover, place & align visuals in order"
+                          title="Press & hold visual or drag grip to move anywhere on canvas"
                           className="p-0.5 text-[#605E5C] hover:text-[#217346] cursor-grab active:cursor-grabbing rounded hover:bg-[#F3F3F3] shrink-0"
                         >
                           <GripVertical className="w-3.5 h-3.5" />
@@ -2819,31 +3542,30 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                         className="flex items-center gap-1 shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {(hasCustomSize || isResizing) && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleResetVisualSize(e, vis.id)}
-                            title="Reset custom diagonal size to default grid width & height"
-                            className="px-1.5 py-0.5 rounded bg-[#F3F3F3] hover:bg-[#E6E6E6] text-[9px] font-mono font-semibold text-[#605E5C]"
-                          >
-                            {vis.customWidth || 480}×{vis.customHeight || 320}
-                          </button>
-                        )}
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={(e) => handleResetVisualSize(e, vis.id)}
+                          title="Position (X,Y) & Size (W×H) — Click to reset size"
+                          className="px-1.5 py-0.5 rounded bg-[#F3F3F3] hover:bg-[#E6E6E6] text-[9px] font-mono font-semibold text-[#605E5C]"
+                        >
+                          {tileX},{tileY} • {tileW}×{tileH}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pushUndoSnapshot(visuals);
                             setVisuals((prev) =>
                               prev.map((v) =>
                                 v.id === vis.id
                                   ? {
                                       ...v,
                                       span: v.span === 2 ? 1 : 2,
-                                      customWidth: undefined,
+                                      customWidth: v.span === 2 ? DEFAULT_TILE_W : 976,
                                     }
                                   : v
                               )
-                            )
-                          }
+                            );
+                          }}
                           title={vis.span === 2 ? 'Half Width' : 'Expand Full Width'}
                           className="p-1 text-[#605E5C] hover:text-[#212121] rounded hover:bg-[#F3F3F3]"
                         >
@@ -2879,11 +3601,54 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({ isOpen, onClose 
                       {renderVisualContent(vis)}
                     </div>
 
-                    {/* Bottom-Right Diagonal Mouse Resize Handle */}
+                    {/* 8-Way Resize Handles (N, S, E, W, NW, NE, SW, SE) */}
+                    <div
+                      data-testid={`resize-handle-${vis.id}-n`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis, 'n')}
+                      className="absolute -top-1 left-6 right-6 h-2 cursor-ns-resize z-10"
+                    />
+                    <div
+                      data-testid={`resize-handle-${vis.id}-s`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis, 's')}
+                      className="absolute -bottom-1 left-6 right-6 h-2 cursor-ns-resize z-10"
+                    />
+                    <div
+                      data-testid={`resize-handle-${vis.id}-w`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis, 'w')}
+                      className="absolute top-6 bottom-6 -left-1 w-2 cursor-ew-resize z-10"
+                    />
+                    <div
+                      data-testid={`resize-handle-${vis.id}-e`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis, 'e')}
+                      className="absolute top-6 bottom-6 -right-1 w-2 cursor-ew-resize z-10"
+                    />
+                    <div
+                      data-testid={`resize-handle-${vis.id}-nw`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis, 'nw')}
+                      className="absolute -top-1 -left-1 w-3.5 h-3.5 cursor-nwse-resize z-10"
+                    />
+                    <div
+                      data-testid={`resize-handle-${vis.id}-ne`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis, 'ne')}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 cursor-nesw-resize z-10"
+                    />
+                    <div
+                      data-testid={`resize-handle-${vis.id}-sw`}
+                      data-resize-handle="true"
+                      onMouseDown={(e) => handleStartResize(e, vis, 'sw')}
+                      className="absolute -bottom-1 -left-1 w-3.5 h-3.5 cursor-nesw-resize z-10"
+                    />
+                    {/* Bottom-Right Diagonal Mouse Resize Handle (SE) */}
                     <div
                       data-testid={`resize-handle-${vis.id}`}
                       data-resize-handle="true"
-                      onMouseDown={(e) => handleStartResize(e, vis)}
+                      onMouseDown={(e) => handleStartResize(e, vis, 'se')}
                       onDoubleClick={(e) => handleResetVisualSize(e, vis.id)}
                       title="Drag diagonally to resize visual width & height (Double-click to reset size)"
                       className={`absolute bottom-1 right-1 w-5 h-5 flex items-end justify-end p-0.5 cursor-nwse-resize rounded transition-colors z-10 ${

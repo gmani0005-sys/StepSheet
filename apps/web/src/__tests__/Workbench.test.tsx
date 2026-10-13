@@ -778,6 +778,40 @@ describe('StepSheet Workbench', () => {
       .querySelectorAll('[data-visual-tile="true"]');
     expect(orderedTiles[0].getAttribute('data-visual-id')).toBe('vis_2');
     expect(orderedTiles[1].getAttribute('data-visual-id')).toBe('vis_1');
+
+    // Verify Press-and-Hold Left Mouse Freeform Drag on Canvas with Snapping & Alignment Guides
+    fireEvent.click(screen.getByTestId('auto-arrange-btn'));
+    const tile2 = screen.getByTestId('visual-tile-vis_2') as HTMLElement;
+    expect(tile2.style.left).toBe('16px');
+    expect(tile2.style.top).toBe('16px');
+
+    fireEvent.mouseDown(tile2, { button: 0, clientX: 50, clientY: 50 });
+    // Drag right by ~494px so left edge (16 + 494 = 510) is within 6px of vis_1's left edge (512px) -> snaps to 512px & shows vertical alignment guide!
+    fireEvent.mouseMove(window, { clientX: 544, clientY: 130 });
+    expect(screen.getAllByTestId('alignment-guide-vertical').length).toBeGreaterThan(0);
+    expect(tile2.style.left).toBe('512px');
+    expect(tile2.style.top).toBe('96px');
+    fireEvent.mouseUp(window);
+
+    // Verify Keyboard Nudging (ArrowRight & ArrowDown +8px grid step)
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('520px');
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.top).toBe('104px');
+
+    // Verify Multi-Select & Group Alignment + Undo/Redo
+    fireEvent.click(screen.getByTestId('select-all-visuals-btn'));
+    expect(screen.getByTestId('visual-tile-vis_1').getAttribute('data-selected')).toBe('true');
+    expect(screen.getByTestId('visual-tile-vis_2').getAttribute('data-selected')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('align-left-btn'));
+    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('16px');
+
+    // Undo restores previous position (520px), Redo re-applies Align Left (16px)
+    fireEvent.click(screen.getByTestId('canvas-undo-btn'));
+    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('520px');
+    fireEvent.click(screen.getByTestId('canvas-redo-btn'));
+    expect((screen.getByTestId('visual-tile-vis_2') as HTMLElement).style.left).toBe('16px');
   });
 });
 

@@ -3,7 +3,7 @@ import os
 import uuid
 from fastapi.testclient import TestClient
 from app.main import app
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, Base, engine
 from app.models.dataset import Dataset
 from app.models.user import User
 from app.services.duckdb_engine import DuckDBEngine
@@ -14,6 +14,7 @@ client = TestClient(app)
 
 @pytest.fixture(scope="module")
 def setup_test_dataset():
+    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     engine_duck = DuckDBEngine()
 
@@ -175,6 +176,7 @@ def test_patch_dashboard_operations(setup_test_dataset):
 
 def test_client_side_dataset_generate_dashboard():
     # Tests dataset that does not pre-exist in backend database
+    Base.metadata.create_all(bind=engine)
     req = {
         "dataset_id": "client-local-orders-123",
         "prompt": "Create an executive revenue dashboard",
@@ -200,6 +202,7 @@ def test_client_side_dataset_generate_dashboard():
 
 def test_client_side_dataset_chat_query():
     # Tests chat query against client-side sample rows in DuckDB
+    Base.metadata.create_all(bind=engine)
     req = {
         "dataset_id": "client-local-orders-123",
         "prompt": "What are the sales by region?",

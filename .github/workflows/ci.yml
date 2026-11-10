@@ -26,6 +26,7 @@ jobs:
 
       - name: Run backend pytest
         run: |
+          export PYTHONPATH=apps/api:$PYTHONPATH
           pytest apps/api/tests -v
 
   test-frontend:

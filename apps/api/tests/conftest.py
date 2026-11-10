@@ -11,7 +11,7 @@ api_path = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(api_path))
 
 from app.main import app
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, engine
 from app.core.config import settings
 
 # Use dedicated test SQLite database
@@ -25,8 +25,10 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
     Base.metadata.create_all(bind=test_engine)
+    Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.drop_all(bind=engine)
     if TEST_DB_PATH.exists():
         try:
             TEST_DB_PATH.unlink()

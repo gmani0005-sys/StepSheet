@@ -187,8 +187,15 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
         if (dashRes && dashRes.plan) {
           const plan = dashRes.plan;
           const mappedVisuals = (plan.visuals || []).map((v: any, idx: number) => {
+            const isSpan2 = v.span === 2 || v.type === 'table' || v.type === 'matrix';
+            const customW = v.customWidth || (isSpan2 ? 976 : 480);
+            const customH = v.customHeight || (isSpan2 ? 340 : 320);
             const col = idx % 2;
             const row = Math.floor(idx / 2);
+            const fallbackX = 16 + col * (480 + 16);
+            const fallbackY = 16 + row * (320 + 16);
+            const x = (typeof v.x === 'number' && Number.isFinite(v.x) && v.x >= 0) ? v.x : fallbackX;
+            const y = (typeof v.y === 'number' && Number.isFinite(v.y) && v.y >= 0) ? v.y : fallbackY;
             const isTrendOrDate = v.type === 'line_area' || v.type === 'stacked_area' || (v.categoryCol && /date|time|month|day|year/i.test(v.categoryCol));
             return {
               id: v.id || `vis_ai_${Date.now()}_${idx}`,
@@ -204,11 +211,11 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
               showDataLabels: true,
               dataLabelPosition: 'outside_end',
               dataLabelContent: 'totals_only',
-              span: 1,
-              x: 16 + col * (480 + 16),
-              y: 16 + row * (320 + 16),
-              customWidth: 480,
-              customHeight: 320,
+              span: isSpan2 ? 2 : 1,
+              x,
+              y,
+              customWidth: customW,
+              customHeight: customH,
               paletteId: plan.palette_id || 'v22',
             };
           });

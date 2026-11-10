@@ -132,6 +132,7 @@ class AiDashboardService:
             dimensions=dimensions,
             dates=dates,
             preferred_model=model_tag,
+            sample_rows=sample_rows or [],
         )
 
         # 3. Local DuckDB Verification (Pre-flight test all KPIs and Visuals)
@@ -248,6 +249,8 @@ class AiDashboardService:
                 dimensions=[c["name"] for c in resolved_columns if c["data_type"] == "text"],
                 dates=[c["name"] for c in resolved_columns if c["data_type"] == "date"],
                 columns=resolved_columns,
+                sample_rows=sample_rows or [],
+                prompt=prompt,
             )
         else:
             # Apply patch to produce updated dashboard
@@ -294,6 +297,7 @@ class AiDashboardService:
         dimensions: List[str],
         dates: List[str],
         preferred_model: Optional[str] = None,
+        sample_rows: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[DashboardPlan, str, str]:
         # Try Ollama if running
         if ollama_manager.is_service_running():
@@ -308,7 +312,16 @@ class AiDashboardService:
                     pass
 
         # Heuristic Dashboard Planner
-        plan = self._heuristic_dashboard_plan(dataset_name, dataset_id, measures, dimensions, dates, columns)
+        plan = self._heuristic_dashboard_plan(
+            dataset_name=dataset_name,
+            dataset_id=dataset_id,
+            measures=measures,
+            dimensions=dimensions,
+            dates=dates,
+            columns=columns,
+            sample_rows=sample_rows,
+            prompt=prompt,
+        )
         return plan, "heuristic", "stepsheet-julius-planner-v1"
 
     def _call_ollama_dashboard(
@@ -371,44 +384,95 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
         dimensions: List[str],
         dates: List[str],
         columns: List[Dict[str, Any]],
+        sample_rows: Optional[List[Dict[str, Any]]] = None,
+        prompt: Optional[str] = None,
     ) -> DashboardPlan:
-        # Determine primary measure
+        p_lower = (prompt or "").lower().strip()
+
+        # 1. Domain Detection
+        all_col_names = [c["name"].lower() for c in columns]
+        is_sales = any(k in all_col_names or k in dataset_name.lower() for k in ["sales", "order", "revenue", "amount", "customer", "product", "deal", "price"])
+        is_finance = any(k in all_col_names or k in dataset_name.lower() for k in ["balance", "credit_limit", "debit", "spend", "budget", "expense", "invoice"])
+        is_hr = any(k in all_col_names or k in dataset_name.lower() for k in ["salary", "employee", "headcount", "department", "tenure", "staff"])
+
+        # 2. Measures Resolution
         primary_measure = measures[0] if measures else None
         secondary_measure = measures[1] if len(measures) > 1 else primary_measure
         for m in measures:
-            if any(term in m.lower() for term in ["revenue", "sales", "amount", "total"]):
+            clean_m = re.sub(r"[^a-z0-9]", "", m.lower())
+            if clean_m and clean_m in p_lower:
                 primary_measure = m
                 break
+        if not primary_measure:
+            for m in measures:
+                if any(k in m.lower() for k in ["revenue", "sales", "amount", "total", "balance", "salary", "spend"]):
+                    primary_measure = m
+                    break
         for m in measures:
-            if m != primary_measure and any(term in m.lower() for term in ["profit", "margin", "cost", "units"]):
+            if m != primary_measure and any(k in m.lower() for k in ["quantity", "qty", "profit", "margin", "cost", "units", "discount"]):
                 secondary_measure = m
                 break
 
-        cat_candidates = [d for d in dimensions if not any(k in d.lower() for k in ["id", "code", "key", "number", "guid", "uuid", "hash"])]
-        preferred_dims = cat_candidates if cat_candidates else dimensions
-        primary_dim = preferred_dims[0] if preferred_dims else (columns[0]["name"] if columns else "Item")
-        secondary_dim = preferred_dims[1] if len(preferred_dims) > 1 else (dimensions[1] if len(dimensions) > 1 else primary_dim)
+        val_col = primary_measure or (measures[0] if measures else (columns[0]["name"] if columns else "Value"))
 
-        # 1. Plan KPIs (4 glassmorphic cards matching V22 design)
+        # 3. Dimensions Resolution
+        cat_candidates = [d for d in dimensions if not any(k in d.lower() for k in ["_id", "id", "_code", "_key", "uuid", "hash"])]
+        preferred_dims = cat_candidates if cat_candidates else dimensions
+        primary_dim = preferred_dims[0] if preferred_dims else (columns[0]["name"] if columns else "Category")
+
+        for d in dimensions:
+            clean_d = re.sub(r"[^a-z0-9]", "", d.lower())
+            if clean_d and clean_d in p_lower:
+                primary_dim = d
+                break
+
+        # Granular dimension (product, item, customer, client)
+        granular_dim = primary_dim
+        for d in preferred_dims:
+            if any(k in d.lower() for k in ["product", "item", "customer", "client", "sku", "account", "user"]):
+                granular_dim = d
+                break
+        if granular_dim == primary_dim and len(preferred_dims) > 1:
+            granular_dim = preferred_dims[1]
+
+        # Geographic / Channel dimension
+        geo_dim = primary_dim
+        for d in preferred_dims:
+            if any(k in d.lower() for k in ["region", "country", "state", "city", "channel", "territory", "location", "market"]):
+                geo_dim = d
+                break
+        if geo_dim == primary_dim and len(preferred_dims) > 2:
+            geo_dim = preferred_dims[2]
+
+        # Status / Pipeline dimension
+        status_dim = None
+        for d in dimensions:
+            if any(k in d.lower() for k in ["status", "stage", "priority", "fulfillment", "state", "tier", "payment"]):
+                status_dim = d
+                break
+
+        secondary_dim = geo_dim if geo_dim != primary_dim else (granular_dim if granular_dim != primary_dim else (dimensions[1] if len(dimensions) > 1 else primary_dim))
+
+        # 4. KPIs Construction (4 cohesive cards matching Glassmorphic V22)
         kpis: List[DashboardKpiPlan] = []
         if primary_measure:
             kpis.append(
                 DashboardKpiPlan(
                     id="kpi_total_primary",
-                    title=f"Total {primary_measure}",
+                    title=f"Total {primary_measure.replace('_', ' ').title()}",
                     column=primary_measure,
                     aggFunc="sum",
-                    subtitle="Cumulative total across records",
+                    subtitle="Gross volume across records" if is_sales else "Cumulative metric total",
                     accentColor="#10B981",
                 )
             )
             kpis.append(
                 DashboardKpiPlan(
                     id="kpi_avg_primary",
-                    title=f"Average {primary_measure}",
+                    title=f"Average {primary_measure.replace('_', ' ').title()}" + (" (AOV)" if is_sales else ""),
                     column=primary_measure,
                     aggFunc="avg",
-                    subtitle="Mean per transaction",
+                    subtitle="Mean deal benchmark" if is_sales else "Per-record mean benchmark",
                     accentColor="#0D9488",
                 )
             )
@@ -416,145 +480,232 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
         if secondary_measure and secondary_measure != primary_measure:
             kpis.append(
                 DashboardKpiPlan(
-                    id="kpi_secondary",
-                    title=f"Total {secondary_measure}",
+                    id="kpi_secondary_volume",
+                    title=f"Total {secondary_measure.replace('_', ' ').title()}",
                     column=secondary_measure,
                     aggFunc="sum",
-                    subtitle="Secondary volume aggregate",
+                    subtitle="Operational unit volume",
                     accentColor="#FB923C",
                 )
             )
-        elif primary_measure:
-            kpis.append(
-                DashboardKpiPlan(
-                    id="kpi_peak_primary",
-                    title=f"Peak {primary_measure}",
-                    column=primary_measure,
-                    aggFunc="max",
-                    subtitle="Peak single volume",
-                    accentColor="#FB923C",
-                )
-            )
-
-        # ID or transaction distinct count
-        id_cols = [c["name"] for c in columns if any(k in c["name"].lower() for k in ["id", "code", "number", "key", "customer", "user"])]
-        if id_cols:
-            kpis.append(
-                DashboardKpiPlan(
-                    id="kpi_distinct_count",
-                    title=f"Unique {id_cols[0]}",
-                    column=id_cols[0],
-                    aggFunc="distinct_count",
-                    subtitle="Active distinct entities",
-                    accentColor="#0284C7",
-                )
-            )
-        elif dimensions:
-            kpis.append(
-                DashboardKpiPlan(
-                    id="kpi_distinct_dim",
-                    title=f"Distinct {primary_dim}",
-                    column=primary_dim,
-                    aggFunc="distinct_count",
-                    subtitle="Category groups",
-                    accentColor="#0284C7",
-                )
-            )
-        elif len(kpis) < 4:
+        else:
             kpis.append(
                 DashboardKpiPlan(
                     id="kpi_record_count",
-                    title="Total Records",
-                    column=columns[0]["name"] if columns else "id",
+                    title="Active Records",
+                    column=primary_dim,
                     aggFunc="count",
-                    subtitle="Dataset active rows",
-                    accentColor="#0284C7",
+                    subtitle="Verified ledger entries",
+                    accentColor="#FB923C",
                 )
             )
 
-        # 2. Plan Visuals (4 complementary visual cards matching V22 layout)
-        visuals: List[DashboardVisualPlan] = []
-        val_col = primary_measure or (measures[0] if measures else (columns[0]["name"] if columns else "Value"))
-        agg_val = "sum" if measures else "count"
+        id_cols = [c["name"] for c in columns if any(c["name"].lower().endswith(k) for k in ["_id", "id", "_code", "_key"])]
+        distinct_col = id_cols[0] if id_cols else primary_dim
+        kpis.append(
+            DashboardKpiPlan(
+                id="kpi_distinct_monitored",
+                title=f"Unique {distinct_col.replace('_', ' ').title()}",
+                column=distinct_col,
+                aggFunc="distinct_count",
+                subtitle="Monitored distinct entities",
+                accentColor="#0284C7",
+            )
+        )
 
-        # A. Visual 1: Focus Intervals Capsule Column Chart (Rounded pills in background tracks)
+        # 5. Multi-Tier Visual Grid Construction (6 visuals, non-overlapping)
+        visuals: List[DashboardVisualPlan] = []
+        date_col = dates[0] if dates else None
+
+        # Visual 1: Hero Visual (Span 2 / 976px wide x 340px high at x=16, y=16)
+        if date_col:
+            visuals.append(
+                DashboardVisualPlan(
+                    id="vis_hero_trend",
+                    title=f"{val_col.replace('_', ' ').title()} Trajectory & Monthly Run-Rate",
+                    type="line_area",
+                    categoryCol=date_col,
+                    valueCol=val_col,
+                    aggFunc="sum",
+                    bins=8,
+                    span=2,
+                    customWidth=976,
+                    customHeight=340,
+                    x=16,
+                    y=16,
+                    sortBy="category_asc",
+                )
+            )
+        else:
+            visuals.append(
+                DashboardVisualPlan(
+                    id="vis_hero_trend",
+                    title=f"{val_col.replace('_', ' ').title()} Strategic Performance by {primary_dim.replace('_', ' ').title()}",
+                    type="column",
+                    categoryCol=primary_dim,
+                    valueCol=val_col,
+                    aggFunc="sum",
+                    bins=8,
+                    span=2,
+                    customWidth=976,
+                    customHeight=340,
+                    x=16,
+                    y=16,
+                    sortBy="value_desc",
+                )
+            )
+
+        # Visual 2: Category Contribution Donut (Mid-Tier Left at x=16, y=372)
         visuals.append(
             DashboardVisualPlan(
-                id="vis_focus_intervals",
-                title=f"Focus Intervals: {val_col} by {primary_dim}",
-                type="column",
+                id="vis_share_donut",
+                title=f"Revenue Contribution by {primary_dim.replace('_', ' ').title()}" if is_sales else f"Distribution Share by {primary_dim.replace('_', ' ').title()}",
+                type="donut",
                 categoryCol=primary_dim,
                 valueCol=val_col,
-                aggFunc=agg_val,
-                bins=8,
-            )
-        )
-
-        # B. Visual 2: Line Area Trend over Time (or Bar comparison)
-        trend_cat = dates[0] if dates else (secondary_dim if secondary_dim != primary_dim else primary_dim)
-        visuals.append(
-            DashboardVisualPlan(
-                id="vis_trend",
-                title=f"{val_col} Trend Over Time" if dates else f"{val_col} Distribution by {trend_cat}",
-                type="line_area",
-                categoryCol=trend_cat,
-                valueCol=val_col,
-                aggFunc=agg_val,
-                bins=8,
-            )
-        )
-
-        # C. Visual 3: Composition Donut Chart
-        donut_cat = secondary_dim if secondary_dim != primary_dim else (dimensions[1] if len(dimensions) > 1 else primary_dim)
-        visuals.append(
-            DashboardVisualPlan(
-                id="vis_donut_comp",
-                title=f"Distribution Share by {donut_cat}",
-                type="donut",
-                categoryCol=donut_cat,
-                valueCol=val_col,
-                aggFunc=agg_val,
+                aggFunc="sum",
                 bins=6,
+                span=1,
+                customWidth=480,
+                customHeight=320,
+                x=16,
+                y=372,
+                sortBy="value_desc",
             )
         )
 
-        # D. Visual 4: Comparison Bar Chart (select distinct tertiary dimension to avoid duplication with Focus Intervals)
-        ranking_cat = primary_dim
-        for d in dimensions:
-            if d != primary_dim and d != donut_cat and not any(k in d.lower() for k in ["_id", "id", "_code"]):
-                ranking_cat = d
-                break
-        if ranking_cat == primary_dim and len(dimensions) > 1:
-            for d in dimensions:
-                if d != primary_dim:
-                    ranking_cat = d
-                    break
-
+        # Visual 3: Ranked Performance Leaderboard Bar (Mid-Tier Right at x=512, y=372)
         visuals.append(
             DashboardVisualPlan(
-                id="vis_performance_bar",
-                title=f"Top Performance Ranking by {ranking_cat}",
+                id="vis_leaderboard_bar",
+                title=f"Top 10 High-Performing {granular_dim.replace('_', ' ').title()} Leaderboard",
                 type="bar",
-                categoryCol=ranking_cat,
+                categoryCol=granular_dim,
                 valueCol=val_col,
-                aggFunc=agg_val,
+                aggFunc="sum",
+                bins=10,
+                topN=10,
+                span=1,
+                customWidth=480,
+                customHeight=320,
+                x=512,
+                y=372,
+                sortBy="value_desc",
+            )
+        )
+
+        # Visual 4: Geographic / Segment Breakdown (Deep Dive Left at x=16, y=708)
+        visuals.append(
+            DashboardVisualPlan(
+                id="vis_geo_column",
+                title=f"{val_col.replace('_', ' ').title()} Breakdown by {secondary_dim.replace('_', ' ').title()}",
+                type="column",
+                categoryCol=secondary_dim,
+                valueCol=val_col,
+                aggFunc="sum",
                 bins=8,
+                span=1,
+                customWidth=480,
+                customHeight=320,
+                x=16,
+                y=708,
+                sortBy="value_desc",
+            )
+        )
+
+        # Visual 5: Operational Pipeline Funnel / Secondary Comparison (Deep Dive Right at x=512, y=708)
+        if status_dim:
+            visuals.append(
+                DashboardVisualPlan(
+                    id="vis_pipeline_funnel",
+                    title=f"Fulfillment Pipeline & {status_dim.replace('_', ' ').title()} Status",
+                    type="funnel",
+                    categoryCol=status_dim,
+                    valueCol=val_col,
+                    aggFunc="count",
+                    bins=6,
+                    span=1,
+                    customWidth=480,
+                    customHeight=320,
+                    x=512,
+                    y=708,
+                    sortBy="value_desc",
+                )
+            )
+        elif secondary_measure and secondary_measure != primary_measure:
+            visuals.append(
+                DashboardVisualPlan(
+                    id="vis_pipeline_funnel",
+                    title=f"{secondary_measure.replace('_', ' ').title()} Distribution by {primary_dim.replace('_', ' ').title()}",
+                    type="column",
+                    categoryCol=primary_dim,
+                    valueCol=secondary_measure,
+                    aggFunc="sum",
+                    bins=6,
+                    span=1,
+                    customWidth=480,
+                    customHeight=320,
+                    x=512,
+                    y=708,
+                    sortBy="value_desc",
+                )
+            )
+        else:
+            visuals.append(
+                DashboardVisualPlan(
+                    id="vis_pipeline_funnel",
+                    title=f"{val_col.replace('_', ' ').title()} by {primary_dim.replace('_', ' ').title()} split by {secondary_dim.replace('_', ' ').title()}",
+                    type="clustered_bar",
+                    categoryCol=primary_dim,
+                    seriesCol=secondary_dim if secondary_dim != primary_dim else "",
+                    valueCol=val_col,
+                    aggFunc="sum",
+                    bins=6,
+                    span=1,
+                    customWidth=480,
+                    customHeight=320,
+                    x=512,
+                    y=708,
+                    sortBy="value_desc",
+                )
+            )
+
+        # Visual 6: Executive Operational Ledger Table (Span 2 / 976px at x=16, y=1044)
+        visuals.append(
+            DashboardVisualPlan(
+                id="vis_ledger_table",
+                title=f"Executive Operational Ledger: {primary_dim.replace('_', ' ').title()} & {secondary_dim.replace('_', ' ').title()} Matrix",
+                type="table",
+                categoryCol=primary_dim,
+                seriesCol=secondary_dim if secondary_dim != primary_dim else "",
+                valueCol=val_col,
+                aggFunc="sum",
+                span=2,
+                customWidth=976,
+                customHeight=340,
+                x=16,
+                y=1044,
+                sortBy="value_desc",
             )
         )
 
         # Slicers
-        slicers = dimensions[:3] if dimensions else []
+        non_id_dims = [d for d in dimensions if not any(k in d.lower() for k in ["_id", "id", "_code"])]
+        slicers = (non_id_dims[:3] if non_id_dims else dimensions[:3]) or [c["name"] for c in columns[:2]]
 
-        title = f"{dataset_name.replace('_', ' ').replace('-', ' ').title()} Executive Dashboard"
+        clean_name = dataset_name.replace("_", " ").replace("-", " ").title()
+        title = f"{clean_name} Executive Dashboard & Revenue Intelligence" if is_sales else f"{clean_name} Executive Dashboard"
+        narrative = f"Automated executive glassmorphic analytics suite generated for {dataset_name}. Includes 4 verified KPI metrics, time-series trajectory hero visual, category market share donut, ranked leaderboard, operational geographic breakdown, pipeline flow, and granular operational matrix ledger."
 
         return DashboardPlan(
             dashboard_title=title,
             dataset_id=dataset_id,
-            description="Generated data-grounded interactive dashboard with slicers and KPIs.",
+            description=narrative,
             slicer_columns=slicers,
             kpis=kpis,
             visuals=visuals,
             palette_id="v22",
+            narrative_summary=narrative,
         )
 
     # -------------------------------------------------------------------------

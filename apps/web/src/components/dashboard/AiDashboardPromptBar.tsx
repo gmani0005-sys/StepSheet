@@ -103,10 +103,15 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         const plan = res.plan;
         const mappedVisuals: DashboardVisualConfig[] = (plan.visuals || []).map(
           (v: any, idx: number) => {
+            const isSpan2 = v.span === 2 || v.type === 'table' || v.type === 'matrix';
+            const customW = v.customWidth || (isSpan2 ? 976 : 480);
+            const customH = v.customHeight || (isSpan2 ? 340 : 320);
             const col = idx % 2;
             const row = Math.floor(idx / 2);
-            const x = 16 + col * (480 + 16);
-            const y = 16 + row * (320 + 16);
+            const fallbackX = 16 + col * (480 + 16);
+            const fallbackY = 16 + row * (320 + 16);
+            const x = (typeof v.x === 'number' && Number.isFinite(v.x) && v.x >= 0) ? v.x : fallbackX;
+            const y = (typeof v.y === 'number' && Number.isFinite(v.y) && v.y >= 0) ? v.y : fallbackY;
             const isTrendOrDate = v.type === 'line_area' || v.type === 'stacked_area' || (v.categoryCol && /date|time|month|day|year/i.test(v.categoryCol));
             return {
               id: v.id || `vis_ai_${Date.now()}_${idx}`,
@@ -122,12 +127,12 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
               showDataLabels: true,
               dataLabelPosition: 'outside_end',
               dataLabelContent: 'totals_only',
-              span: 1,
+              span: isSpan2 ? 2 : 1,
               x,
               y,
-              customWidth: 480,
-              customHeight: 320,
-              w: 6,
+              customWidth: customW,
+              customHeight: customH,
+              w: isSpan2 ? 12 : 6,
               h: 4,
               customTitle: true,
               legendPosition: 'top_right',
@@ -294,8 +299,15 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         if (existing) {
           return { ...existing, ...v };
         }
-        const x = (idx % 2) * 6;
-        const y = Math.floor(idx / 2) * 4;
+        const isSpan2 = v.span === 2 || v.type === 'table' || v.type === 'matrix';
+        const customW = v.customWidth || (isSpan2 ? 976 : 480);
+        const customH = v.customHeight || (isSpan2 ? 340 : 320);
+        const col = idx % 2;
+        const row = Math.floor(idx / 2);
+        const fallbackX = 16 + col * (480 + 16);
+        const fallbackY = 16 + row * (320 + 16);
+        const x = (typeof v.x === 'number' && Number.isFinite(v.x) && v.x >= 0) ? v.x : fallbackX;
+        const y = (typeof v.y === 'number' && Number.isFinite(v.y) && v.y >= 0) ? v.y : fallbackY;
         return {
           id: v.id || `vis_patch_${Date.now()}_${idx}`,
           title: v.title,
@@ -305,9 +317,15 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           seriesCol: v.seriesCol || '',
           aggFunc: v.aggFunc || 'sum',
           bins: v.bins || 5,
+          topN: v.topN || 10,
+          sortBy: v.sortBy || 'value_desc',
+          showDataLabels: true,
+          span: isSpan2 ? 2 : 1,
+          customWidth: customW,
+          customHeight: customH,
           x,
           y,
-          w: 6,
+          w: isSpan2 ? 12 : 6,
           h: 4,
           customTitle: true,
           legendPosition: 'top_right',

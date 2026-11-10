@@ -33,6 +33,13 @@ class DashboardVisualPlan(BaseModel):
     seriesCol: Optional[str] = ""
     aggFunc: Literal["sum", "avg", "min", "max", "count", "distinct_count"] = "sum"
     bins: Optional[int] = 5
+    span: Optional[int] = 1
+    customWidth: Optional[int] = None
+    customHeight: Optional[int] = None
+    x: Optional[int] = None
+    y: Optional[int] = None
+    sortBy: Optional[str] = "value_desc"
+    topN: Optional[int] = 10
 
 
 class DashboardPlan(BaseModel):
@@ -44,6 +51,7 @@ class DashboardPlan(BaseModel):
     kpis: List[DashboardKpiPlan] = Field(default_factory=list)
     visuals: List[DashboardVisualPlan] = Field(default_factory=list)
     palette_id: str = "classic"
+    narrative_summary: Optional[str] = ""
 
 
 class GenerateDashboardRequest(BaseModel):

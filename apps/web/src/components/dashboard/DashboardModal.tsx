@@ -378,21 +378,79 @@ export function getRowVal(
   return undefined;
 }
 
-const ensureVisualCanvasCoords = (
+export const layoutVisualsFlow = (
   list: DashboardVisualConfig[]
 ): DashboardVisualConfig[] => {
+  let curY = 16;
+  let curCol = 0;
+  let rowMaxH = DEFAULT_TILE_H;
+
   return list.map((v, idx) => {
-    const col = idx % 2;
-    const row = Math.floor(idx / 2);
-    const defaultX = 16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP);
-    const defaultY = 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP);
+    const isSpan2 = v.span === 2 || v.type === 'table' || v.type === 'matrix' || (typeof v.customWidth === 'number' && v.customWidth > 600);
+    const tileW = isSpan2 ? 976 : (v.customWidth || DEFAULT_TILE_W);
+    const tileH = v.customHeight || (isSpan2 ? 340 : DEFAULT_TILE_H);
+
+    if (
+      typeof v.x === 'number' &&
+      Number.isFinite(v.x) &&
+      v.x >= 0 &&
+      typeof v.y === 'number' &&
+      Number.isFinite(v.y) &&
+      v.y >= 0
+    ) {
+      return {
+        ...v,
+        span: isSpan2 ? 2 : 1,
+        customWidth: tileW,
+        customHeight: tileH,
+        zIndex: typeof v.zIndex === 'number' && Number.isFinite(v.zIndex) ? v.zIndex : idx + 1,
+      };
+    }
+
+    let x = 16;
+    let y = curY;
+
+    if (isSpan2) {
+      if (curCol === 1) {
+        curY += rowMaxH + DEFAULT_TILE_GAP;
+        y = curY;
+        curCol = 0;
+        rowMaxH = DEFAULT_TILE_H;
+      }
+      x = 16;
+      curY += tileH + DEFAULT_TILE_GAP;
+      rowMaxH = DEFAULT_TILE_H;
+      curCol = 0;
+    } else {
+      if (curCol === 0) {
+        x = 16;
+        curCol = 1;
+        rowMaxH = Math.max(rowMaxH, tileH);
+      } else {
+        x = 16 + DEFAULT_TILE_W + DEFAULT_TILE_GAP;
+        rowMaxH = Math.max(rowMaxH, tileH);
+        curY += rowMaxH + DEFAULT_TILE_GAP;
+        curCol = 0;
+        rowMaxH = DEFAULT_TILE_H;
+      }
+    }
+
     return {
       ...v,
-      x: typeof v.x === 'number' && Number.isFinite(v.x) && v.x > 12 ? Math.max(0, v.x) : defaultX,
-      y: typeof v.y === 'number' && Number.isFinite(v.y) && v.y > 12 ? Math.max(0, v.y) : defaultY,
+      x,
+      y,
+      span: isSpan2 ? 2 : 1,
+      customWidth: tileW,
+      customHeight: tileH,
       zIndex: typeof v.zIndex === 'number' && Number.isFinite(v.zIndex) ? v.zIndex : idx + 1,
     };
   });
+};
+
+const ensureVisualCanvasCoords = (
+  list: DashboardVisualConfig[]
+): DashboardVisualConfig[] => {
+  return layoutVisualsFlow(list);
 };
 
 const computeSnapAndGuides = (
@@ -4754,6 +4812,123 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               </div>
             </div>
 
+            {/* Executive AI Insights Narrative Banner (Glassmorphism V22) */}
+            {(() => {
+              if (filteredRows.length === 0 || columns.length === 0) return null;
+
+              const numCols = columns.filter((c: any) => {
+                const dt = String(c.data_type || c.type || '').toLowerCase();
+                const name = String(c.name || '').toLowerCase();
+                return ['amount', 'revenue', 'sales', 'profit', 'quantity', 'balance', 'salary'].some(k => name.includes(k)) || ['integer', 'float', 'number'].includes(dt);
+              });
+              const primaryMeas = numCols[0]?.name || columns.find((c: any) => !String(c.name || '').toLowerCase().endsWith('id'))?.name;
+              const catCols = columns.filter((c: any) => {
+                const name = String(c.name || '').toLowerCase();
+                return !name.endsWith('_id') && name !== 'id' && !numCols.some((nc: any) => nc.name === c.name);
+              });
+              const primaryD = catCols[0]?.name || columns[0]?.name;
+              const geoD = catCols.find((c: any) => /region|country|state|city|channel/i.test(String(c.name || '')))?.name || catCols[1]?.name;
+
+              let topCatName = '';
+              let topCatSum = 0;
+              let totalMeasSum = 0;
+              let topGeoName = '';
+              let topGeoCount = 0;
+
+              if (primaryMeas) {
+                const catMap = new Map<string, number>();
+                const geoMap = new Map<string, number>();
+                for (const r of filteredRows) {
+                  const v = Number(r[primaryMeas]) || 0;
+                  totalMeasSum += v;
+                  if (primaryD) {
+                    const ck = String(r[primaryD] ?? 'Other');
+                    catMap.set(ck, (catMap.get(ck) || 0) + v);
+                  }
+                  if (geoD) {
+                    const gk = String(r[geoD] ?? 'General');
+                    geoMap.set(gk, (geoMap.get(gk) || 0) + 1);
+                  }
+                }
+                for (const [k, v] of catMap.entries()) {
+                  if (v > topCatSum) {
+                    topCatSum = v;
+                    topCatName = k;
+                  }
+                }
+                for (const [k, v] of geoMap.entries()) {
+                  if (v > topGeoCount) {
+                    topGeoCount = v;
+                    topGeoName = k;
+                  }
+                }
+              }
+
+              const topCatPct = totalMeasSum > 0 ? `${((topCatSum / totalMeasSum) * 100).toFixed(1)}%` : '0%';
+              const avgDeal = filteredRows.length > 0 ? (totalMeasSum / filteredRows.length) : 0;
+              const isCurr = primaryMeas && ['amount', 'revenue', 'sales', 'price', 'cost', 'spend', 'budget', 'salary'].some(k => primaryMeas.toLowerCase().includes(k));
+              const prefix = isCurr ? '$' : '';
+
+              const isSalesDomain = columns.some((c: any) => /sales|order|revenue|amount|customer|product/i.test(String(c.name || '')));
+              const domainLabel = isSalesDomain ? 'SALES & REVENUE INTELLIGENCE' : 'EXECUTIVE BUSINESS INTELLIGENCE';
+
+              return (
+                <div
+                  data-testid="executive-ai-insights-banner"
+                  className="rounded-2xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-sky-500/10 backdrop-blur-xl p-4 shadow-sm relative overflow-hidden transition-all"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-xs shrink-0 mt-0.5">
+                        <Sparkles className="w-5 h-5 animate-pulse" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            {domainLabel}
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-800">
+                            Executive Strategic Takeaway
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                          {topCatName ? (
+                            <>
+                              <strong className="text-slate-900 font-bold">{topCatName}</strong> is the primary volume driver contributing{' '}
+                              <strong className="text-emerald-700 font-bold">{prefix}{formatNum(topCatSum)} ({topCatPct})</strong> of overall{' '}
+                              {primaryMeas}.{' '}
+                              {topGeoName && (
+                                <>
+                                  Regional activity is led by <strong className="text-slate-900 font-bold">{topGeoName}</strong> across{' '}
+                                  <strong className="text-slate-900 font-bold">{topGeoCount} transactions</strong>.{' '}
+                                </>
+                              )}
+                              Across all <strong className="text-slate-900 font-bold">{filteredRows.length.toLocaleString()} records</strong>, the average transaction benchmark is{' '}
+                              <strong className="text-teal-700 font-bold">{prefix}{formatNum(avgDeal)}</strong>.
+                            </>
+                          ) : (
+                            `Executive analytics generated for ${selectedDataset?.name || 'Dataset'} across ${filteredRows.length} active records.`
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/70 border border-white/60 shadow-2xs text-[11px]">
+                        <span className="text-slate-400 font-bold">Top Driver:</span>
+                        <span className="font-extrabold text-slate-800 truncate max-w-[120px]">{topCatName || '-'}</span>
+                        <span className="text-emerald-700 font-black">{topCatPct}</span>
+                      </div>
+                      <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/70 border border-white/60 shadow-2xs text-[11px]">
+                        <span className="text-slate-400 font-bold">Mean Benchmark:</span>
+                        <span className="font-extrabold text-teal-800">{prefix}{formatNum(avgDeal)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Dynamic KPI Cards Section */}
             <div className="space-y-3">
 
@@ -5025,8 +5200,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
                 const col = idx % 2;
                 const row = Math.floor(idx / 2);
-                const tileX = (typeof vis.x === 'number' && Number.isFinite(vis.x) && vis.x > 12) ? vis.x : (16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP));
-                const tileY = (typeof vis.y === 'number' && Number.isFinite(vis.y) && vis.y > 12) ? vis.y : (16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP));
+                const tileX = (typeof vis.x === 'number' && Number.isFinite(vis.x) && vis.x >= 0) ? vis.x : (16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP));
+                const tileY = (typeof vis.y === 'number' && Number.isFinite(vis.y) && vis.y >= 0) ? vis.y : (16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP));
                 const tileW = vis.customWidth || (vis.span === 2 ? 976 : DEFAULT_TILE_W);
                 const tileH = vis.customHeight || DEFAULT_TILE_H;
 

@@ -4816,101 +4816,254 @@ export const localEngine = {
     const slicerCandidates = nonIdDims.length > 0 ? nonIdDims.slice(0, 3) : profile.dimensions.slice(0, 3);
     const slicerColumns = slicerCandidates.length > 0 ? slicerCandidates : (cols.slice(0, 2).map((c: any) => c.name));
 
-    // 3. Build 4 Rich Complementary Visuals Grounded in V22
-    const visuals: any[] = [];
+    // 3. Domain Awareness & Dynamic Narrative Insight Calculation
+    const isSales = profile.colNames.some((c) => /sales|order|revenue|amount|customer|product|price|deal/i.test(c)) || /sales|order|revenue/i.test(datasetName);
+    const isFinance = profile.colNames.some((c) => /balance|credit_limit|debit|spend|budget|expense|invoice/i.test(c));
+    const isHR = profile.colNames.some((c) => /salary|employee|headcount|department|tenure|staff/i.test(c));
+
+    // Dynamic data insight aggregation
+    let topCategory = 'Primary Segment';
+    let topCategorySum = 0;
+    let topCategoryPct = '0.0%';
+    let totalPrimarySum = 0;
+    let topGeo = 'Primary Region';
+    let topGeoCount = 0;
+
     const compDim = secondaryDim && secondaryDim !== primaryDim ? secondaryDim : primaryDim;
+    const granularDim = nonIdDims.find((d) => /product|item|customer|client|sku|account|user|sub_category/i.test(d)) || compDim;
+    const geoDim = nonIdDims.find((d) => /region|country|state|city|channel|territory|location|market/i.test(d)) || compDim;
+    const statusDim = profile.dimensions.find((d) => /status|stage|priority|fulfillment|state|tier|payment/i.test(d)) || null;
 
-    // Visual 1: Focus Intervals (Capsule column bar chart)
-    visuals.push({
-      id: 'vis_focus_intervals',
-      title: `Focus Intervals (${primaryDim})`,
-      type: 'column',
-      categoryCol: primaryDim,
-      valueCol: primaryMeasure,
-      aggFunc: 'sum',
-      bins: 5,
-      x: 0,
-      y: 0,
-      w: 6,
-      h: 4,
-    });
+    if (Array.isArray(rows) && rows.length > 0 && primaryMeasure) {
+      const catMap = new Map<string, number>();
+      const geoMap = new Map<string, number>();
 
-    // Visual 2: Time Trend or Clustered Comparison
+      for (const r of rows) {
+        const val = Number(getRowVal(r, primaryMeasure)) || 0;
+        totalPrimarySum += val;
+
+        const catKey = String(getRowVal(r, primaryDim) || 'Other');
+        catMap.set(catKey, (catMap.get(catKey) || 0) + val);
+
+        const geoKey = String(getRowVal(r, geoDim) || 'General');
+        geoMap.set(geoKey, (geoMap.get(geoKey) || 0) + 1);
+      }
+
+      let maxCatVal = -Infinity;
+      for (const [k, v] of catMap.entries()) {
+        if (v > maxCatVal) {
+          maxCatVal = v;
+          topCategory = k;
+          topCategorySum = v;
+        }
+      }
+
+      if (totalPrimarySum > 0) {
+        topCategoryPct = `${((topCategorySum / totalPrimarySum) * 100).toFixed(1)}%`;
+      }
+
+      let maxGeoVal = -Infinity;
+      for (const [k, v] of geoMap.entries()) {
+        if (v > maxGeoVal) {
+          maxGeoVal = v;
+          topGeo = k;
+          topGeoCount = v;
+        }
+      }
+    }
+
+    const avgValNum = Array.isArray(rows) && rows.length > 0 ? (totalPrimarySum / rows.length).toFixed(2) : '0';
+    const narrativeInsight = `${topCategory} is the leading revenue driver generating ${topCategoryPct} of total volume. Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions. Across all ${rows ? rows.length : 0} records, the per-record benchmark stands at ${avgValNum}.`;
+
+    // 4. Build 6 Multi-Tier Complementary Visuals (Executive Grid V22)
+    const visuals: any[] = [];
+
+    // Visual 1: Hero Visual (Span 2, 976px wide x 340px high at x=16, y=16)
     if (profile.dates.length > 0) {
       visuals.push({
-        id: 'vis_trend_over_time',
-        title: `${primaryMeasure} Trend Over Time`,
+        id: 'vis_hero_trend',
+        title: `${primaryMeasure} Trajectory & Monthly Run-Rate`,
         type: 'line_area',
         categoryCol: profile.dates[0],
         valueCol: primaryMeasure,
         aggFunc: 'sum',
-        bins: 5,
-        x: 6,
-        y: 0,
-        w: 6,
+        bins: 8,
+        span: 2,
+        customWidth: 976,
+        customHeight: 340,
+        x: 16,
+        y: 16,
+        w: 12,
         h: 4,
+        sortBy: 'category_asc',
       });
     } else {
       visuals.push({
-        id: 'vis_trend_over_time',
-        title: `${primaryMeasure} by ${compDim}`,
-        type: 'line_area',
-        categoryCol: compDim,
+        id: 'vis_hero_trend',
+        title: `${primaryMeasure} Strategic Performance by ${primaryDim}`,
+        type: 'column',
+        categoryCol: primaryDim,
         valueCol: primaryMeasure,
         aggFunc: 'sum',
-        bins: 5,
-        x: 6,
-        y: 0,
-        w: 6,
+        bins: 8,
+        span: 2,
+        customWidth: 976,
+        customHeight: 340,
+        x: 16,
+        y: 16,
+        w: 12,
         h: 4,
+        sortBy: 'value_desc',
       });
     }
 
-    // Visual 3: Distribution Share (Donut)
+    // Visual 2: Category Contribution Donut (Mid-Tier Left at x=16, y=372)
     visuals.push({
       id: 'vis_share_donut',
-      title: `${compDim} Distribution Share`,
+      title: isSales ? `Revenue Contribution by ${primaryDim}` : `${primaryDim} Distribution Share`,
       type: 'donut',
-      categoryCol: compDim,
+      categoryCol: primaryDim,
       valueCol: primaryMeasure,
       aggFunc: 'sum',
-      bins: 5,
-      x: 0,
-      y: 4,
+      bins: 6,
+      span: 1,
+      customWidth: 480,
+      customHeight: 320,
+      x: 16,
+      y: 372,
       w: 6,
       h: 4,
+      sortBy: 'value_desc',
     });
 
-    // Visual 4: Ranking Bar Chart (prioritize tertiary dimension or product/sub-entity to prevent visual duplication)
-    const tertiaryCandidate = profile.dimensions.find(
-      (d) => d !== primaryDim && d !== compDim && !d.toLowerCase().endsWith('_id') && !d.toLowerCase().endsWith('id')
-    ) || (compDim !== primaryDim ? compDim : primaryDim);
-
+    // Visual 3: Ranked Performance Leaderboard Bar (Mid-Tier Right at x=512, y=372)
     visuals.push({
-      id: 'vis_ranking_bar',
-      title: `Top ${tertiaryCandidate} Ranking`,
+      id: 'vis_leaderboard_bar',
+      title: `Top 10 High-Performing ${granularDim} Leaderboard`,
       type: 'bar',
-      categoryCol: tertiaryCandidate,
+      categoryCol: granularDim,
       valueCol: primaryMeasure,
       aggFunc: 'sum',
-      bins: 5,
-      x: 6,
-      y: 4,
+      bins: 10,
+      topN: 10,
+      span: 1,
+      customWidth: 480,
+      customHeight: 320,
+      x: 512,
+      y: 372,
       w: 6,
       h: 4,
+      sortBy: 'value_desc',
+    });
+
+    // Visual 4: Geographic / Channel Breakdown (Deep Dive Left at x=16, y=708)
+    visuals.push({
+      id: 'vis_geo_column',
+      title: `${primaryMeasure} Breakdown by ${geoDim}`,
+      type: 'column',
+      categoryCol: geoDim,
+      valueCol: primaryMeasure,
+      aggFunc: 'sum',
+      bins: 8,
+      span: 1,
+      customWidth: 480,
+      customHeight: 320,
+      x: 16,
+      y: 708,
+      w: 6,
+      h: 4,
+      sortBy: 'value_desc',
+    });
+
+    // Visual 5: Operational Pipeline Funnel / Secondary Comparison (Deep Dive Right at x=512, y=708)
+    if (statusDim) {
+      visuals.push({
+        id: 'vis_pipeline_funnel',
+        title: `Fulfillment Pipeline & ${statusDim} Status`,
+        type: 'funnel',
+        categoryCol: statusDim,
+        valueCol: primaryMeasure,
+        aggFunc: 'count',
+        bins: 6,
+        span: 1,
+        customWidth: 480,
+        customHeight: 320,
+        x: 512,
+        y: 708,
+        w: 6,
+        h: 4,
+        sortBy: 'value_desc',
+      });
+    } else if (secondaryMeasure && secondaryMeasure !== primaryMeasure) {
+      visuals.push({
+        id: 'vis_pipeline_funnel',
+        title: `${secondaryMeasure} Distribution by ${primaryDim}`,
+        type: 'column',
+        categoryCol: primaryDim,
+        valueCol: secondaryMeasure,
+        aggFunc: 'sum',
+        bins: 6,
+        span: 1,
+        customWidth: 480,
+        customHeight: 320,
+        x: 512,
+        y: 708,
+        w: 6,
+        h: 4,
+        sortBy: 'value_desc',
+      });
+    } else {
+      visuals.push({
+        id: 'vis_pipeline_funnel',
+        title: `${primaryMeasure} by ${primaryDim} split by ${compDim}`,
+        type: 'clustered_bar',
+        categoryCol: primaryDim,
+        seriesCol: compDim !== primaryDim ? compDim : '',
+        valueCol: primaryMeasure,
+        aggFunc: 'sum',
+        bins: 6,
+        span: 1,
+        customWidth: 480,
+        customHeight: 320,
+        x: 512,
+        y: 708,
+        w: 6,
+        h: 4,
+        sortBy: 'value_desc',
+      });
+    }
+
+    // Visual 6: Executive Operational Ledger Table (Span 2 / 976px at x=16, y=1044)
+    visuals.push({
+      id: 'vis_ledger_table',
+      title: `Executive Operational Ledger: ${primaryDim} & ${compDim} Matrix`,
+      type: 'table',
+      categoryCol: primaryDim,
+      seriesCol: compDim !== primaryDim ? compDim : '',
+      valueCol: primaryMeasure,
+      aggFunc: 'sum',
+      span: 2,
+      customWidth: 976,
+      customHeight: 340,
+      x: 16,
+      y: 1044,
+      w: 12,
+      h: 4,
+      sortBy: 'value_desc',
     });
 
     const titlePrefix = datasetName.replace(/\.[^/.]+$/, '');
     return {
       plan: {
         schema_version: '1.0',
-        dashboard_title: `${titlePrefix} Executive Dashboard`,
+        dashboard_title: isSales ? `${titlePrefix} Executive Dashboard & Revenue Intelligence` : `${titlePrefix} Executive Dashboard`,
         dataset_id: datasetId,
-        description: prompt || `AI generated interactive executive dashboard for ${datasetName}`,
+        description: narrativeInsight || prompt || `AI generated interactive executive dashboard for ${datasetName}`,
         slicer_columns: slicerColumns,
         kpis,
         visuals,
         palette_id: 'v22',
+        narrative_summary: narrativeInsight,
       },
       latency_ms: 14.2,
       provider: 'localEngine',
@@ -5132,23 +5285,44 @@ export const localEngine = {
       if (pLower.includes('average') || pLower.includes('avg')) aggFunc = 'avg';
       else if (pLower.includes('count')) aggFunc = 'count';
 
-      const count = updated.visuals.length;
-      const x = (count % 2) * 6;
-      const y = Math.floor(count / 2) * 4;
-      const maxY = Math.max(...updated.visuals.map((v: any) => (v.y || 0) + (v.h || 4)), 0);
+      const isSpan2 = targetType === 'table' || targetType === 'matrix';
+      const customWidth = isSpan2 ? 976 : 480;
+      const customHeight = isSpan2 ? 340 : 320;
+      const lastVis = updated.visuals[updated.visuals.length - 1];
+      let newX = 16;
+      let newY = 16;
+      if (lastVis) {
+        const lastIsSpan2 = lastVis.span === 2 || (lastVis.customWidth && lastVis.customWidth > 600);
+        if (!lastIsSpan2 && lastVis.x === 16 && !isSpan2) {
+          newX = 512;
+          newY = lastVis.y || 16;
+        } else {
+          newX = 16;
+          newY = (lastVis.y || 16) + (lastVis.customHeight || 320) + 16;
+        }
+      }
+
+      let cleanTitle = `${aggFunc.toUpperCase()} of ${targetMeas} by ${targetDim}`;
+      if (targetType === 'donut') cleanTitle = `Distribution Share of ${targetMeas} by ${targetDim}`;
+      else if (targetType === 'line_area') cleanTitle = `${targetMeas} Trend over ${targetDim}`;
+      else if (targetType === 'bar') cleanTitle = `Top ${targetDim} Leaderboard by ${targetMeas}`;
+      else if (targetType === 'table') cleanTitle = `Detailed ${targetDim} Ledger Matrix`;
 
       const newVis = {
         id: `vis_patch_${Date.now()}`,
-        title: `${aggFunc.toUpperCase()} of ${targetMeas} by ${targetDim}`,
+        title: cleanTitle,
         type: targetType,
         categoryCol: targetDim,
         valueCol: targetMeas,
         seriesCol: '',
         aggFunc,
         bins: 5,
-        x,
-        y: Math.max(y, count > 4 ? maxY : y),
-        w: 6,
+        span: isSpan2 ? 2 : 1,
+        customWidth,
+        customHeight,
+        x: newX,
+        y: newY,
+        w: isSpan2 ? 12 : 6,
         h: 4,
         customTitle: true,
       };

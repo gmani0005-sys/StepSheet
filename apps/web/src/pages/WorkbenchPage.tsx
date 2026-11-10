@@ -19,6 +19,9 @@ import { TextTransformModal } from '../components/transforms/TextTransformModal'
 import { DateTransformModal } from '../components/transforms/DateTransformModal';
 import { MathTransformModal } from '../components/transforms/MathTransformModal';
 import { PivotUnpivotModal } from '../components/transforms/PivotUnpivotModal';
+import { FormulaBuilderModal } from '../components/transforms/FormulaBuilderModal';
+import { DataCleaningModal } from '../components/transforms/DataCleaningModal';
+import { TableOperationsModal } from '../components/transforms/TableOperationsModal';
 import { NaturalLanguageStepBar } from '../components/ai/NaturalLanguageStepBar';
 import { QualityModal } from '../components/quality/QualityModal';
 import { ExportModal } from '../components/export/ExportModal';
@@ -27,6 +30,8 @@ import { VersionHistoryModal } from '../components/versioning/VersionHistoryModa
 import { ShareModal } from '../components/collab/ShareModal';
 import { AuditModal } from '../components/audit/AuditModal';
 import { DashboardModal } from '../components/dashboard/DashboardModal';
+import { ChatWithDataModal } from '../components/ai/ChatWithDataModal';
+import { LocalAiSetupModal } from '../components/ai/LocalAiSetupModal';
 import { ExportShareModal } from '../components/export_share/ExportShareModal';
 import { exportShareApi } from '../api/exportShareApi';
 import { SHARE_EXPORT_ENABLED } from '../config/features';
@@ -43,6 +48,13 @@ export const WorkbenchPage: React.FC = () => {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
+  const [isChatWithDataOpen, setIsChatWithDataOpen] = useState(false);
+  const [isLocalAiSetupOpen, setIsLocalAiSetupOpen] = useState(false);
+  const [isFormulaBuilderOpen, setIsFormulaBuilderOpen] = useState(false);
+  const [isDataCleaningOpen, setIsDataCleaningOpen] = useState(false);
+  const [dataCleaningTab, setDataCleaningTab] = useState<'duplicates' | 'missing' | 'text' | 'numeric' | 'date'>('duplicates');
+  const [isTableOpsOpen, setIsTableOpsOpen] = useState(false);
+  const [tableOpsTab, setTableOpsTab] = useState<'columns' | 'headers' | 'rows' | 'top_bottom' | 'transpose'>('columns');
   const [exportInitialTab, setExportInitialTab] = useState<'files' | 'code' | 'run'>('files');
   const [isExportShareOpen, setIsExportShareOpen] = useState(false);
   const [exportShareTab, setExportShareTab] = useState<'files' | 'link' | 'history'>('files');
@@ -125,8 +137,19 @@ export const WorkbenchPage: React.FC = () => {
         onOpenShare={() => setIsShareOpen(true)}
         onOpenAudit={() => setIsAuditOpen(true)}
         onOpenDashboard={() => setIsDashboardOpen(true)}
+        onOpenChatWithData={() => setIsChatWithDataOpen(true)}
+        onOpenLocalAiSetup={() => setIsLocalAiSetupOpen(true)}
         onOpenExportShare={handleOpenExportShare}
         onQuickDownload={handleQuickDownload}
+        onOpenDataCleaning={(tab = 'duplicates') => {
+          setDataCleaningTab(tab);
+          setIsDataCleaningOpen(true);
+        }}
+        onOpenTableOps={(tab = 'columns') => {
+          setTableOpsTab(tab);
+          setIsTableOpsOpen(true);
+        }}
+        onOpenFormulaBuilder={() => setIsFormulaBuilderOpen(true)}
       />
 
       {/* Main 3-Panel Layout */}
@@ -217,6 +240,61 @@ export const WorkbenchPage: React.FC = () => {
         initialMode={activeWizardStepType === 'unpivot' ? 'unpivot' : 'pivot'}
         onClose={closeStepWizard}
       />
+      <DataCleaningModal
+        isOpen={
+          isDataCleaningOpen ||
+          (isStepWizardOpen &&
+            ['remove_duplicates', 'impute_missing', 'standardize_values', 'flag_outliers'].includes(
+              activeWizardStepType || ''
+            ))
+        }
+        onClose={() => {
+          setIsDataCleaningOpen(false);
+          closeStepWizard();
+        }}
+        initialTab={
+          activeWizardStepType === 'impute_missing'
+            ? 'missing'
+            : activeWizardStepType === 'standardize_values'
+            ? 'text'
+            : activeWizardStepType === 'flag_outliers'
+            ? 'numeric'
+            : dataCleaningTab
+        }
+      />
+      <TableOperationsModal
+        isOpen={
+          isTableOpsOpen ||
+          (isStepWizardOpen &&
+            [
+              'remove_column',
+              'reorder_columns',
+              'promote_headers',
+              'remove_rows',
+              'top_bottom_n',
+              'transpose',
+            ].includes(activeWizardStepType || ''))
+        }
+        onClose={() => {
+          setIsTableOpsOpen(false);
+          closeStepWizard();
+        }}
+        initialTab={
+          activeWizardStepType === 'promote_headers'
+            ? 'headers'
+            : activeWizardStepType === 'remove_rows'
+            ? 'rows'
+            : activeWizardStepType === 'top_bottom_n'
+            ? 'top_bottom'
+            : activeWizardStepType === 'transpose'
+            ? 'transpose'
+            : tableOpsTab
+        }
+      />
+      <FormulaBuilderModal
+        isOpen={isFormulaBuilderOpen}
+        onClose={() => setIsFormulaBuilderOpen(false)}
+      />
 
       <AuthModal
         isOpen={isAuthModalOpen}
@@ -274,6 +352,20 @@ export const WorkbenchPage: React.FC = () => {
         isOpen={isDashboardOpen}
         onClose={() => setIsDashboardOpen(false)}
         onOpenExportShare={handleOpenExportShare}
+      />
+
+      <ChatWithDataModal
+        isOpen={isChatWithDataOpen}
+        onClose={() => setIsChatWithDataOpen(false)}
+        onOpenDashboard={() => {
+          setIsChatWithDataOpen(false);
+          setIsDashboardOpen(true);
+        }}
+      />
+
+      <LocalAiSetupModal
+        isOpen={isLocalAiSetupOpen}
+        onClose={() => setIsLocalAiSetupOpen(false)}
       />
 
       {SHARE_EXPORT_ENABLED && (

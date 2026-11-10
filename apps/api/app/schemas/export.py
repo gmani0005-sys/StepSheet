@@ -31,3 +31,17 @@ class RunFullPipelineResponse(BaseModel):
     execution_time_ms: float
     status: str
     sample_preview: List[Dict[str, Any]]
+
+
+class DirectDashboardExportRequest(BaseModel):
+    title: Optional[str] = "Executive Dashboard"
+    dataset_name: Optional[str] = "Dataset"
+    kpis: List[Dict[str, Any]] = Field(default_factory=list)
+    visuals: List[Dict[str, Any]] = Field(default_factory=list)
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    columns: List[str] = Field(default_factory=list)
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+    filtered_row_count: Optional[int] = None
+    total_row_count: Optional[int] = None
+    format: str = "xlsx"
+

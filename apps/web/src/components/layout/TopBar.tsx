@@ -21,6 +21,8 @@ import {
   GitMerge,
   Calculator,
   Sparkles,
+  MessageSquare,
+  Zap,
   Calendar,
   Type,
   TrendingUp,
@@ -39,6 +41,10 @@ import {
   ChevronDown,
   CheckCircle2,
   BarChart3,
+  Heading,
+  Rows,
+  Award,
+  Shuffle,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { useAuthStore } from '../../store/authStore';
@@ -58,9 +64,14 @@ interface TopBarProps {
   onOpenDashboard?: () => void;
   onOpenExportShare?: (tab?: 'files' | 'link' | 'history', format?: string) => void;
   onQuickDownload?: (format: 'xlsx_values' | 'csv') => void;
+  onOpenDataCleaning?: (tab?: 'duplicates' | 'missing' | 'text' | 'numeric' | 'date') => void;
+  onOpenTableOps?: (tab?: 'columns' | 'headers' | 'rows' | 'top_bottom' | 'transpose') => void;
+  onOpenFormulaBuilder?: () => void;
+  onOpenChatWithData?: () => void;
+  onOpenLocalAiSetup?: () => void;
 }
 
-type RibbonTabId = 'Home' | 'Formulas' | 'Data' | 'Join' | 'Quality' | 'View' | 'Help';
+type RibbonTabId = 'Home' | 'Transform' | 'Clean' | 'Filter & Sort' | 'Analyse' | 'Formulas' | 'View' | 'Export';
 
 interface RibbonItem {
   id: string;
@@ -91,6 +102,11 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenDashboard,
   onOpenExportShare,
   onQuickDownload,
+  onOpenDataCleaning,
+  onOpenTableOps,
+  onOpenFormulaBuilder,
+  onOpenChatWithData,
+  onOpenLocalAiSetup,
 }) => {
   const {
     selectedDataset,
@@ -140,28 +156,63 @@ export const TopBar: React.FC<TopBarProps> = ({
   const ribbonConfig: Record<RibbonTabId, RibbonGroup[]> = {
     Home: [
       {
-        name: 'Import & Export',
+        name: 'AI Analytics',
+        items: [
+          {
+            id: 'home-chat-data',
+            label: 'Chat with Data',
+            icon: MessageSquare,
+            onClick: () => onOpenChatWithData?.(),
+            title: 'Ask questions in natural language and get instant calculations',
+            accent: true,
+          },
+          {
+            id: 'home-ai-dashboard',
+            label: 'AI Dashboard',
+            icon: Sparkles,
+            onClick: () => onOpenDashboard?.(),
+            title: 'Generate an interactive dashboard from plain text (Native Julius-style)',
+            primarySolid: true,
+          },
+          {
+            id: 'home-local-ai',
+            label: 'Local AI Setup',
+            icon: Zap,
+            onClick: () => onOpenLocalAiSetup?.(),
+            title: 'Ollama local runtime & model diagnostics',
+          },
+        ],
+      },
+      {
+        name: 'File & Getting Started',
         items: [
           {
             id: 'home-import',
             label: 'Import File',
             icon: UploadCloud,
             onClick: triggerFileImport,
-            title: 'Import / Upload Excel (.xlsx) or CSV dataset',
+            title: 'Import / Upload Excel (.xlsx, .xls) or CSV datasets (supports batch multi-file)',
             accent: true,
           },
           {
+            id: 'home-samples',
+            label: 'Sample Data',
+            icon: Sparkles,
+            onClick: () => loadSamples(),
+            title: 'Load rich multi-table retail sample dataset',
+          },
+          {
             id: 'home-export',
-            label: 'Export / Download',
+            label: 'Quick Download',
             icon: Download,
-            onClick: () => onOpenExport?.(),
-            title: 'Download spreadsheet with live formulas, CSV, Parquet, or SQL/Polars code',
+            onClick: () => (onQuickDownload ? onQuickDownload('xlsx_values') : onOpenExport?.()),
+            title: 'Instantly download current table as Excel .xlsx',
             primarySolid: true,
           },
         ],
       },
       {
-        name: 'Pipeline',
+        name: 'Pipeline & Execution',
         items: [
           {
             id: 'home-undo',
@@ -184,94 +235,61 @@ export const TopBar: React.FC<TopBarProps> = ({
             label: 'Run Full',
             icon: Play,
             onClick: () => (onOpenRunFull ? onOpenRunFull() : onOpenExport?.()),
-            title: 'Execute pipeline across 100% of rows',
+            title: 'Execute complete transformation pipeline across 100% of rows',
             accent: true,
           },
         ],
       },
       {
-        name: 'Sort & Filter',
+        name: 'Quick Actions',
         items: [
           {
-            id: 'home-filter',
-            label: 'Filter Rows',
-            icon: Filter,
-            onClick: () => triggerStep('filter_rows'),
-            title: 'Keep or remove rows by visual rule conditions',
+            id: 'home-formula-builder',
+            label: 'Formula Builder',
+            icon: Calculator,
+            onClick: () => onOpenFormulaBuilder?.(),
+            title: 'Guided Formula Builder: Search 50+ Excel functions with live preview',
+            accent: true,
           },
           {
-            id: 'home-sort',
-            label: 'Sort Rows',
-            icon: ArrowUpDown,
-            onClick: () => triggerStep('sort_rows'),
-            title: 'Sort ascending or descending by column',
+            id: 'home-clean-studio',
+            label: 'Clean Studio',
+            icon: ShieldCheck,
+            onClick: () => onOpenDataCleaning?.('duplicates'),
+            title: 'Data Hygiene Studio: Duplicates, missing values, text & number cleaning',
           },
           {
-            id: 'home-dedupe',
-            label: 'Deduplicate',
-            icon: CopyMinus,
-            onClick: () => triggerStep('remove_duplicates'),
-            title: 'Remove duplicate rows on key columns',
+            id: 'home-table-ops',
+            label: 'Manage Columns',
+            icon: Columns,
+            onClick: () => onOpenTableOps?.('columns'),
+            title: 'Remove, keep, or reorder table columns',
           },
-        ],
-      },
-      {
-        name: 'Formulas & Summary',
-        items: [
           {
             id: 'home-pivot',
             label: 'PivotTable',
-            icon: Columns,
+            icon: TableProperties,
             onClick: () => triggerStep('pivot'),
-            title: 'Insert / Build PivotTable: Interactive Rows, Columns, Values & Totals matrix',
-            accent: true,
+            title: 'Interactive PivotTable Builder',
           },
           {
             id: 'home-xlookup',
             label: 'XLOOKUP',
             icon: GitMerge,
             onClick: () => triggerStep('xlookup'),
-            title: 'XLOOKUP Wizard: Modern flexible lookup across sheets in any column direction',
-          },
-          {
-            id: 'home-vlookup',
-            label: 'VLOOKUP',
-            icon: TableProperties,
-            onClick: () => triggerStep('vlookup'),
-            title: 'VLOOKUP Wizard: Classic vertical lookup by column index number (col_index_num)',
-          },
-          {
-            id: 'home-calc',
-            label: 'Calculate Column',
-            icon: Calculator,
-            onClick: () => triggerStep('math_transform'),
-            title: 'Create calculated arithmetic or math column',
-          },
-          {
-            id: 'home-if',
-            label: 'If / Then Logic',
-            icon: Sparkles,
-            onClick: () => triggerStep('conditional'),
-            title: 'IF / IFS conditional column rules',
-          },
-          {
-            id: 'home-group',
-            label: 'Group & Summarize',
-            icon: TableProperties,
-            onClick: () => triggerStep('group_by'),
-            title: 'Group by keys and aggregate (SUM, COUNT, AVG, MIN, MAX)',
+            title: 'XLOOKUP across sheets with preview',
           },
         ],
       },
       {
-        name: 'Visuals, Canvas & Quality',
+        name: 'Visuals & Models',
         items: [
           {
             id: 'home-dashboard',
             label: 'Dashboard',
             icon: BarChart3,
             onClick: () => onOpenDashboard?.(),
-            title: 'Visual Dashboard: Bar, Clustered Bar, Column, Histogram, Donut, Pie, Slicer & KPI Cards',
+            title: 'Visual Dashboard: 16 chart types, slicers, and KPI scorecards',
             accent: true,
           },
           {
@@ -279,277 +297,442 @@ export const TopBar: React.FC<TopBarProps> = ({
             label: 'Canvas / ER',
             icon: Layers,
             onClick: () => onOpenRelationships?.(),
-            title: 'Multi-table relationships & ER canvas',
+            title: 'Interactive multi-table entity-relationship canvas',
           },
           {
             id: 'home-quality',
             label: 'Data Quality',
-            icon: ShieldCheck,
+            icon: CheckCircle2,
             onClick: () => onOpenQuality?.(),
-            title: 'Data integrity & quality rules',
+            title: 'Data validation rules and schema profiling',
+          },
+        ],
+      },
+    ],
+    Transform: [
+      {
+        name: 'Manage Columns',
+        items: [
+          {
+            id: 't-manage-cols',
+            label: 'Columns Studio',
+            icon: Columns,
+            onClick: () => onOpenTableOps?.('columns'),
+            title: 'Remove unwanted columns, keep selected, or reorder sequence',
+            accent: true,
+          },
+          {
+            id: 't-reorder',
+            label: 'Reorder Columns',
+            icon: SlidersHorizontal,
+            onClick: () => onOpenTableOps?.('columns'),
+            title: 'Rearrange column order left-to-right',
+          },
+          {
+            id: 't-rename',
+            label: 'Rename Column',
+            icon: Type,
+            onClick: () => triggerStep('rename_column'),
+            title: 'Rename column header cleanly',
+          },
+          {
+            id: 't-change-type',
+            label: 'Change Type',
+            icon: TableProperties,
+            onClick: () => triggerStep('change_type'),
+            title: 'Cast column data type (text, number, date, boolean)',
+          },
+          {
+            id: 't-promote',
+            label: 'Promote Headers',
+            icon: Heading,
+            onClick: () => onOpenTableOps?.('headers'),
+            title: 'Use values from row #1 as column headers',
+          },
+        ],
+      },
+      {
+        name: 'Reshape & Structure',
+        items: [
+          {
+            id: 't-split',
+            label: 'Split Column',
+            icon: Split,
+            onClick: () => triggerStep('split_column'),
+            title: 'Split text column by delimiter or character position',
+          },
+          {
+            id: 't-pivot',
+            label: 'Pivot Table',
+            icon: Columns,
+            onClick: () => triggerStep('pivot'),
+            title: 'Pivot rows into columns with aggregation & totals',
+            accent: true,
+          },
+          {
+            id: 't-unpivot',
+            label: 'Unpivot Columns',
+            icon: ArrowDownUp,
+            onClick: () => triggerStep('unpivot'),
+            title: 'Melt wide columns into key-value rows',
+          },
+          {
+            id: 't-transpose',
+            label: 'Transpose Matrix',
+            icon: Shuffle,
+            onClick: () => onOpenTableOps?.('transpose'),
+            title: 'Rotate table 90 degrees: swap rows and columns',
+          },
+        ],
+      },
+      {
+        name: 'Combine & Group',
+        items: [
+          {
+            id: 't-join',
+            label: 'Join Builder',
+            icon: GitMerge,
+            onClick: () => triggerStep('join'),
+            title: 'Join datasets with Venn diagram, cardinality & join health check',
+            accent: true,
+          },
+          {
+            id: 't-append',
+            label: 'Append (Union)',
+            icon: PlusCircle,
+            onClick: () => triggerStep('append'),
+            title: 'Stack multiple tables vertically with incremental discriminator',
+          },
+          {
+            id: 't-group',
+            label: 'Group By',
+            icon: TableProperties,
+            onClick: () => triggerStep('group_by'),
+            title: 'Aggregate rows by keys (SUM, AVG, MIN, MAX, COUNT)',
+          },
+        ],
+      },
+    ],
+    Clean: [
+      {
+        name: 'Cleaning Studio',
+        items: [
+          {
+            id: 'c-studio',
+            label: 'Hygiene Studio',
+            icon: ShieldCheck,
+            onClick: () => onOpenDataCleaning?.('duplicates'),
+            title: 'Open dedicated Data Cleaning Studio: duplicates, missing values, text & numeric hygiene',
+            accent: true,
+          },
+        ],
+      },
+      {
+        name: 'Duplicates',
+        items: [
+          {
+            id: 'c-dedupe',
+            label: 'Remove Duplicates',
+            icon: CopyMinus,
+            onClick: () => onOpenDataCleaning?.('duplicates'),
+            title: 'Deduplicate on key columns, keep first or last row',
+          },
+          {
+            id: 'c-audit-dedupe',
+            label: 'Audit Duplicates',
+            icon: Filter,
+            onClick: () => onOpenDataCleaning?.('duplicates'),
+            title: 'Filter to view only duplicated rows for audit',
+          },
+        ],
+      },
+      {
+        name: 'Missing & Blanks',
+        items: [
+          {
+            id: 'c-impute',
+            label: 'Handle Missing',
+            icon: Replace,
+            onClick: () => onOpenDataCleaning?.('missing'),
+            title: 'Impute missing values using Mean, Median, Mode, or custom value',
+          },
+          {
+            id: 'c-fill',
+            label: 'Fill Down / Up',
+            icon: ArrowDownUp,
+            onClick: () => triggerStep('fill_down'),
+            title: 'Propagate adjacent non-blank values up or down',
+          },
+          {
+            id: 'c-remove-blank',
+            label: 'Remove Blank Rows',
+            icon: Rows,
+            onClick: () => onOpenTableOps?.('rows'),
+            title: 'Drop rows where all cells are empty or null',
+          },
+        ],
+      },
+      {
+        name: 'Text Hygiene',
+        items: [
+          {
+            id: 'c-clean-spaces',
+            label: 'Clean Spaces',
+            icon: Type,
+            onClick: () => onOpenDataCleaning?.('text'),
+            title: 'Trim leading/trailing spaces and collapse multiple spaces into one',
+          },
+          {
+            id: 'c-standardize',
+            label: 'Standardize Values',
+            icon: SlidersHorizontal,
+            onClick: () => onOpenDataCleaning?.('text'),
+            title: 'Category mapping table: map messy spellings to standard names',
+          },
+          {
+            id: 'c-case',
+            label: 'Change Case',
+            icon: Type,
+            onClick: () => triggerStep('text_transform'),
+            title: 'Convert to UPPERCASE, lowercase, or Proper Case',
+          },
+        ],
+      },
+      {
+        name: 'Numbers & Outliers',
+        items: [
+          {
+            id: 'c-clean-num',
+            label: 'Clean Currency',
+            icon: Calculator,
+            onClick: () => onOpenDataCleaning?.('numeric'),
+            title: 'Strip $, €, commas, % and convert to pure numbers',
+          },
+          {
+            id: 'c-outliers',
+            label: 'Detect Outliers',
+            icon: TrendingUp,
+            onClick: () => onOpenDataCleaning?.('numeric'),
+            title: 'Statistical outlier detection using Interquartile Range (IQR)',
+          },
+        ],
+      },
+    ],
+    'Filter & Sort': [
+      {
+        name: 'Filter Data',
+        items: [
+          {
+            id: 'fs-filter',
+            label: 'Filter Rows',
+            icon: Filter,
+            onClick: () => triggerStep('filter_rows'),
+            title: 'Filter rows with multi-rule AND/OR conditions',
+            accent: true,
+          },
+        ],
+      },
+      {
+        name: 'Sort Data',
+        items: [
+          {
+            id: 'fs-sort',
+            label: 'Sort Rows',
+            icon: ArrowUpDown,
+            onClick: () => triggerStep('sort_rows'),
+            title: 'Multi-column priority sorting (ascending / descending)',
+            accent: true,
+          },
+        ],
+      },
+      {
+        name: 'Top / Bottom Analysis',
+        items: [
+          {
+            id: 'fs-top-bottom',
+            label: 'Top / Bottom N',
+            icon: Award,
+            onClick: () => onOpenTableOps?.('top_bottom'),
+            title: 'Filter to the top or bottom N records by metric column',
+          },
+          {
+            id: 'fs-remove-rows',
+            label: 'Remove Top/Bottom Rows',
+            icon: Rows,
+            onClick: () => onOpenTableOps?.('rows'),
+            title: 'Remove first N rows, last N rows, or keep a slice',
+          },
+        ],
+      },
+    ],
+    Analyse: [
+      {
+        name: 'Summarize & Matrix',
+        items: [
+          {
+            id: 'a-group',
+            label: 'Group & Aggregate',
+            icon: TableProperties,
+            onClick: () => triggerStep('group_by'),
+            title: 'Group by categories and compute SUM, AVG, COUNT, MIN, MAX',
+            accent: true,
+          },
+          {
+            id: 'a-pivot',
+            label: 'PivotTable Matrix',
+            icon: Columns,
+            onClick: () => triggerStep('pivot'),
+            title: 'Multi-dimensional cross-tabulation PivotTable',
+            accent: true,
+          },
+        ],
+      },
+      {
+        name: 'Calculations & Rankings',
+        items: [
+          {
+            id: 'a-window',
+            label: 'Window Calculations',
+            icon: TrendingUp,
+            onClick: () => triggerStep('window_calc'),
+            title: 'Running total, moving average, lead/lag differences',
+          },
+          {
+            id: 'a-rank',
+            label: 'Rank & Percentile',
+            icon: Award,
+            onClick: () => triggerStep('window_calc'),
+            title: 'Row rank, dense rank, and percentile distribution',
+          },
+          {
+            id: 'a-top-n',
+            label: 'Top Performing Records',
+            icon: Award,
+            onClick: () => onOpenTableOps?.('top_bottom'),
+            title: 'Identify top performers by revenue, quantity or score',
+          },
+          {
+            id: 'a-outlier-flag',
+            label: 'Flag Outliers',
+            icon: ShieldCheck,
+            onClick: () => onOpenDataCleaning?.('numeric'),
+            title: 'Create TRUE/FALSE anomaly flags for statistical outliers',
+          },
+        ],
+      },
+      {
+        name: 'Visual Dashboards',
+        items: [
+          {
+            id: 'a-dash',
+            label: 'Open Dashboard',
+            icon: BarChart3,
+            onClick: () => onOpenDashboard?.(),
+            title: 'Explore 16 visual chart templates with interactive slicers',
+            accent: true,
           },
         ],
       },
     ],
     Formulas: [
       {
-        name: 'Lookup & Reference',
+        name: 'Formula Builders',
         items: [
           {
-            id: 'f-xlookup',
-            label: 'XLOOKUP',
-            icon: GitMerge,
-            onClick: () => triggerStep('xlookup'),
-            title: 'XLOOKUP Wizard: Modern flexible lookup in any direction with multi-column return',
+            id: 'f-guided-builder',
+            label: 'Guided Formula Builder',
+            icon: Calculator,
+            onClick: () => onOpenFormulaBuilder?.(),
+            title: 'Excel Formula Studio: Search 50+ functions with syntax, descriptions & live row preview',
             accent: true,
           },
           {
-            id: 'f-vlookup',
-            label: 'VLOOKUP',
-            icon: TableProperties,
-            onClick: () => triggerStep('vlookup'),
-            title: 'VLOOKUP Wizard: Vertical table lookup by column index number (col_index_num)',
-            accent: true,
+            id: 'f-custom-col',
+            label: 'Custom Column',
+            icon: PlusCircle,
+            onClick: () => triggerStep('custom_column'),
+            title: 'Add a column with a constant value or custom expression',
           },
           {
-            id: 'f-join',
-            label: 'Visual Join',
-            icon: Layers,
-            onClick: () => triggerStep('join'),
-            title: 'Join tables with cardinality & key health check',
+            id: 'f-conditional',
+            label: 'If / Then Logic',
+            icon: Sparkles,
+            onClick: () => triggerStep('conditional'),
+            title: 'Visual IF / IFS / SWITCH rule builder with fallback',
           },
         ],
       },
       {
-        name: 'Function Library',
+        name: 'Function Catalog',
         items: [
           {
             id: 'f-math',
-            label: 'Calculate Column',
+            label: 'Math & Rounding',
             icon: Calculator,
             onClick: () => triggerStep('math_transform'),
-            title: 'Arithmetic (+, -, *, /), round, percent change',
-          },
-          {
-            id: 'f-cond',
-            label: 'If / Then Logic',
-            icon: Sparkles,
-            onClick: () => triggerStep('conditional'),
-            title: 'Visual IF / IFS / SWITCH builder',
+            title: 'Arithmetic operations, ROUND, ROUNDUP, ABS, percentage change',
           },
           {
             id: 'f-text',
             label: 'Text Functions',
             icon: Type,
             onClick: () => triggerStep('text_transform'),
-            title: 'TRIM, UPPER, LOWER, PROPER, SUBSTRING, CONCAT',
+            title: 'TEXTBEFORE, TEXTAFTER, TRIM, CLEAN, UPPER, LOWER, PROPER, CONCAT',
           },
           {
             id: 'f-date',
             label: 'Date & Time',
             icon: Calendar,
             onClick: () => triggerStep('date_transform'),
-            title: 'YEAR, MONTH, EOMONTH, DATEDIF, add interval',
+            title: 'NETWORKDAYS working days, EOMONTH, EDATE, YEAR, MONTH, DAY',
           },
           {
-            id: 'f-window',
-            label: 'Window & Rank',
-            icon: TrendingUp,
-            onClick: () => triggerStep('window_calc'),
-            title: 'Running total, Rank, Moving average, Lag / Lead',
-          },
-        ],
-      },
-    ],
-    Data: [
-      {
-        name: 'Get & Export Data',
-        items: [
-          {
-            id: 'd-import',
-            label: 'Import File',
-            icon: UploadCloud,
-            onClick: triggerFileImport,
-            accent: true,
-          },
-          {
-            id: 'd-export',
-            label: 'Download / Export',
-            icon: Download,
-            onClick: () => onOpenExport?.(),
-            primarySolid: true,
-          },
-        ],
-      },
-      {
-        name: 'Sort & Filter',
-        items: [
-          {
-            id: 'd-filter',
-            label: 'Filter Rows',
-            icon: Filter,
-            onClick: () => triggerStep('filter_rows'),
-          },
-          {
-            id: 'd-sort',
-            label: 'Sort Rows',
-            icon: ArrowUpDown,
-            onClick: () => triggerStep('sort_rows'),
-          },
-        ],
-      },
-      {
-        name: 'Data Tools',
-        items: [
-          {
-            id: 'd-dedupe',
-            label: 'Remove Duplicates',
-            icon: CopyMinus,
-            onClick: () => triggerStep('remove_duplicates'),
-          },
-          {
-            id: 'd-type',
-            label: 'Change Type',
-            icon: Columns,
-            onClick: () => triggerStep('change_type'),
-          },
-          {
-            id: 'd-rename',
-            label: 'Rename Column',
-            icon: Type,
-            onClick: () => triggerStep('rename_column'),
-          },
-          {
-            id: 'd-replace',
-            label: 'Replace Values',
-            icon: Replace,
-            onClick: () => triggerStep('replace_values'),
-          },
-          {
-            id: 'd-fill',
-            label: 'Fill Down / Up',
-            icon: ArrowDownUp,
-            onClick: () => triggerStep('fill_down'),
-          },
-          {
-            id: 'd-split',
-            label: 'Text to Columns',
-            icon: Split,
-            onClick: () => triggerStep('split_column'),
-          },
-        ],
-      },
-      {
-        name: 'Outline & Reshape',
-        items: [
-          {
-            id: 'd-group',
-            label: 'Group & Summarize',
-            icon: TableProperties,
-            onClick: () => triggerStep('group_by'),
-          },
-          {
-            id: 'd-pivot',
-            label: 'PivotTable',
-            icon: Columns,
-            onClick: () => triggerStep('pivot'),
-            title: 'Insert / Build PivotTable: Reshape rows into columns with live aggregation & totals',
-            accent: true,
-          },
-          {
-            id: 'd-unpivot',
-            label: 'Unpivot Columns',
-            icon: ArrowDownUp,
-            onClick: () => triggerStep('unpivot'),
-          },
-        ],
-      },
-    ],
-    Join: [
-      {
-        name: 'Combine Queries',
-        items: [
-          {
-            id: 'j-builder',
-            label: 'Visual Join Builder',
-            icon: GitMerge,
-            onClick: () => triggerStep('join'),
-            accent: true,
-          },
-          {
-            id: 'j-xlookup',
+            id: 'f-xlookup',
             label: 'XLOOKUP',
-            icon: Layers,
+            icon: GitMerge,
             onClick: () => triggerStep('xlookup'),
+            title: 'Modern lookup across sheets in any column direction',
           },
           {
-            id: 'j-vlookup',
+            id: 'f-vlookup',
             label: 'VLOOKUP',
             icon: TableProperties,
             onClick: () => triggerStep('vlookup'),
-          },
-          {
-            id: 'j-append',
-            label: 'Append / Union',
-            icon: PlusCircle,
-            onClick: () => triggerStep('append'),
-          },
-        ],
-      },
-      {
-        name: 'Relationships',
-        items: [
-          {
-            id: 'j-canvas',
-            label: 'Canvas / ER',
-            icon: Layers,
-            onClick: () => onOpenRelationships?.(),
-          },
-        ],
-      },
-    ],
-    Quality: [
-      {
-        name: 'Data Integrity',
-        items: [
-          {
-            id: 'q-rules',
-            label: 'Quality Rules',
-            icon: ShieldCheck,
-            onClick: () => onOpenQuality?.(),
-            accent: true,
-          },
-          {
-            id: 'q-dedupe',
-            label: 'Remove Duplicates',
-            icon: CopyMinus,
-            onClick: () => triggerStep('remove_duplicates'),
-          },
-          {
-            id: 'q-replace',
-            label: 'Clean Nulls',
-            icon: Replace,
-            onClick: () => triggerStep('replace_values'),
+            title: 'Classic vertical lookup by column index number',
           },
         ],
       },
     ],
     View: [
       {
-        name: 'Visual Analytics',
+        name: 'Visuals & Models',
         items: [
           {
             id: 'v-dashboard',
             label: 'Visual Dashboard',
             icon: BarChart3,
             onClick: () => onOpenDashboard?.(),
-            title: 'Open interactive Visual Dashboard (Bar, Clustered Bar, Column, Histogram, Donut, Pie, Slicer & KPI Cards)',
+            title: 'Open interactive Visual Dashboard (16 visual charts & KPI scorecards)',
             accent: true,
+          },
+          {
+            id: 'v-canvas',
+            label: 'Relationships / ER',
+            icon: Layers,
+            onClick: () => onOpenRelationships?.(),
+            title: 'Multi-table schema diagram and join relationships',
+          },
+          {
+            id: 'v-quality',
+            label: 'Data Quality Rules',
+            icon: CheckCircle2,
+            onClick: () => onOpenQuality?.(),
+            title: 'Inspect data quality rules and schema integrity',
           },
         ],
       },
       {
-        name: 'Show Panes',
+        name: 'Show / Hide Panes',
         items: [
           {
             id: 'v-left',
@@ -588,47 +771,111 @@ export const TopBar: React.FC<TopBarProps> = ({
           },
         ],
       },
-    ],
-    Help: [
       {
-        name: 'Demo & Sample Data',
+        name: 'Governance',
         items: [
           {
-            id: 'h-samples',
-            label: 'Load Sample Data',
-            icon: Sparkles,
-            onClick: () => loadSamples(),
-            accent: true,
-          },
-        ],
-      },
-      {
-        name: 'Workbook Governance',
-        items: [
-          {
-            id: 'h-templates',
+            id: 'v-templates',
             label: 'Templates',
             icon: LayoutTemplate,
             onClick: () => onOpenTemplates?.(),
           },
           {
-            id: 'h-versions',
-            label: 'Versions',
+            id: 'v-versions',
+            label: 'Version History',
             icon: History,
             onClick: () => onOpenVersions?.(),
           },
           {
-            id: 'h-audit',
-            label: 'Audit Log',
+            id: 'v-audit',
+            label: 'Audit Trail',
             icon: Activity,
             onClick: () => onOpenAudit?.(),
           },
         ],
       },
     ],
+    Export: [
+      {
+        name: 'Quick Downloads',
+        items: [
+          {
+            id: 'e-xlsx',
+            label: 'Download Excel (.xlsx)',
+            icon: Download,
+            onClick: () => (onQuickDownload ? onQuickDownload('xlsx_values') : onOpenExport?.()),
+            title: 'Download transformed data immediately as Microsoft Excel spreadsheet',
+            accent: true,
+          },
+          {
+            id: 'e-csv',
+            label: 'Download CSV',
+            icon: Download,
+            onClick: () => (onQuickDownload ? onQuickDownload('csv') : onOpenExport?.()),
+            title: 'Download as comma-separated values (.csv)',
+          },
+        ],
+      },
+      {
+        name: 'Export & Share Studio',
+        items: [
+          {
+            id: 'e-hub',
+            label: 'Export Studio',
+            icon: UploadCloud,
+            onClick: () => (onOpenExportShare ? onOpenExportShare('files') : onOpenExport?.()),
+            title: 'Packaged Workbooks (.sswb.html), Power BI starter pack, Parquet, and PDF reports',
+            primarySolid: true,
+          },
+          {
+            id: 'e-run-full',
+            label: 'Run Full Pipeline',
+            icon: Play,
+            onClick: () => (onOpenRunFull ? onOpenRunFull() : onOpenExport?.()),
+            title: 'Execute complete data pipeline on 100% full dataset rows',
+            accent: true,
+          },
+        ],
+      },
+      {
+        name: 'Share & Governance',
+        items: [
+          {
+            id: 'e-share',
+            label: 'Share Project',
+            icon: Share2,
+            onClick: () => (onOpenExportShare ? onOpenExportShare('link') : onOpenShare?.()),
+            title: 'Share interactive link or embed with stakeholders',
+          },
+          {
+            id: 'e-versions',
+            label: 'Snapshots',
+            icon: History,
+            onClick: () => onOpenVersions?.(),
+            title: 'Create and review version snapshots of this workbook',
+          },
+          {
+            id: 'e-audit',
+            label: 'Audit Trail',
+            icon: Activity,
+            onClick: () => onOpenAudit?.(),
+            title: 'Review complete changelog and execution history',
+          },
+        ],
+      },
+    ],
   };
 
-  const ribbonTabs: RibbonTabId[] = ['Home', 'Formulas', 'Data', 'Join', 'Quality', 'View', 'Help'];
+  const ribbonTabs: RibbonTabId[] = [
+    'Home',
+    'Transform',
+    'Clean',
+    'Filter & Sort',
+    'Analyse',
+    'Formulas',
+    'View',
+    'Export',
+  ];
   const activeGroups = ribbonConfig[activeRibbonTab] || [];
 
   return (
@@ -639,9 +886,12 @@ export const TopBar: React.FC<TopBarProps> = ({
         ref={topFileInputRef}
         className="hidden"
         accept=".csv,.xlsx,.xls,.parquet"
-        onChange={(e) => {
-          if (e.target.files && e.target.files[0]) {
-            uploadDataset(e.target.files[0]);
+        multiple
+        onChange={async (e) => {
+          if (e.target.files && e.target.files.length > 0) {
+            for (const file of Array.from(e.target.files)) {
+              await uploadDataset(file);
+            }
             e.target.value = '';
           }
         }}
@@ -810,6 +1060,16 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* Right: Dashboard, Share, User Menu, Task Pane Toggle */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Feature A: Chat with Data */}
+          <button
+            type="button"
+            onClick={onOpenChatWithData}
+            title="Chat with Data: Natural language queries executed locally via DuckDB"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-[#0078D4] hover:bg-[#106EBE] text-white border border-white/30 rounded-[2px] whitespace-nowrap shrink-0 transition-colors shadow-2xs"
+          >
+            <MessageSquare size={13} className="shrink-0" />
+            <span>Chat with Data</span>
+          </button>
           <button
             type="button"
             onClick={onOpenDashboard}

@@ -20,6 +20,10 @@ import { ShareModal } from '../components/collab/ShareModal';
 import { AuditModal } from '../components/audit/AuditModal';
 import { DashboardModal } from '../components/dashboard/DashboardModal';
 import { EditStepModal } from '../components/steps/EditStepModal';
+import { FormulaBuilderModal } from '../components/transforms/FormulaBuilderModal';
+import { DataCleaningModal } from '../components/transforms/DataCleaningModal';
+import { TableOperationsModal } from '../components/transforms/TableOperationsModal';
+import { StepBuilderModal } from '../components/steps/StepBuilderModal';
 import { RightPanel } from '../components/layout/RightPanel';
 import { LeftPanel } from '../components/layout/LeftPanel';
 import { DataGrid } from '../components/grid/DataGrid';
@@ -89,6 +93,9 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Append / Union Tables')).toBeDefined();
     expect(screen.getByText('Union All (Default)')).toBeDefined();
     expect(screen.getByText('Match by Column Name')).toBeDefined();
+    expect(screen.getByText(/Add Custom Column/i)).toBeDefined();
+    expect(screen.getByText('Append New Records Only')).toBeDefined();
+    expect(screen.getByText('Upsert / Replace by Key')).toBeDefined();
   });
 
   it('renders RelationshipsModal with ER Canvas and JoinBuilderModal with health check', async () => {
@@ -866,6 +873,648 @@ describe('StepSheet Workbench', () => {
     }
     expect(screen.getByTestId('page-tab-page_1')).toBeDefined();
     expect(screen.getByTestId('page-tab-page_2')).toBeDefined();
+  });
+
+  it('renders Custom Column in catalog and executes custom column and incremental append in localEngine', async () => {
+    // 1. RightPanel catalog contains Custom Column
+    useWorkbenchStore.setState({ activeTab: 'catalog' });
+    render(<RightPanel />);
+    expect(screen.getAllByText('Custom Column').length).toBeGreaterThan(0);
+
+    // 2. StepBuilderModal renders for custom_column
+    useWorkbenchStore.setState({
+      isStepWizardOpen: true,
+      activeWizardStepType: 'custom_column',
+      editingStep: null,
+    });
+    render(<StepBuilderModal />);
+    expect(screen.getByText('Add Custom Column')).toBeDefined();
+    expect(screen.getByPlaceholderText(/Total_Amount, Profit_Margin/i)).toBeDefined();
+
+    // 3. Test localEngine execution for custom_column
+    const baseDataset = {
+      meta: {
+        id: 'ds-jan',
+        name: 'Sales_Jan',
+        project_id: 'p1',
+        file_id: 'f1',
+        file_format: 'csv' as const,
+        row_count: 2,
+        column_count: 2,
+        size_bytes: 100,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'id', data_type: 'integer', nullable: false },
+          { name: 'amount', data_type: 'float', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [
+        { id: 1, amount: 100 },
+        { id: 2, amount: 200 },
+      ],
+    };
+
+    const febDataset = {
+      meta: {
+        id: 'ds-feb',
+        name: 'Sales_Feb',
+        project_id: 'p1',
+        file_id: 'f2',
+        file_format: 'csv' as const,
+        row_count: 2,
+        column_count: 2,
+        size_bytes: 100,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'id', data_type: 'integer', nullable: false },
+          { name: 'amount', data_type: 'float', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [
+        { id: 2, amount: 250 }, // overlapping key
+        { id: 3, amount: 300 }, // new key
+      ],
+    };
+
+    // Execute append with custom column (Month) and append_new_only incremental mode
+    const appendStep: any = {
+      id: 'step-append-1',
+      type: 'append',
+      label: 'Append Feb Sales',
+      enabled: true,
+      params: {
+        append_dataset_id: 'ds-feb',
+        append_dataset_name: 'Sales_Feb',
+        add_custom_column: true,
+        custom_column_name: 'Month',
+        primary_value: 'January',
+        appended_value: 'February',
+        incremental_mode: 'append_new_only',
+        key_column: 'id',
+      },
+    };
+
+    const runResult = await localEngine.runPipeline('ds-jan', [appendStep], 100, [baseDataset as any, febDataset as any]);
+    expect(runResult.rows.length).toBe(3); // id 1 (Jan), id 2 (Jan), id 3 (Feb) - id 2 from Feb was deduplicated
+    expect(runResult.rows[0].Month).toBe('January');
+    expect(runResult.rows[1].Month).toBe('January');
+    expect(runResult.rows[2].Month).toBe('February');
+    expect(runResult.rows[2].id).toBe(3);
+
+    // Test standalone custom_column step with static value
+    const customColStep: any = {
+      id: 'step-cc-1',
+      type: 'custom_column',
+      label: 'Add Status Column',
+      enabled: true,
+      params: {
+        new_column: 'Status',
+        value: 'Active',
+      },
+    };
+    const ccResult = await localEngine.runPipeline('ds-jan', [customColStep], 100, [baseDataset as any]);
+    expect(ccResult.rows[0].Status).toBe('Active');
+    expect(ccResult.rows[1].Status).toBe('Active');
+  });
+
+  it('supports editing applied aggregation step and synchronizing function, alias, and step label', () => {
+    const groupStep: any = {
+      id: 'step-group-1',
+      type: 'group_by',
+      label: 'Group by region (sum_amount)',
+      enabled: true,
+      params: {
+        group_by_columns: ['region'],
+        aggregations: [
+          { column: 'amount', agg_func: 'sum', function: 'sum', output_column: 'sum_amount', alias: 'sum_amount' },
+        ],
+      },
+    };
+
+    const mockDataset = {
+      id: 'ds-agg',
+      name: 'Sales',
+      original_filename: 'sales.csv',
+      file_format: 'csv' as const,
+      row_count: 10,
+      column_count: 2,
+      file_size_bytes: 100,
+      schema_metadata: [
+        { name: 'region', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
+        { name: 'amount', data_type: 'float', physical_type: 'FLOAT', nullable: false },
+      ],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    useWorkbenchStore.setState({
+      datasets: [mockDataset as any],
+      selectedDataset: mockDataset as any,
+      columns: mockDataset.schema_metadata as any,
+      steps: [groupStep],
+      isEditStepModalOpen: true,
+      editingStep: groupStep,
+    });
+
+    render(<EditStepModal />);
+    expect(screen.getByText('Edit Applied Step')).toBeDefined();
+    expect(screen.getByDisplayValue('Group by region (sum_amount)')).toBeDefined();
+
+    // Select dropdown for aggregation function
+    const funcSelect = screen.getByDisplayValue('SUM');
+    expect(funcSelect).toBeDefined();
+
+    // Change agg_func to AVG
+    fireEvent.change(funcSelect, { target: { value: 'avg' } });
+
+    // Verify alias and label update
+    expect(screen.getByDisplayValue('avg_amount')).toBeDefined();
+    expect(screen.getAllByDisplayValue(/avg_amount/i).length).toBe(2);
+  });
+
+  it('executes custom column formulas with arithmetic, string functions, and conditionals in localEngine', async () => {
+    const dataset = {
+      meta: {
+        id: 'ds-calc',
+        name: 'Orders',
+        project_id: 'p1',
+        file_id: 'f1',
+        file_format: 'csv' as const,
+        row_count: 2,
+        column_count: 4,
+        size_bytes: 200,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'item', data_type: 'text', nullable: false },
+          { name: 'price', data_type: 'float', nullable: false },
+          { name: 'qty', data_type: 'integer', nullable: false },
+          { name: 'category', data_type: 'text', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [
+        { item: 'Widget Pro', price: 50, qty: 3, category: 'hardware' },
+        { item: 'Cloud Sub', price: 120, qty: 1, category: 'software' },
+      ],
+    };
+
+    // 1. Arithmetic formula: [price] * [qty]
+    const stepArith: any = {
+      id: 'step-arith',
+      type: 'custom_column',
+      label: 'Compute Total',
+      enabled: true,
+      params: {
+        new_column: 'Total_Price',
+        formula: '[price] * [qty]',
+      },
+    };
+    const resArith = await localEngine.runPipeline('ds-calc', [stepArith], 100, [dataset as any]);
+    expect(resArith.rows[0].Total_Price).toBe(150);
+    expect(resArith.rows[1].Total_Price).toBe(120);
+
+    // 2. Text formula: UPPER([category])
+    const stepText: any = {
+      id: 'step-text',
+      type: 'custom_column',
+      label: 'Upper Category',
+      enabled: true,
+      params: {
+        new_column: 'Cat_Upper',
+        formula: 'UPPER([category])',
+      },
+    };
+    const resText = await localEngine.runPipeline('ds-calc', [stepText], 100, [dataset as any]);
+    expect(resText.rows[0].Cat_Upper).toBe('HARDWARE');
+    expect(resText.rows[1].Cat_Upper).toBe('SOFTWARE');
+
+    // 3. Conditional formula: IF([price] > 100, "High", "Standard")
+    const stepCond: any = {
+      id: 'step-cond',
+      type: 'custom_column',
+      label: 'Classify Tier',
+      enabled: true,
+      params: {
+        new_column: 'Price_Tier',
+        formula: 'IF([price] > 100, "High", "Standard")',
+      },
+    };
+    const resCond = await localEngine.runPipeline('ds-calc', [stepCond], 100, [dataset as any]);
+    expect(resCond.rows[0].Price_Tier).toBe('Standard');
+    expect(resCond.rows[1].Price_Tier).toBe('High');
+  });
+
+  it('supports multi-table append stacking three datasets in localEngine', async () => {
+    const ds1 = {
+      meta: {
+        id: 'ds-q1',
+        name: 'Q1',
+        project_id: 'p1',
+        file_id: 'f1',
+        file_format: 'csv' as const,
+        row_count: 1,
+        column_count: 2,
+        size_bytes: 50,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'id', data_type: 'integer', nullable: false },
+          { name: 'val', data_type: 'integer', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [{ id: 1, val: 10 }],
+    };
+    const ds2 = {
+      meta: {
+        id: 'ds-q2',
+        name: 'Q2',
+        project_id: 'p1',
+        file_id: 'f2',
+        file_format: 'csv' as const,
+        row_count: 1,
+        column_count: 2,
+        size_bytes: 50,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'id', data_type: 'integer', nullable: false },
+          { name: 'val', data_type: 'integer', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [{ id: 2, val: 20 }],
+    };
+    const ds3 = {
+      meta: {
+        id: 'ds-q3',
+        name: 'Q3',
+        project_id: 'p1',
+        file_id: 'f3',
+        file_format: 'csv' as const,
+        row_count: 1,
+        column_count: 2,
+        size_bytes: 50,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'id', data_type: 'integer', nullable: false },
+          { name: 'val', data_type: 'integer', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [{ id: 3, val: 30 }],
+    };
+
+    const multiAppendStep: any = {
+      id: 'step-multi-append',
+      type: 'append',
+      label: 'Append Q2 and Q3',
+      enabled: true,
+      params: {
+        dataset_ids: ['ds-q2', 'ds-q3'],
+      },
+    };
+
+    const stacked = await localEngine.runPipeline('ds-q1', [multiAppendStep], 100, [ds1 as any, ds2 as any, ds3 as any]);
+    expect(stacked.rows.length).toBe(3);
+    expect(stacked.rows.map((r: any) => r.id)).toEqual([1, 2, 3]);
+  });
+
+  it('renders FormulaBuilderModal with searchable function catalog and token insertion', () => {
+    useWorkbenchStore.setState({
+      selectedDataset: {
+        id: 'ds-test',
+        name: 'Orders',
+        project_id: 'p1',
+        original_filename: 'test.csv',
+        file_format: 'csv',
+        row_count: 3,
+        column_count: 3,
+        file_size_bytes: 100,
+        schema_metadata: [
+          { name: 'Price', data_type: 'float', physical_type: 'float8', nullable: false },
+          { name: 'Qty', data_type: 'integer', physical_type: 'int4', nullable: false },
+          { name: 'Email', data_type: 'text', physical_type: 'varchar', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      columns: [
+        { name: 'Price', data_type: 'float' as const, physical_type: 'float8', nullable: false },
+        { name: 'Qty', data_type: 'integer' as const, physical_type: 'int4', nullable: false },
+        { name: 'Email', data_type: 'text' as const, physical_type: 'varchar', nullable: false },
+      ],
+      rows: [
+        { Price: 19.99, Qty: 2, Email: 'john.doe@example.com' },
+        { Price: 150.5, Qty: 1, Email: 'jane.smith@acme.org' },
+      ],
+    });
+
+    render(<FormulaBuilderModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText('Guided Formula & Calculated Column Builder')).toBeDefined();
+    expect(screen.getByPlaceholderText(/Search functions/i)).toBeDefined();
+    expect(screen.getByText('Sample Row Evaluation Preview')).toBeDefined();
+  });
+
+  it('evaluates Excel formulas (ROUND, IF, TEXTBEFORE, TEXTAFTER, NETWORKDAYS, EOMONTH, CLEAN) in localEngine', async () => {
+    const ds = {
+      meta: {
+        id: 'ds-calc',
+        name: 'CalcTest',
+        project_id: 'p1',
+        file_id: 'f1',
+        file_format: 'csv' as const,
+        row_count: 2,
+        column_count: 5,
+        size_bytes: 100,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'Price', data_type: 'float', nullable: false },
+          { name: 'Email', data_type: 'string', nullable: false },
+          { name: 'StartDate', data_type: 'string', nullable: false },
+          { name: 'EndDate', data_type: 'string', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [
+        { Price: 19.456, Email: 'alice.wonder@company.com', StartDate: '2026-01-05', EndDate: '2026-01-09' },
+        { Price: 120.89, Email: 'bob.builder@acme.org', StartDate: '2026-02-01', EndDate: '2026-02-10' },
+      ],
+    };
+
+    const steps: any[] = [
+      {
+        id: 's1',
+        type: 'custom_column',
+        label: 'Round Price',
+        enabled: true,
+        params: { new_column: 'Rounded', formula: 'ROUND([Price], 1)' },
+      },
+      {
+        id: 's2',
+        type: 'custom_column',
+        label: 'User Name',
+        enabled: true,
+        params: { new_column: 'User', formula: 'TEXTBEFORE([Email], "@")' },
+      },
+      {
+        id: 's3',
+        type: 'custom_column',
+        label: 'Domain',
+        enabled: true,
+        params: { new_column: 'Domain', formula: 'TEXTAFTER([Email], "@")' },
+      },
+      {
+        id: 's4',
+        type: 'custom_column',
+        label: 'WorkDays',
+        enabled: true,
+        params: { new_column: 'WorkDays', formula: 'NETWORKDAYS([StartDate], [EndDate])' },
+      },
+      {
+        id: 's5',
+        type: 'custom_column',
+        label: 'PriceTier',
+        enabled: true,
+        params: { new_column: 'PriceTier', formula: 'IF([Price] > 100, "Premium", "Standard")' },
+      },
+    ];
+
+    const res = await localEngine.runPipeline('ds-calc', steps, 100, [ds as any]);
+    expect(res.rows[0].Rounded).toBe(19.5);
+    expect(res.rows[0].User).toBe('alice.wonder');
+    expect(res.rows[0].Domain).toBe('company.com');
+    expect(res.rows[0].WorkDays).toBe(5);
+    expect(res.rows[0].PriceTier).toBe('Standard');
+    expect(res.rows[1].PriceTier).toBe('Premium');
+  });
+
+  it('renders DataCleaningModal and executes duplicates_only, impute_missing, standardize_values, and flag_outliers in localEngine', async () => {
+    useWorkbenchStore.setState({
+      selectedDataset: {
+        id: 'ds-clean',
+        name: 'DirtyData',
+        project_id: 'p1',
+        original_filename: 'test.csv',
+        file_format: 'csv',
+        row_count: 5,
+        column_count: 3,
+        file_size_bytes: 100,
+        schema_metadata: [
+          { name: 'category', data_type: 'text', physical_type: 'varchar', nullable: false },
+          { name: 'amount', data_type: 'float', physical_type: 'float8', nullable: true },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      columns: [
+        { name: 'category', data_type: 'text' as const, physical_type: 'varchar', nullable: false },
+        { name: 'amount', data_type: 'float' as const, physical_type: 'float8', nullable: true },
+      ],
+      rows: [
+        { category: 'electr', amount: 100 },
+        { category: 'electr', amount: 100 },
+        { category: 'Electronics', amount: null },
+        { category: 'Books', amount: 50 },
+        { category: 'Books', amount: 9999 }, // Outlier
+      ],
+    });
+
+    render(<DataCleaningModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText(/Cleaning & Hygiene Studio/i)).toBeDefined();
+    expect(screen.getByText(/Audit Duplicates Only/i)).toBeDefined();
+
+    const ds = {
+      meta: {
+        id: 'ds-clean',
+        name: 'DirtyData',
+        project_id: 'p1',
+        file_id: 'f1',
+        file_format: 'csv' as const,
+        row_count: 5,
+        column_count: 2,
+        size_bytes: 100,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'category', data_type: 'string', nullable: false },
+          { name: 'amount', data_type: 'float', nullable: true },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [
+        { category: 'electr', amount: 100 },
+        { category: 'electr', amount: 100 },
+        { category: 'Electronics', amount: null },
+        { category: 'Books', amount: 50 },
+        { category: 'Books', amount: 9999 },
+      ],
+    };
+
+    // Test Duplicates Only mode
+    const dedupStep: any = {
+      id: 'step-dedup-audit',
+      type: 'remove_duplicates',
+      label: 'Audit Duplicates',
+      enabled: true,
+      params: { columns: ['category'], keep: 'duplicates_only' },
+    };
+    const dedupRes = await localEngine.runPipeline('ds-clean', [dedupStep], 100, [ds as any]);
+    expect(dedupRes.rows.length).toBe(4); // 'electr' (2) and 'Books' (2) are duplicated
+
+    // Test Impute Missing (mean)
+    const imputeStep: any = {
+      id: 'step-impute',
+      type: 'impute_missing',
+      label: 'Impute Mean',
+      enabled: true,
+      params: { column: 'amount', strategy: 'mean' },
+    };
+    const imputeRes = await localEngine.runPipeline('ds-clean', [imputeStep], 100, [ds as any]);
+    expect(imputeRes.rows[2].amount).toBeGreaterThan(0);
+
+    // Test Standardize Values (mapping table)
+    const stdStep: any = {
+      id: 'step-std',
+      type: 'standardize_values',
+      label: 'Standardize Category',
+      enabled: true,
+      params: { column: 'category', mapping: { electr: 'Electronics' } },
+    };
+    const stdRes = await localEngine.runPipeline('ds-clean', [stdStep], 100, [ds as any]);
+    expect(stdRes.rows[0].category).toBe('Electronics');
+
+    // Test Flag Outliers (IQR)
+    const outlierStep: any = {
+      id: 'step-outlier',
+      type: 'flag_outliers',
+      label: 'Flag Outliers',
+      enabled: true,
+      params: { column: 'amount', iqr_multiplier: 1.5, output_column: 'is_outlier' },
+    };
+    const outlierRes = await localEngine.runPipeline('ds-clean', [outlierStep], 100, [ds as any]);
+    expect(outlierRes.rows.some((r: any) => r.is_outlier === true)).toBe(true);
+  });
+
+  it('renders TableOperationsModal and executes remove_column, reorder_columns, promote_headers, remove_rows, top_bottom_n, and transpose in localEngine', async () => {
+    render(<TableOperationsModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByText('Table Structure & Reshape Studio')).toBeDefined();
+    expect(screen.getByText('Manage Columns')).toBeDefined();
+    expect(screen.getByText('Promote Headers')).toBeDefined();
+    expect(screen.getByText('Remove Rows')).toBeDefined();
+    expect(screen.getByText('Top / Bottom N')).toBeDefined();
+    expect(screen.getByText('Transpose Table')).toBeDefined();
+
+    const ds = {
+      meta: {
+        id: 'ds-ops',
+        name: 'TableOps',
+        project_id: 'p1',
+        file_id: 'f1',
+        file_format: 'csv' as const,
+        row_count: 4,
+        column_count: 3,
+        size_bytes: 100,
+        storage_path: '',
+        schema_metadata: [
+          { name: 'col_a', data_type: 'string', nullable: false },
+          { name: 'col_b', data_type: 'integer', nullable: false },
+          { name: 'col_c', data_type: 'float', nullable: false },
+        ],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      rows: [
+        { col_a: 'Row1', col_b: 10, col_c: 100.5 },
+        { col_a: 'Row2', col_b: 40, col_c: 200.5 },
+        { col_a: 'Row3', col_b: 20, col_c: 300.5 },
+        { col_a: 'Row4', col_b: 30, col_c: 400.5 },
+      ],
+    };
+
+    // 1. Remove Column (drop col_c)
+    const dropStep: any = {
+      id: 's-drop',
+      type: 'remove_column',
+      label: 'Drop col_c',
+      enabled: true,
+      params: { columns: ['col_c'], keep_selected: false },
+    };
+    const dropRes = await localEngine.runPipeline('ds-ops', [dropStep], 100, [ds as any]);
+    expect(dropRes.rows[0].col_c).toBeUndefined();
+    expect(dropRes.rows[0].col_a).toBe('Row1');
+
+    // 2. Reorder Columns
+    const reorderStep: any = {
+      id: 's-reorder',
+      type: 'reorder_columns',
+      label: 'Reorder cols',
+      enabled: true,
+      params: { column_order: ['col_b', 'col_a', 'col_c'] },
+    };
+    const reorderRes = await localEngine.runPipeline('ds-ops', [reorderStep], 100, [ds as any]);
+    expect(Object.keys(reorderRes.rows[0])).toEqual(['col_b', 'col_a', 'col_c']);
+
+    // 3. Remove Rows (top 1)
+    const removeRowsStep: any = {
+      id: 's-rm-rows',
+      type: 'remove_rows',
+      label: 'Remove top 1',
+      enabled: true,
+      params: { mode: 'top_n', count: 1 },
+    };
+    const rmRes = await localEngine.runPipeline('ds-ops', [removeRowsStep], 100, [ds as any]);
+    expect(rmRes.rows.length).toBe(3);
+    expect(rmRes.rows[0].col_a).toBe('Row2');
+
+    // 4. Top N
+    const topStep: any = {
+      id: 's-top',
+      type: 'top_bottom_n',
+      label: 'Top 2 by col_b',
+      enabled: true,
+      params: { column: 'col_b', mode: 'top', n: 2 },
+    };
+    const topRes = await localEngine.runPipeline('ds-ops', [topStep], 100, [ds as any]);
+    expect(topRes.rows.length).toBe(2);
+    expect(topRes.rows[0].col_b).toBe(40);
+    expect(topRes.rows[1].col_b).toBe(30);
+
+    // 5. Transpose
+    const transposeStep: any = {
+      id: 's-transpose',
+      type: 'transpose',
+      label: 'Transpose Table',
+      enabled: true,
+      params: {},
+    };
+    const transRes = await localEngine.runPipeline('ds-ops', [transposeStep], 100, [ds as any]);
+    expect(transRes.rows.length).toBe(3); // 3 original columns become 3 rows
+    expect(transRes.rows[0].Attribute).toBe('col_a');
+  });
+
+  it('renders EditStepModal visual editor for remove_column, reorder_columns, impute_missing, and flag_outliers', () => {
+    useWorkbenchStore.setState({
+      isEditStepModalOpen: true,
+      editingStep: {
+        id: 'step-edit-test',
+        type: 'remove_column',
+        label: 'Remove col_c',
+        enabled: true,
+        params: { columns: ['col_c'], keep_selected: false },
+      },
+    });
+
+    render(<EditStepModal />);
+    expect(screen.getByText('Drop Selected Columns')).toBeDefined();
+    expect(screen.getByText('Keep Only Selected Columns')).toBeDefined();
   });
 });
 

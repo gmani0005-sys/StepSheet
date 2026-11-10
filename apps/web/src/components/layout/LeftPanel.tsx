@@ -47,10 +47,12 @@ export const LeftPanel: React.FC = () => {
 
   if (!isLeftPanelOpen) return null;
 
-  const handleFileUpload = async (file: File) => {
+  const handleFilesUpload = async (files: FileList | File[]) => {
     setIsUploading(true);
     try {
-      await uploadDataset(file);
+      for (const file of Array.from(files)) {
+        await uploadDataset(file);
+      }
     } catch (err: any) {
       alert(`Upload failed: ${err.message}`);
     } finally {
@@ -62,7 +64,7 @@ export const LeftPanel: React.FC = () => {
     e.preventDefault();
     setDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileUpload(e.dataTransfer.files[0]);
+      handleFilesUpload(e.dataTransfer.files);
     }
   };
 
@@ -106,9 +108,10 @@ export const LeftPanel: React.FC = () => {
         ref={fileInputRef}
         className="hidden"
         accept=".csv,.xlsx,.xls,.parquet"
+        multiple
         onChange={(e) => {
-          if (e.target.files && e.target.files[0]) {
-            handleFileUpload(e.target.files[0]);
+          if (e.target.files && e.target.files.length > 0) {
+            handleFilesUpload(e.target.files);
             e.target.value = '';
           }
         }}

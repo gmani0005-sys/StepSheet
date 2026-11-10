@@ -664,100 +664,997 @@ export function createDashboardPresentationBlob(data: DashboardExportData): Blob
   ]);
 }
 
-export function createDashboardHtmlBlob(data: DashboardExportData): Blob {
+export function createDashboardSswbJsonBlob(data: DashboardExportData): Blob {
+  const jsonStr = JSON.stringify(
+    {
+      title: data.title || 'Executive Dashboard',
+      datasetName: data.datasetName || 'Dataset',
+      kpis: data.kpis || [],
+      visuals: data.visuals || [],
+      rows: (data.rows || []).slice(0, 10000),
+      columns: data.columns || [],
+      steps: data.steps || [],
+      filteredRowCount: data.filteredRowCount,
+      totalRowCount: data.totalRowCount,
+      exportedAt: new Date().toISOString(),
+    },
+    null,
+    2
+  );
+  return new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+}
+
+export function createDashboardSswbHtmlBlob(data: DashboardExportData): Blob {
   const dsTitle = data.title || 'Executive Dashboard';
+  const dsName = data.datasetName || 'Dataset';
+  const eTitle = escapeXml(dsTitle);
+  const eDsName = escapeXml(dsName);
+  const stepsCount = (data.steps || []).length;
+  const filteredCount = data.filteredRowCount || (data.rows || []).length;
+
+  const safeDataJson = JSON.stringify({
+    title: dsTitle,
+    datasetName: dsName,
+    kpis: data.kpis || [],
+    visuals: data.visuals || [],
+    rows: (data.rows || []).slice(0, 10000),
+    columns: data.columns || [],
+    steps: data.steps || [],
+    filteredRowCount: data.filteredRowCount,
+    totalRowCount: data.totalRowCount,
+    exportedAt: new Date().toISOString(),
+  }).replace(/<\//g, '<\\/');
+
   const html = `<!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>${escapeXml(dsTitle)} — StepSheet Dashboard</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${eTitle} — StepSheet Packaged Workbook</title>
   <style>
-    body { font-family: Aptos, Calibri, Carlito, "Segoe UI", sans-serif; margin: 0; background: #F8FAFC; color: #1E293B; }
-    .navbar { background: #185C37; color: white; padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; }
-    .navbar h1 { margin: 0; font-size: 18px; font-weight: 700; }
-    .navbar .meta { font-size: 12px; opacity: 0.85; }
-    .container { padding: 24px 28px; max-width: 1400px; margin: 0 auto; }
-    .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
-    .kpi-card { background: white; border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .kpi-title { font-size: 12px; font-weight: 600; text-transform: uppercase; color: #64748B; margin-bottom: 6px; }
-    .kpi-val { font-size: 28px; font-weight: 800; color: #185C37; font-family: monospace; }
-    .kpi-sub { font-size: 11px; color: #94A3B8; margin-top: 4px; }
-    .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 20px; }
-    .chart-card { background: white; border: 1px solid #E2E8F0; border-radius: 10px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #F1F5F9; padding-bottom: 10px; }
-    .chart-title { font-size: 14px; font-weight: 700; color: #0F172A; }
-    .chart-badge { font-size: 10px; text-transform: uppercase; font-weight: 700; background: #E6F2EB; color: #185C37; padding: 3px 8px; border-radius: 4px; }
-    .bar-item { margin-bottom: 12px; }
-    .bar-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
-    .bar-track { height: 14px; background: #F1F5F9; border-radius: 4px; overflow: hidden; }
-    .bar-fill { height: 100%; background: #217346; border-radius: 4px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-    th { text-align: left; padding: 8px 10px; background: #F8FAFC; border-bottom: 2px solid #E2E8F0; color: #475569; font-weight: 600; }
-    td { padding: 8px 10px; border-bottom: 1px solid #F1F5F9; }
+    :root {
+      --primary: #185C37;
+      --primary-dark: #124629;
+      --primary-light: #E6F2EB;
+      --accent: #217346;
+      --bg: #F4F6F8;
+      --card-bg: #FFFFFF;
+      --text-main: #1E293B;
+      --text-muted: #64748B;
+      --border: #E2E8F0;
+      --border-dark: #CBD5E1;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aptos, Calibri, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      background: var(--primary);
+      color: white;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .brand-title {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+    }
+    .brand-badge {
+      background: #10B981;
+      color: #064E3B;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .topbar-meta {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+    .btn-light {
+      background: white;
+      color: var(--primary);
+      border-color: rgba(255,255,255,0.8);
+    }
+    .btn-light:hover {
+      background: #F1F5F9;
+    }
+    .btn-outline {
+      background: rgba(255,255,255,0.12);
+      color: white;
+      border-color: rgba(255,255,255,0.25);
+    }
+    .btn-outline:hover {
+      background: rgba(255,255,255,0.2);
+    }
+
+    .nav-tabs {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      gap: 8px;
+    }
+    .nav-tab {
+      padding: 12px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .nav-tab:hover {
+      color: var(--text-main);
+    }
+    .nav-tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    .container {
+      max-width: 1480px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 20px 24px 48px;
+      flex: 1;
+    }
+
+    .slicer-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .slicer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .slicer-title {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+    }
+    .slicer-clear {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--primary);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    .slicer-clear:hover {
+      text-decoration: underline;
+    }
+    .slicer-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      max-height: 90px;
+      overflow-y: auto;
+    }
+    .chip {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      background: #F1F5F9;
+      color: #334155;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.12s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .chip:hover {
+      background: #E2E8F0;
+    }
+    .chip.selected {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary-dark);
+    }
+    .chip-count {
+      font-size: 9px;
+      opacity: 0.75;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      position: relative;
+      overflow: hidden;
+      border-left: 5px solid var(--accent);
+    }
+    .kpi-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+    .kpi-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--text-main);
+      margin: 8px 0 4px;
+      font-family: monospace;
+    }
+    .kpi-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .visuals-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      gap: 20px;
+    }
+    .visual-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+      display: flex;
+      flex-direction: column;
+    }
+    .visual-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #F1F5F9;
+    }
+    .visual-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0F172A;
+    }
+    .visual-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: var(--primary-light);
+      color: var(--primary);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(24,92,55,0.2);
+    }
+    .chart-container {
+      flex: 1;
+      min-height: 240px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    svg.chart-svg {
+      width: 100%;
+      height: 240px;
+      overflow: visible;
+    }
+    .bar-rect {
+      fill: var(--accent);
+      transition: fill 0.2s;
+    }
+    .bar-rect:hover {
+      fill: var(--primary-dark);
+    }
+    .axis-text {
+      font-size: 10px;
+      fill: #64748B;
+    }
+    .val-text {
+      font-size: 10px;
+      font-weight: bold;
+      fill: #1E293B;
+    }
+
+    .table-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+    .table-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .search-input {
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      min-width: 280px;
+      outline: none;
+    }
+    .search-input:focus {
+      border-color: var(--primary);
+    }
+    .table-responsive {
+      overflow-x: auto;
+      max-height: 600px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+    }
+    table.data-table th {
+      background: #F8FAFC;
+      color: #334155;
+      padding: 10px 14px;
+      font-weight: 700;
+      border-bottom: 2px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    table.data-table th:hover {
+      background: #F1F5F9;
+    }
+    table.data-table td {
+      padding: 8px 14px;
+      border-bottom: 1px solid #F1F5F9;
+      white-space: nowrap;
+    }
+    table.data-table tr:hover td {
+      background: #F8FAFC;
+    }
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .lineage-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .lineage-item {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .lineage-idx {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--primary-light);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    #chart-tooltip {
+      position: fixed;
+      display: none;
+      background: rgba(15, 23, 42, 0.95);
+      color: white;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      pointer-events: none;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    }
+
     @media print {
-      .navbar { background: white !important; color: #000 !important; border-bottom: 2px solid #217346; padding: 10px 0; }
+      .topbar-actions, .nav-tabs, .slicer-card, .btn { display: none !important; }
       body { background: white !important; }
-      .container { padding: 0 !important; }
-      .kpi-card, .chart-card { box-shadow: none !important; border: 1px solid #CCC !important; }
+      .visual-card { break-inside: avoid; border: 1px solid #CCC !important; box-shadow: none !important; }
     }
   </style>
 </head>
 <body>
-  <div class="navbar">
-    <h1>StepSheet Executive Dashboard: ${escapeXml(dsTitle)}</h1>
-    <div class="meta">Dataset: ${escapeXml(data.datasetName)} &bull; ${data.filteredRowCount} Records &bull; ${new Date().toLocaleDateString()}</div>
+  <!-- Embedded StepSheet Workbook Data Island -->
+  <script id="stepsheet-packaged-data" type="application/json">
+${safeDataJson}
+  </script>
+
+  <!-- Top Navigation Header -->
+  <div class="topbar">
+    <div class="brand-section">
+      <div class="brand-icon">S</div>
+      <div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="brand-title">${eTitle}</span>
+          <span class="brand-badge">.SSWB Universal Workbook</span>
+        </div>
+        <div class="topbar-meta">Dataset: <strong>${eDsName}</strong> &bull; <span id="hdr-row-count">${filteredCount}</span> rows packaged</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-outline" id="btn-fullscreen" onclick="toggleFullScreen()">⛶ Full Screen</button>
+      <button class="btn btn-outline" onclick="window.print()">🖨️ Print / PDF</button>
+      <button class="btn btn-light" onclick="exportDataCsv()">📥 Export CSV</button>
+      <button class="btn btn-light" onclick="exportRawSswb()">💾 Save .sswb</button>
+    </div>
   </div>
 
+  <!-- Navigation Tabs -->
+  <div class="nav-tabs">
+    <div class="nav-tab active" id="tab-btn-dash" onclick="switchTab('dash')">📊 Visual Dashboard</div>
+    <div class="nav-tab" id="tab-btn-data" onclick="switchTab('data')">📋 Packaged Data Table</div>
+    <div class="nav-tab" id="tab-btn-lineage" onclick="switchTab('lineage')">⚡ Pipeline Lineage (${stepsCount})</div>
+  </div>
+
+  <!-- Main Container -->
   <div class="container">
-    <!-- KPIs -->
-    <div class="kpi-row">
-      ${(data.kpis || [])
-        .map(
-          (k) => `      <div class="kpi-card">
-        <div class="kpi-title">${escapeXml(k.title)}</div>
-        <div class="kpi-val">${escapeXml(k.formattedValue)}</div>
-        <div class="kpi-sub">${escapeXml(k.aggFunc.toUpperCase())} of ${escapeXml(k.column)} &bull; ${escapeXml(k.subtitle)}</div>
-      </div>`
-        )
-        .join('\n')}
+    <!-- VIEW 1: DASHBOARD -->
+    <div id="view-dash">
+      <!-- Slicer Bar -->
+      <div class="slicer-card" id="slicer-container">
+        <div class="slicer-header">
+          <div class="slicer-title">Interactive Dimension Slicers (Click to Filter Dashboard)</div>
+          <button class="slicer-clear" id="slicer-clear-btn" onclick="clearFilters()" style="display:none;">Clear All Filters</button>
+        </div>
+        <div class="slicer-chips" id="slicer-chips-area"></div>
+      </div>
+
+      <!-- KPI Scorecards -->
+      <div class="kpi-grid" id="kpi-cards-grid"></div>
+
+      <!-- Visual Charts Grid -->
+      <div class="visuals-grid" id="visuals-grid"></div>
     </div>
 
-    <!-- Charts -->
-    <div class="charts-grid">
-      ${(data.visuals || [])
-        .map((v) => {
-          const maxVal = Math.max(1, ...v.items.map((x) => Math.abs(x.value)));
-          return `      <div class="chart-card">
-        <div class="chart-header">
-          <div class="chart-title">${escapeXml(v.title)}</div>
-          <div class="chart-badge">${escapeXml(v.type)}</div>
+    <!-- VIEW 2: DATA TABLE -->
+    <div id="view-data" style="display:none;">
+      <div class="table-card">
+        <div class="table-toolbar">
+          <input type="text" class="search-input" id="table-search" placeholder="Search across all columns..." oninput="handleTableSearch(this.value)" />
+          <div style="font-size:12px; color:var(--text-muted);" id="table-record-info">Loading...</div>
         </div>
-        <div>
-          ${v.items
-            .slice(0, 8)
-            .map(
-              (it) => `          <div class="bar-item">
-            <div class="bar-label">
-              <span><strong>${escapeXml(it.category)}</strong></span>
-              <span>${Number(it.value).toLocaleString()} <span style="color: #64748B;">(${escapeXml(it.percentage)})</span></span>
-            </div>
-            <div class="bar-track">
-              <div class="bar-fill" style="width: ${Math.max(4, Math.round((Math.abs(it.value) / maxVal) * 100))}%;"></div>
-            </div>
-          </div>`
-            )
-            .join('\n')}
+        <div class="table-responsive">
+          <table class="data-table" id="raw-data-table">
+            <thead>
+              <tr id="table-header-row"></tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
         </div>
-      </div>`;
-        })
-        .join('\n')}
+        <div class="pagination">
+          <button class="btn btn-light" onclick="changePage(-1)">&larr; Previous</button>
+          <span id="page-indicator">Page 1 of 1</span>
+          <button class="btn btn-light" onclick="changePage(1)">Next &rarr;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 3: LINEAGE -->
+    <div id="view-lineage" style="display:none;">
+      <div class="table-card">
+        <h3 style="margin-bottom:14px; font-size:16px;">Pipeline Lineage &amp; Applied Transformations</h3>
+        <div class="lineage-list" id="lineage-list-container"></div>
+      </div>
     </div>
   </div>
+
+  <div id="chart-tooltip"></div>
+
+  <!-- Client-side Interactive Engine -->
+  <script>
+    var PACKAGE = JSON.parse(document.getElementById('stepsheet-packaged-data').textContent);
+    var allRows = PACKAGE.rows || [];
+    var activeFilters = new Map();
+    var activeTab = 'dash';
+
+    var searchQ = '';
+    var sortCol = null;
+    var sortAsc = true;
+    var currentPage = 1;
+    var pageSize = 50;
+
+    var PALETTE = ['#217346', '#2563EB', '#D97706', '#9333EA', '#059669', '#DC2626', '#0284C7', '#7C3AED'];
+
+    function init() {
+      buildSlicers();
+      renderDashboard();
+      renderLineage();
+      renderTable();
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.getElementById('view-dash').style.display = tab === 'dash' ? 'block' : 'none';
+      document.getElementById('view-data').style.display = tab === 'data' ? 'block' : 'none';
+      document.getElementById('view-lineage').style.display = tab === 'lineage' ? 'block' : 'none';
+
+      document.getElementById('tab-btn-dash').className = 'nav-tab' + (tab === 'dash' ? ' active' : '');
+      document.getElementById('tab-btn-data').className = 'nav-tab' + (tab === 'data' ? ' active' : '');
+      document.getElementById('tab-btn-lineage').className = 'nav-tab' + (tab === 'lineage' ? ' active' : '');
+    }
+
+    function getFilteredRows() {
+      if (activeFilters.size === 0) return allRows;
+      return allRows.filter(function(r) {
+        var it = activeFilters.entries();
+        var entry;
+        while (!(entry = it.next()).done) {
+          var col = entry.value[0];
+          var valSet = entry.value[1];
+          var rowVal = String(r[col] != null ? r[col] : '(Blank)');
+          if (!valSet.has(rowVal)) return false;
+        }
+        return true;
+      });
+    }
+
+    function buildSlicers() {
+      var container = document.getElementById('slicer-chips-area');
+      container.innerHTML = '';
+
+      var catCols = new Set();
+      (PACKAGE.visuals || []).forEach(function(v) {
+        if (v.categoryCol && v.type !== 'histogram') catCols.add(v.categoryCol);
+      });
+
+      if (catCols.size === 0 && PACKAGE.columns) {
+        PACKAGE.columns.slice(0, 3).forEach(function(c) { catCols.add(c); });
+      }
+
+      catCols.forEach(function(col) {
+        var valCounts = new Map();
+        allRows.forEach(function(r) {
+          var v = String(r[col] != null ? r[col] : '(Blank)');
+          valCounts.set(v, (valCounts.get(v) || 0) + 1);
+        });
+
+        var sorted = Array.from(valCounts.entries()).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 10);
+        sorted.forEach(function(pair) {
+          var val = pair[0];
+          var cnt = pair[1];
+          var chip = document.createElement('button');
+          chip.className = 'chip';
+          chip.innerHTML = '<strong>' + escapeHtml(col) + ':</strong> ' + escapeHtml(val) + ' <span class="chip-count">(' + cnt + ')</span>';
+          chip.onclick = function() { toggleFilter(col, val); };
+          chip.dataset.col = col;
+          chip.dataset.val = val;
+          container.appendChild(chip);
+        });
+      });
+    }
+
+    function toggleFilter(col, val) {
+      if (!activeFilters.has(col)) {
+        activeFilters.set(col, new Set());
+      }
+      var s = activeFilters.get(col);
+      if (s.has(val)) {
+        s.delete(val);
+        if (s.size === 0) activeFilters.delete(col);
+      } else {
+        s.add(val);
+      }
+
+      document.querySelectorAll('.chip').forEach(function(c) {
+        var cCol = c.dataset.col;
+        var cVal = c.dataset.val;
+        var isSel = activeFilters.has(cCol) && activeFilters.get(cCol).has(cVal);
+        c.className = 'chip' + (isSel ? ' selected' : '');
+      });
+
+      document.getElementById('slicer-clear-btn').style.display = activeFilters.size > 0 ? 'inline' : 'none';
+      renderDashboard();
+      renderTable();
+    }
+
+    function clearFilters() {
+      activeFilters.clear();
+      document.querySelectorAll('.chip').forEach(function(c) { c.className = 'chip'; });
+      document.getElementById('slicer-clear-btn').style.display = 'none';
+      renderDashboard();
+      renderTable();
+    }
+
+    function renderDashboard() {
+      var filtered = getFilteredRows();
+      document.getElementById('hdr-row-count').textContent = filtered.length.toLocaleString();
+
+      var kpiContainer = document.getElementById('kpi-cards-grid');
+      kpiContainer.innerHTML = '';
+      (PACKAGE.kpis || []).forEach(function(k, idx) {
+        var metricVal = 0;
+        var col = k.column;
+        var agg = (k.aggFunc || 'sum').toLowerCase();
+
+        if (agg === 'count') {
+          metricVal = filtered.length;
+        } else if (agg === 'distinct') {
+          metricVal = new Set(filtered.map(function(r) { return r[col]; })).size;
+        } else {
+          var nums = filtered.map(function(r) { return Number(r[col]); }).filter(function(n) { return !isNaN(n); });
+          if (agg === 'sum') metricVal = nums.reduce(function(a,b) { return a + b; }, 0);
+          else if (agg === 'avg') metricVal = nums.length ? nums.reduce(function(a,b) { return a + b; }, 0) / nums.length : 0;
+          else if (agg === 'min') metricVal = nums.length ? Math.min.apply(null, nums) : 0;
+          else if (agg === 'max') metricVal = nums.length ? Math.max.apply(null, nums) : 0;
+        }
+
+        var formatted = metricVal >= 1e6 ? (metricVal/1e6).toFixed(2) + 'M' : metricVal >= 1e3 ? (metricVal/1e3).toFixed(1) + 'K' : Number(metricVal.toFixed(1)).toLocaleString();
+
+        var card = document.createElement('div');
+        card.className = 'kpi-card';
+        card.style.borderLeftColor = PALETTE[idx % PALETTE.length];
+        card.innerHTML = '<div class="kpi-title">' + escapeHtml(k.title) + '</div>' +
+          '<div class="kpi-value">' + formatted + '</div>' +
+          '<div class="kpi-sub">' + escapeHtml(agg.toUpperCase()) + ' of ' + escapeHtml(col) + ' &bull; ' + escapeHtml(k.subtitle || 'Active Filtered Rows') + '</div>';
+        kpiContainer.appendChild(card);
+      });
+
+      var visualsContainer = document.getElementById('visuals-grid');
+      visualsContainer.innerHTML = '';
+
+      (PACKAGE.visuals || []).forEach(function(v, vIdx) {
+        var card = document.createElement('div');
+        card.className = 'visual-card';
+
+        var catMap = new Map();
+        filtered.forEach(function(r) {
+          var cat = String(r[v.categoryCol] != null ? r[v.categoryCol] : '(Blank)');
+          if (!catMap.has(cat)) catMap.set(cat, []);
+          catMap.get(cat).push(r);
+        });
+
+        var agg = (v.aggFunc || 'sum').toLowerCase();
+        var items = Array.from(catMap.entries()).map(function(pair) {
+          var cat = pair[0];
+          var gRows = pair[1];
+          var val = 0;
+          if (agg === 'count') val = gRows.length;
+          else {
+            var nums = gRows.map(function(r) { return Number(r[v.valueCol]); }).filter(function(n) { return !isNaN(n); });
+            if (agg === 'sum') val = nums.reduce(function(a,b) { return a + b; }, 0);
+            else if (agg === 'avg') val = nums.length ? nums.reduce(function(a,b) { return a + b; }, 0) / nums.length : 0;
+            else if (agg === 'min') val = nums.length ? Math.min.apply(null, nums) : 0;
+            else if (agg === 'max') val = nums.length ? Math.max.apply(null, nums) : 0;
+          }
+          return { category: cat, value: val, count: gRows.length };
+        });
+
+        items.sort(function(a,b) { return b.value - a.value; });
+        items = items.slice(0, 8);
+        var totalVal = items.reduce(function(a,b) { return a + Math.max(0, b.value); }, 0) || 1;
+        items.forEach(function(it) {
+          it.pct = ((Math.max(0, it.value) / totalVal) * 100).toFixed(1) + '%';
+        });
+
+        var vType = (v.type || 'bar').toLowerCase();
+        var chartHtml = '';
+
+        if (vType === 'pie' || vType === 'donut') {
+          chartHtml = renderSvgDonut(items, vType === 'donut');
+        } else if (vType === 'column' || vType === 'histogram' || vType === 'stacked_column' || vType === 'clustered_column') {
+          chartHtml = renderSvgColumn(items);
+        } else {
+          chartHtml = renderSvgBar(items);
+        }
+
+        card.innerHTML = '<div class="visual-header">' +
+          '<div>' +
+            '<div class="visual-title">' + escapeHtml(v.title) + '</div>' +
+            '<div style="font-size:11px; color:#64748B;">' + escapeHtml(v.categoryCol) + ' &bull; ' + escapeHtml(v.aggFunc) + '(' + escapeHtml(v.valueCol) + ')</div>' +
+          '</div>' +
+          '<div class="visual-badge">' + escapeHtml(v.type) + '</div>' +
+        '</div>' +
+        '<div class="chart-container">' + chartHtml + '</div>';
+        visualsContainer.appendChild(card);
+      });
+    }
+
+    function renderSvgBar(items) {
+      var maxVal = Math.max.apply(null, items.map(function(x) { return Math.abs(x.value); }).concat([1]));
+      var rows = items.map(function(it, idx) {
+        var pct = Math.max(2, Math.round((Math.abs(it.value) / maxVal) * 100));
+        var color = PALETTE[idx % PALETTE.length];
+        return '<div style="margin-bottom:10px;">' +
+          '<div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px;">' +
+            '<span style="font-weight:600; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(it.category) + '</span>' +
+            '<span style="font-weight:700; color:#334155;">' + Number(it.value).toLocaleString() + ' <span style="font-size:10px; color:#64748B;">(' + it.pct + ')</span></span>' +
+          '</div>' +
+          '<div style="height:14px; background:#F1F5F9; border-radius:4px; overflow:hidden;">' +
+            '<div style="height:100%; width:' + pct + '%; background:' + color + '; border-radius:4px; transition:width 0.3s ease;"></div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      return '<div>' + rows + '</div>';
+    }
+
+    function renderSvgColumn(items) {
+      var maxVal = Math.max.apply(null, items.map(function(x) { return Math.abs(x.value); }).concat([1]));
+      var w = 460;
+      var h = 200;
+      var padL = 30;
+      var padB = 40;
+      var colW = Math.max(16, (w - padL) / (items.length || 1) - 12);
+
+      var cols = items.map(function(it, idx) {
+        var barH = Math.max(4, (Math.abs(it.value) / maxVal) * (h - padB - 20));
+        var x = padL + idx * (colW + 12);
+        var y = h - padB - barH;
+        var color = PALETTE[idx % PALETTE.length];
+        return '<rect x="' + x + '" y="' + y + '" width="' + colW + '" height="' + barH + '" rx="3" fill="' + color + '" class="bar-rect" onmousemove="showTip(event, \\'' + escapeHtml(it.category) + ': ' + Number(it.value).toLocaleString() + ' (' + it.pct + ')\\')" onmouseout="hideTip()"></rect>' +
+          '<text x="' + (x + colW/2) + '" y="' + (h - padB + 16) + '" text-anchor="middle" class="axis-text">' + escapeHtml(it.category.slice(0, 8)) + '</text>' +
+          '<text x="' + (x + colW/2) + '" y="' + (y - 4) + '" text-anchor="middle" class="val-text">' + Number(it.value).toLocaleString() + '</text>';
+      }).join('');
+
+      return '<svg viewBox="0 0 ' + w + ' ' + h + '" class="chart-svg">' + cols + '</svg>';
+    }
+
+    function renderSvgDonut(items, isDonut) {
+      var r = 80;
+      var cx = 100;
+      var cy = 100;
+      var curAngle = -Math.PI / 2;
+
+      var paths = items.map(function(it, idx) {
+        var slicePct = Math.max(0.001, parseFloat(it.pct) / 100);
+        var nextAngle = curAngle + slicePct * 2 * Math.PI;
+        var x1 = cx + r * Math.cos(curAngle);
+        var y1 = cy + r * Math.sin(curAngle);
+        var x2 = cx + r * Math.cos(nextAngle);
+        var y2 = cy + r * Math.sin(nextAngle);
+        var largeArc = slicePct > 0.5 ? 1 : 0;
+        var color = PALETTE[idx % PALETTE.length];
+        var pathData = 'M ' + cx + ' ' + cy + ' L ' + x1 + ' ' + y1 + ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + x2 + ' ' + y2 + ' Z';
+        curAngle = nextAngle;
+
+        return '<path d="' + pathData + '" fill="' + color + '" onmousemove="showTip(event, \\'' + escapeHtml(it.category) + ': ' + Number(it.value).toLocaleString() + ' (' + it.pct + ')\\')" onmouseout="hideTip()"></path>';
+      }).join('');
+
+      var cutout = isDonut ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r * 0.55) + '" fill="white"></circle>' : '';
+
+      var legend = items.map(function(it, idx) {
+        var color = PALETTE[idx % PALETTE.length];
+        return '<div style="display:flex; align-items:center; gap:6px; font-size:11px; margin-bottom:4px;">' +
+          '<div style="width:10px; height:10px; background:' + color + '; border-radius:2px; shrink-0;"></div>' +
+          '<span style="font-weight:600; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(it.category) + '</span>' +
+          '<span style="color:#64748B;">(' + it.pct + ')</span>' +
+        '</div>';
+      }).join('');
+
+      return '<div style="display:flex; align-items:center; justify-content:space-around; gap:16px;">' +
+        '<svg viewBox="0 0 200 200" style="width:160px; height:160px;">' + paths + cutout + '</svg>' +
+        '<div style="max-height:180px; overflow-y:auto;">' + legend + '</div>' +
+      '</div>';
+    }
+
+    function renderTable() {
+      var filtered = getFilteredRows();
+      var cols = PACKAGE.columns || (filtered.length ? Object.keys(filtered[0]) : []);
+
+      var viewRows = filtered;
+      if (searchQ) {
+        var q = searchQ.toLowerCase();
+        viewRows = viewRows.filter(function(r) {
+          return cols.some(function(c) { return String(r[c] != null ? r[c] : '').toLowerCase().includes(q); });
+        });
+      }
+
+      if (sortCol) {
+        viewRows = viewRows.slice().sort(function(a,b) {
+          var va = a[sortCol];
+          var vb = b[sortCol];
+          if (typeof va === 'number' && typeof vb === 'number') {
+            return sortAsc ? va - vb : vb - va;
+          }
+          return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+        });
+      }
+
+      var totalPages = Math.max(1, Math.ceil(viewRows.length / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      document.getElementById('table-record-info').textContent = 'Showing ' + viewRows.length.toLocaleString() + ' rows (Page ' + currentPage + ' of ' + totalPages + ')';
+      document.getElementById('page-indicator').textContent = 'Page ' + currentPage + ' of ' + totalPages;
+
+      var thead = document.getElementById('table-header-row');
+      thead.innerHTML = cols.map(function(c) {
+        var isCur = sortCol === c;
+        var arrow = isCur ? (sortAsc ? ' ▲' : ' ▼') : '';
+        return '<th onclick="sortTable(\\'' + escapeHtml(c) + '\\')">' + escapeHtml(c) + arrow + '</th>';
+      }).join('');
+
+      var tbody = document.getElementById('table-body');
+      var start = (currentPage - 1) * pageSize;
+      var pageData = viewRows.slice(start, start + pageSize);
+
+      tbody.innerHTML = pageData.map(function(r) {
+        return '<tr>' + cols.map(function(c) { return '<td>' + escapeHtml(r[c] != null ? r[c] : '') + '</td>'; }).join('') + '</tr>';
+      }).join('');
+    }
+
+    function handleTableSearch(val) {
+      searchQ = val;
+      currentPage = 1;
+      renderTable();
+    }
+
+    function sortTable(col) {
+      if (sortCol === col) sortAsc = !sortAsc;
+      else { sortCol = col; sortAsc = true; }
+      renderTable();
+    }
+
+    function changePage(delta) {
+      currentPage += delta;
+      renderTable();
+    }
+
+    function renderLineage() {
+      var container = document.getElementById('lineage-list-container');
+      var steps = PACKAGE.steps || [];
+      if (!steps.length) {
+        container.innerHTML = '<div style="color:#64748B; font-size:13px;">No pipeline transformation steps recorded for this workbook.</div>';
+        return;
+      }
+      container.innerHTML = steps.map(function(s, idx) {
+        return '<div class="lineage-item">' +
+          '<div class="lineage-idx">' + (idx + 1) + '</div>' +
+          '<div style="flex:1;">' +
+            '<div style="display:flex; align-items:center; gap:8px;">' +
+              '<span style="font-weight:700; font-size:13px;">' + escapeHtml(s.label || s.id || 'Step') + '</span>' +
+              '<span style="font-size:10px; font-weight:800; background:#F1F5F9; padding:2px 6px; border-radius:4px; text-transform:uppercase;">' + escapeHtml(s.type || '') + '</span>' +
+            </div>' +
+            '<div style="font-size:11px; color:#64748B; margin-top:2px;">' + escapeHtml(JSON.stringify(s.params || {})) + '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function exportDataCsv() {
+      var rows = getFilteredRows();
+      var cols = PACKAGE.columns || (rows.length ? Object.keys(rows[0]) : []);
+      var csv = [
+        cols.join(','),
+      ].concat(rows.map(function(r) {
+        return cols.map(function(c) {
+          var val = String(r[c] != null ? r[c] : '');
+          return val.includes(',') || val.includes('"') || val.includes('\\n') ? '"' + val.replace(/"/g, '""') + '"' : val;
+        }).join(',');
+      })).join('\\n');
+
+      var blob = new Blob([csv], { type: 'text/csv' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = (PACKAGE.title || 'StepSheet') + '_data.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportRawSswb() {
+      var blob = new Blob([JSON.stringify(PACKAGE, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = (PACKAGE.title || 'StepSheet') + '_packaged_workbook.sswb';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function toggleFullScreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(function() {});
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen().catch(function() {});
+      }
+    }
+
+    function showTip(e, text) {
+      var tip = document.getElementById('chart-tooltip');
+      tip.textContent = text;
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 14) + 'px';
+      tip.style.top = (e.clientY + 14) + 'px';
+    }
+
+    function hideTip() {
+      document.getElementById('chart-tooltip').style.display = 'none';
+    }
+
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    window.onload = init;
+  </script>
 </body>
 </html>`;
 
-  return new Blob([html], { type: 'text/html' });
+  return new Blob([html], { type: 'text/html;charset=utf-8;' });
 }
+
+export const createDashboardHtmlBlob = createDashboardSswbHtmlBlob;
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const blobUrl = window.URL.createObjectURL(blob);
@@ -773,6 +1670,89 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
       a.parentNode.removeChild(a);
     }
   }, 1500);
+}
+
+async function fetchDirectDashboardBlob(
+  data: DashboardExportData,
+  format: string
+): Promise<{ blob: Blob; filename: string } | null> {
+  const safeTitle = (data.title || data.datasetName || 'Dashboard').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const endpointsToTry = [
+    `${API_BASE}/export/direct-dashboard`,
+    `${API_BASE}/exports/direct-dashboard`,
+    'http://127.0.0.1:8000/api/v1/export/direct-dashboard',
+    'http://localhost:8000/api/v1/export/direct-dashboard',
+  ];
+
+  const payload = {
+    title: data.title || 'Executive Dashboard',
+    dataset_name: data.datasetName || 'Dataset',
+    kpis: data.kpis || [],
+    visuals: data.visuals || [],
+    rows: data.rows || [],
+    columns: data.columns || [],
+    steps: data.steps || [],
+    filtered_row_count: data.filteredRowCount,
+    total_row_count: data.totalRowCount,
+    format:
+      format === 'sswb_html' || format === 'packaged_workbook' || format === 'sswb.html'
+        ? 'sswb_html'
+        : format === 'sswb'
+        ? 'sswb'
+        : format === 'xlsx_values'
+        ? 'xlsx'
+        : format,
+  };
+
+  for (const url of endpointsToTry) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader(),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const blob = await res.blob();
+        let filename = '';
+        const disp = res.headers.get('content-disposition');
+        if (disp) {
+          const m = disp.match(/filename="?([^"]+)"?/);
+          if (m && m[1]) filename = m[1];
+        }
+        if (!filename) {
+          const ext =
+            format === 'sswb_html' || format === 'packaged_workbook' || format === 'sswb.html'
+              ? 'sswb.html'
+              : format === 'sswb'
+              ? 'sswb'
+              : format === 'pptx'
+              ? 'pptx'
+              : format === 'pdf'
+              ? 'pdf'
+              : format === 'csv'
+              ? 'csv'
+              : format === 'html'
+              ? 'html'
+              : 'xlsx';
+          filename = `${safeTitle}_${
+            format === 'sswb_html' || format === 'packaged_workbook' || format === 'sswb.html' || format === 'sswb'
+              ? 'packaged_workbook'
+              : format === 'pptx'
+              ? 'presentation'
+              : 'dashboard'
+          }.${ext}`;
+        }
+        return { blob, filename };
+      }
+    } catch {
+      // Continue next endpoint
+    }
+  }
+  return null;
 }
 
 const localBlobRegistry = new Map<string, { blob: Blob; filename: string }>();
@@ -804,48 +1784,75 @@ async function createLocalExportJob(payload: ExportJobCreatePayload): Promise<Ex
   let fileType = '';
 
   if (dData) {
-    if (format === 'pdf') {
-      blob = createDashboardPdfBlob(dData);
-      filename = `${safeTitle}_dashboard.pdf`;
-      fileType = 'pdf';
-    } else if (format === 'pptx') {
-      blob = createDashboardPresentationBlob(dData);
-      filename = `${safeTitle}_presentation.pptx`;
-      fileType = 'pptx';
-    } else if (format === 'html') {
-      blob = createDashboardHtmlBlob(dData);
-      filename = `${safeTitle}_dashboard.html`;
-      fileType = 'html';
-    } else if (format === 'xlsx_values' || format === 'packaged_workbook') {
-      blob = createDashboardExcelXml(dData);
-      filename = `${safeTitle}_packaged_workbook.xls`;
-      fileType = 'xlsx';
-    } else if (format === 'csv') {
-      const delim = payload.options?.csv_delimiter || ',';
-      const csvLines = [
-        dData.columns.join(delim),
-        ...dData.rows.map((r) =>
-          dData.columns
-            .map((c) => {
-              const val = r[c];
-              if (val === null || val === undefined) return '';
-              const s = String(val);
-              return s.includes(',') || s.includes('"') || s.includes('\n')
-                ? `"${s.replace(/"/g, '""')}"`
-                : s;
-            })
-            .join(delim)
-        ),
-      ];
-      blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-      filename = `${safeTitle}_data.csv`;
-      fileType = 'csv';
+    const remote = await fetchDirectDashboardBlob(dData, format);
+    if (remote) {
+      blob = remote.blob;
+      filename = remote.filename;
+      fileType =
+        format === 'sswb_html' || format === 'packaged_workbook' || format === 'sswb.html'
+          ? 'html'
+          : format === 'sswb'
+          ? 'sswb'
+          : format === 'pptx'
+          ? 'pptx'
+          : format === 'pdf'
+          ? 'pdf'
+          : format === 'csv'
+          ? 'csv'
+          : 'xlsx';
     } else {
-      blob = createDashboardExcelXml(dData);
-      filename = `${safeTitle}_packaged_workbook.xls`;
-      fileType = 'xlsx';
+      if (format === 'sswb_html' || format === 'packaged_workbook' || format === 'sswb.html') {
+        blob = createDashboardSswbHtmlBlob(dData);
+        filename = `${safeTitle}_packaged_workbook.sswb.html`;
+        fileType = 'html';
+      } else if (format === 'sswb') {
+        blob = createDashboardSswbJsonBlob(dData);
+        filename = `${safeTitle}_packaged_workbook.sswb`;
+        fileType = 'sswb';
+      } else if (format === 'pdf') {
+        blob = createDashboardPdfBlob(dData);
+        filename = `${safeTitle}_dashboard.pdf`;
+        fileType = 'pdf';
+      } else if (format === 'pptx') {
+        blob = createDashboardPresentationBlob(dData);
+        filename = `${safeTitle}_presentation_pack.zip`;
+        fileType = 'zip';
+      } else if (format === 'html') {
+        blob = createDashboardHtmlBlob(dData);
+        filename = `${safeTitle}_dashboard.html`;
+        fileType = 'html';
+      } else if (format === 'xlsx_values') {
+        blob = createDashboardExcelXml(dData);
+        filename = `${safeTitle}_packaged_workbook.xml`;
+        fileType = 'xml';
+      } else if (format === 'csv') {
+        const delim = payload.options?.csv_delimiter || ',';
+        const csvLines = [
+          dData.columns.join(delim),
+          ...dData.rows.map((r) =>
+            dData.columns
+              .map((c) => {
+                const val = r[c];
+                if (val === null || val === undefined) return '';
+                const s = String(val);
+                return s.includes(',') || s.includes('"') || s.includes('\n')
+                  ? `"${s.replace(/"/g, '""')}"`
+                  : s;
+              })
+              .join(delim)
+          ),
+        ];
+        blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        filename = `${safeTitle}_data.csv`;
+        fileType = 'csv';
+      } else {
+        blob = createDashboardExcelXml(dData);
+        filename = `${safeTitle}_packaged_workbook.xml`;
+        fileType = 'xml';
+      }
     }
   } else {
+
     // Standard data export fallback
     const rowLimit =
       payload.row_scope === 'custom' && payload.row_limit ? payload.row_limit : 50000;
@@ -949,10 +1956,11 @@ async function createLocalExportJob(payload: ExportJobCreatePayload): Promise<Ex
         columns: cols,
       };
       blob = createDashboardExcelXml(mockDData);
-      filename = `${safeTitle}_packaged_workbook.xls`;
-      fileType = 'xlsx';
+      filename = `${safeTitle}_packaged_workbook.xml`;
+      fileType = 'xml';
     }
   }
+
 
   const fileId = `file_${Date.now()}`;
   localBlobRegistry.set(`${payload.dataset_id}_${fileId}`, { blob, filename });
@@ -994,17 +2002,32 @@ export const exportShareApi = {
    */
   async downloadDashboard(data: DashboardExportData, format: string): Promise<void> {
     const safeTitle = (data.title || data.datasetName || 'Dashboard').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // 1. First attempt to call the high-fidelity Python backend service (xlsxwriter, python-pptx, reportlab)
+    const remote = await fetchDirectDashboardBlob(data, format);
+    if (remote) {
+      triggerBrowserDownload(remote.blob, remote.filename);
+      return;
+    }
+
+    // 2. Client-side offline fallback
     let blob: Blob;
     let filename: string;
 
-    if (format === 'pdf') {
+    if (format === 'sswb_html' || format === 'packaged_workbook' || format === 'sswb.html') {
+      blob = createDashboardSswbHtmlBlob(data);
+      filename = `${safeTitle}_packaged_workbook.sswb.html`;
+    } else if (format === 'sswb') {
+      blob = createDashboardSswbJsonBlob(data);
+      filename = `${safeTitle}_packaged_workbook.sswb`;
+    } else if (format === 'pdf') {
       blob = createDashboardPdfBlob(data);
       filename = `${safeTitle}_dashboard.pdf`;
     } else if (format === 'pptx') {
       blob = createDashboardPresentationBlob(data);
-      filename = `${safeTitle}_presentation.pptx`;
+      filename = `${safeTitle}_presentation_pack.zip`;
     } else if (format === 'html') {
-      blob = createDashboardHtmlBlob(data);
+      blob = createDashboardSswbHtmlBlob(data);
       filename = `${safeTitle}_dashboard.html`;
     } else if (format === 'csv') {
       const csvLines = [
@@ -1063,11 +2086,12 @@ export const exportShareApi = {
     } else {
       // xlsx_values / packaged_workbook
       blob = createDashboardExcelXml(data);
-      filename = `${safeTitle}_packaged_workbook.xls`;
+      filename = `${safeTitle}_packaged_workbook.xml`;
     }
 
     triggerBrowserDownload(blob, filename);
   },
+
 
   async createJob(payload: ExportJobCreatePayload): Promise<ExportJobStatus> {
     if (isStandalone || payload.options?.dashboardData) {

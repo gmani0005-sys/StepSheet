@@ -877,3 +877,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     },
   };
 });
+
+if (typeof window !== 'undefined') {
+  (window as any).__STEPSHEET_STORE__ = useWorkbenchStore;
+}
+

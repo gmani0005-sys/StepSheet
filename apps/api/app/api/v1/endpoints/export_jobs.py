@@ -208,3 +208,9 @@ def list_export_history(
             )
         )
     return results
+
+
+from app.api.v1.endpoints.export import export_direct_dashboard
+
+router.add_api_route("/direct-dashboard", export_direct_dashboard, methods=["POST"])
+

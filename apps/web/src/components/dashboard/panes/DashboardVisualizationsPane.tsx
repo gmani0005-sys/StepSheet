@@ -18,6 +18,10 @@ import {
   Lock,
   Unlock,
   SlidersHorizontal,
+  Gauge,
+  Filter,
+  Layers,
+  GitCommitVertical,
 } from 'lucide-react';
 import { DashboardPaneWrapper, DashboardPaneConfig } from './DashboardPaneWrapper';
 import {
@@ -343,6 +347,14 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
                         <PieChart className="w-4 h-4 text-[#0EA5E9]" />
                       ) : vt.type === 'line_area' ? (
                         <TrendingUp className="w-4 h-4 text-[#2563EB]" />
+                      ) : vt.type === 'stacked_area' ? (
+                        <Layers className="w-4 h-4 text-[#0284C7]" />
+                      ) : vt.type === 'waterfall' ? (
+                        <GitCommitVertical className="w-4 h-4 text-[#059669]" />
+                      ) : vt.type === 'gauge' ? (
+                        <Gauge className="w-4 h-4 text-[#D97706]" />
+                      ) : vt.type === 'funnel' ? (
+                        <Filter className="w-4 h-4 text-[#E11D48]" />
                       ) : vt.type === 'treemap' ? (
                         <LayoutGrid className="w-4 h-4 text-[#7C3AED]" />
                       ) : vt.type === 'histogram' ? (

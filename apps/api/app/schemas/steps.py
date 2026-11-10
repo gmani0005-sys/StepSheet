@@ -136,11 +136,20 @@ class StepSchema(BaseModel):
     type: Literal[
         "change_type",
         "rename_column",
+        "remove_column",
+        "reorder_columns",
+        "promote_headers",
+        "remove_rows",
+        "transpose",
         "filter_rows",
         "sort_rows",
         "remove_duplicates",
         "fill_down",
         "replace_values",
+        "standardize_values",
+        "impute_missing",
+        "flag_outliers",
+        "top_bottom_n",
         "split_column",
         "xlookup",
         "append",
@@ -153,6 +162,7 @@ class StepSchema(BaseModel):
         "math_transform",
         "pivot",
         "unpivot",
+        "custom_column",
     ]
     label: str
     enabled: bool = True

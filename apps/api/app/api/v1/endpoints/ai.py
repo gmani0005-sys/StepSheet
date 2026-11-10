@@ -5,7 +5,16 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.dataset import Dataset
 from app.schemas.steps import StepSchema
+from app.schemas.chat_query import ChatQueryRequest, ChatQueryResponse
+from app.schemas.ai_dashboard import (
+    GenerateDashboardRequest,
+    GenerateDashboardResponse,
+    PatchDashboardRequest,
+    PatchDashboardResponse,
+)
 from app.services.llm_adapter import llm_adapter
+from app.services.chat_query_service import chat_query_service
+from app.services.ai_dashboard_service import ai_dashboard_service
 
 router = APIRouter()
 
@@ -68,3 +77,77 @@ def generate_step(req: GenerateStepRequest, db: Session = Depends(get_db)):
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to generate step: {str(e)}")
+
+
+@router.post("/chat-query", response_model=ChatQueryResponse)
+def execute_chat_query(req: ChatQueryRequest, db: Session = Depends(get_db)):
+    """
+    Feature A: Chat with Data. Translates analytical plain English questions into
+    a safe structured DuckDB plan, executes locally, and returns explanation,
+    calculated tables, and chart visuals.
+    """
+    try:
+        response = chat_query_service.process_chat_query(
+            db=db,
+            dataset_id=req.dataset_id,
+            prompt=req.prompt,
+            model_tag=req.model_tag,
+            idempotency_key=req.idempotency_key,
+            columns=req.columns,
+            sample_rows=req.sample_rows,
+            dataset_name=req.dataset_name,
+        )
+        return response
+    except ValueError as ve:
+        raise HTTPException(status_code=404 if "not found" in str(ve) else 400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat query execution failed: {str(e)}")
+
+
+@router.post("/generate-dashboard", response_model=GenerateDashboardResponse)
+def generate_interactive_dashboard(req: GenerateDashboardRequest, db: Session = Depends(get_db)):
+    """
+    Feature B: Native Julius-style interactive dashboard generation from a plain-English prompt.
+    Profiles dataset locally, plans KPIs/visuals/slicers, verifies in DuckDB, and returns structured plan.
+    """
+    try:
+        response = ai_dashboard_service.generate_dashboard(
+            db=db,
+            dataset_id=req.dataset_id,
+            prompt=req.prompt,
+            model_tag=req.model_tag,
+            idempotency_key=req.idempotency_key,
+            columns=req.columns,
+            sample_rows=req.sample_rows,
+            dataset_name=req.dataset_name,
+        )
+        return response
+    except ValueError as ve:
+        raise HTTPException(status_code=404 if "not found" in str(ve) else 400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dashboard generation failed: {str(e)}")
+
+
+@router.post("/patch-dashboard", response_model=PatchDashboardResponse)
+def patch_interactive_dashboard(req: PatchDashboardRequest, db: Session = Depends(get_db)):
+    """
+    Conversational Dashboard Editing: Takes plain-English editing commands (e.g. 'Add a monthly trend',
+    'Remove pie chart', 'Add region slicer') and applies constrained patches without rebuilding unrelated visuals.
+    """
+    try:
+        response = ai_dashboard_service.patch_dashboard(
+            db=db,
+            dataset_id=req.dataset_id,
+            prompt=req.prompt,
+            current_dashboard=req.current_dashboard,
+            model_tag=req.model_tag,
+            idempotency_key=req.idempotency_key,
+            columns=req.columns,
+            sample_rows=req.sample_rows,
+            dataset_name=req.dataset_name,
+        )
+        return response
+    except ValueError as ve:
+        raise HTTPException(status_code=404 if "not found" in str(ve) else 400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dashboard patch failed: {str(e)}")

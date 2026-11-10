@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     sharing,
     audit,
     export_jobs,
+    local_ai,
 )
 
 api_router = APIRouter()
@@ -24,6 +25,7 @@ api_router.include_router(projects.router, prefix="/projects", tags=["Projects"]
 api_router.include_router(pipelines.router, prefix="/pipelines", tags=["Pipelines"])
 api_router.include_router(joins.router, prefix="/joins", tags=["Joins & Lookups"])
 api_router.include_router(ai.router, prefix="/ai", tags=["AI Step Assistant"])
+api_router.include_router(local_ai.router, prefix="/ai/local", tags=["Local AI & Ollama"])
 api_router.include_router(quality.router, prefix="/quality", tags=["Data Integrity & Quality"])
 api_router.include_router(export.router, prefix="/export", tags=["Exporters & Pipeline Runner"])
 api_router.include_router(export_jobs.router, prefix="/exports", tags=["Export Jobs & Delivery"])

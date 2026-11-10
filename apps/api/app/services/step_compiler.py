@@ -119,41 +119,68 @@ class StepCompiler:
                 generated.power_query_m = f'Table.RenameColumns(Source, {{"{old_name}", "{new_name}"}})'
 
             elif stype == "filter_rows":
-                col = params["column"]
-                op = params.get("operator", "eq")
-                val = params.get("value")
+                raw_conds = params.get("conditions")
+                logic = str(params.get("combine") or params.get("logic") or "AND").upper()
+                if isinstance(raw_conds, list) and raw_conds:
+                    sub_sqls = []
+                    for c in raw_conds:
+                        if c.get("column"):
+                            sub_sqls.append(cls._build_filter_condition(c["column"], c.get("operator", "eq"), c.get("value")))
+                    where_cond = f" {logic} ".join(sub_sqls) if sub_sqls else "1=1"
+                else:
+                    col = params.get("column", current_cols[0] if current_cols else "col")
+                    op = params.get("operator", "eq")
+                    val = params.get("value")
+                    where_cond = cls._build_filter_condition(col, op, val)
 
-                where_cond = cls._build_filter_condition(col, op, val)
                 cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte} WHERE {where_cond}\n)"
                 ctes.append(cte_sql)
 
                 generated.sql = f"WHERE {where_cond}"
-                generated.polars = cls._build_polars_filter(col, op, val)
+                generated.polars = cls._build_polars_filter(params.get("column", "col"), params.get("operator", "eq"), params.get("value"))
                 generated.power_query_m = f'Table.SelectRows(Source, each {where_cond})'
-                generated.excel_formula = f'=FILTER(A2:Z1000, {cls._build_excel_filter(col, op, val)})'
+                generated.excel_formula = f'=FILTER(A2:Z1000, {cls._build_excel_filter(params.get("column", "col"), params.get("operator", "eq"), params.get("value"))})'
 
             elif stype == "sort_rows":
-                col = params["column"]
-                dir_str = "DESC" if str(params.get("direction", "asc")).lower() == "desc" else "ASC"
+                raw_keys = params.get("sort_keys") or params.get("conditions")
+                if isinstance(raw_keys, list) and raw_keys:
+                    order_clauses = []
+                    for sk in raw_keys:
+                        sc = sk.get("column")
+                        if sc:
+                            sdir = "DESC" if str(sk.get("direction", "asc")).lower() == "desc" else "ASC"
+                            order_clauses.append(f'"{sc}" {sdir} NULLS LAST')
+                    order_sql = ", ".join(order_clauses) if order_clauses else '1 ASC'
+                else:
+                    col = params.get("column", current_cols[0] if current_cols else "col")
+                    dir_str = "DESC" if str(params.get("direction", "asc")).lower() == "desc" else "ASC"
+                    order_sql = f'"{col}" {dir_str} NULLS LAST'
 
-                cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte} ORDER BY \"{col}\" {dir_str} NULLS LAST\n)"
+                cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte} ORDER BY {order_sql}\n)"
                 ctes.append(cte_sql)
 
-                descending = "true" if dir_str == "DESC" else "false"
-                generated.sql = f'ORDER BY "{col}" {dir_str} NULLS LAST'
-                generated.polars = f'df = df.sort("{col}", descending={descending})'
-                generated.power_query_m = f'Table.Sort(Source, {{"{col}", Order.{ "Descending" if dir_str == "DESC" else "Ascending" }}})'
-                generated.excel_formula = f'=SORT(A2:Z1000, COLUMN_INDEX, {1 if dir_str == "ASC" else -1})'
+                generated.sql = f'ORDER BY {order_sql}'
+                generated.polars = f'df = df.sort(...)'
+                generated.power_query_m = f'Table.Sort(Source, ...)'
+                generated.excel_formula = f'=SORT(A2:Z1000, 1)'
 
             elif stype == "remove_duplicates":
                 key_cols = params.get("columns", [])
                 if not key_cols:
                     key_cols = list(current_cols)
-                keep = params.get("keep", "first")
-                order_dir = "ASC" if keep == "first" else "DESC"
-
+                keep = params.get("keep_mode") or params.get("keep", "first")
                 safe_part = ", ".join([f'"{k}"' for k in key_cols])
-                cte_sql = f"""{curr_cte} AS (
+
+                if keep == "duplicates_only":
+                    cte_sql = f"""{curr_cte} AS (
+    SELECT * FROM (
+        SELECT *, count(*) OVER (PARTITION BY {safe_part}) as _dedup_count
+        FROM {prev_cte}
+    ) WHERE _dedup_count > 1
+)"""
+                else:
+                    order_dir = "ASC" if keep == "first" else "DESC"
+                    cte_sql = f"""{curr_cte} AS (
     SELECT * FROM (
         SELECT *, row_number() OVER (PARTITION BY {safe_part} ORDER BY _row_id {order_dir}) as _dedup_rank
         FROM {prev_cte}
@@ -162,7 +189,7 @@ class StepCompiler:
                 ctes.append(cte_sql)
 
                 cols_repr = json.dumps(key_cols)
-                generated.sql = f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {safe_part} ORDER BY _row_id {order_dir}) = 1"
+                generated.sql = f"QUALIFY COUNT(*) OVER (PARTITION BY {safe_part}) > 1" if keep == "duplicates_only" else f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {safe_part} ORDER BY _row_id) = 1"
                 generated.polars = f'df = df.unique(subset={cols_repr}, keep="{keep}")'
                 generated.power_query_m = f'Table.Distinct(Source, {cols_repr})'
                 generated.excel_formula = f'=UNIQUE(A2:Z1000)'
@@ -298,45 +325,263 @@ class StepCompiler:
                 generated.excel_formula = f'=XLOOKUP({left_key}2, LookupSheet!A:A, LookupSheet!B:B, "{if_not_found}", 0)'
 
             elif stype in ["append", "append_tables"]:
-                app_ds_id = params["append_dataset_id"]
-                app_path = dataset_paths.get(app_ds_id, "")
-                app_sql = app_path.replace("\\", "/")
+                raw_ids = params.get("dataset_ids") or []
+                if not raw_ids and params.get("append_dataset_id"):
+                    raw_ids = [params["append_dataset_id"]]
+                elif not raw_ids and params.get("right_dataset_id"):
+                    raw_ids = [params["right_dataset_id"]]
+                if not raw_ids and dataset_paths:
+                    raw_ids = [list(dataset_paths.keys())[0]]
+
                 union_kw = "UNION" if params.get("union_type") == "distinct" else "UNION ALL"
                 align_mode = params.get("alignment_mode", "by_name")
 
-                if align_mode == "by_name" and app_path and os.path.exists(app_path):
-                    try:
-                        import duckdb
-                        temp_cols = [d[0] for d in duckdb.connect().execute(f"DESCRIBE SELECT * FROM read_parquet('{app_sql}') LIMIT 0").fetchall()]
-                        for tc in temp_cols:
-                            if tc != "_row_id" and tc not in current_cols:
-                                current_cols.append(tc)
-                    except Exception:
-                        pass
+                # Custom Provenance / Discriminator Column
+                add_custom_col = bool(params.get("add_custom_column") or params.get("custom_column_name"))
+                custom_col = str(params.get("custom_column_name") or "").strip()
+                primary_val = str(params.get("primary_value") if params.get("primary_value") is not None else "").replace("'", "''")
+                append_val = str(params.get("appended_value") if params.get("appended_value") is not None else "").replace("'", "''")
+
+                # Incremental key handling
+                inc_mode = params.get("incremental_mode") or ("distinct" if params.get("union_type") == "distinct" else "all")
+                key_col = params.get("key_column")
+
+                for app_ds_id in raw_ids:
+                    app_path = dataset_paths.get(app_ds_id, "")
+                    app_sql = app_path.replace("\\", "/")
+                    if align_mode == "by_name" and app_path and os.path.exists(app_path):
+                        try:
+                            import duckdb
+                            temp_cols = [d[0] for d in duckdb.connect().execute(f"DESCRIBE SELECT * FROM read_parquet('{app_sql}') LIMIT 0").fetchall()]
+                            for tc in temp_cols:
+                                if tc != "_row_id" and tc not in current_cols:
+                                    current_cols.append(tc)
+                        except Exception:
+                            pass
+
+                if add_custom_col and custom_col and custom_col not in current_cols:
+                    current_cols.append(custom_col)
+
+                # Build left query
+                if add_custom_col and custom_col:
+                    if custom_col in current_cols:
+                        left_proj = f'* EXCLUDE(_row_id, "{custom_col}"), COALESCE("{custom_col}", \'{primary_val}\') AS "{custom_col}"'
+                    else:
+                        left_proj = f'* EXCLUDE(_row_id), \'{primary_val}\' AS "{custom_col}"'
+                else:
+                    left_proj = '* EXCLUDE(_row_id)'
+
+                left_where = ""
+                right_selects = []
+                for app_ds_id in raw_ids:
+                    app_path = dataset_paths.get(app_ds_id, "")
+                    app_sql = app_path.replace("\\", "/")
+                    right_where = ""
+
+                    if key_col and inc_mode == "append_new_only":
+                        right_where = f' WHERE "{key_col}" NOT IN (SELECT "{key_col}" FROM {prev_cte})'
+                    elif key_col and inc_mode == "upsert":
+                        left_where = f' WHERE "{key_col}" NOT IN (SELECT "{key_col}" FROM read_parquet(\'{app_sql}\'))'
+
+                    if add_custom_col and custom_col:
+                        right_proj = f'*, \'{append_val}\' AS "{custom_col}"'
+                    else:
+                        right_proj = '*'
+
+                    if align_mode == "by_position":
+                        proj_cols = ", ".join([f'"{c}"' for c in current_cols])
+                        right_selects.append(f"SELECT {proj_cols} FROM (SELECT {right_proj} FROM read_parquet('{app_sql}'){right_where})")
+                    else:
+                        right_selects.append(f"SELECT {right_proj} FROM read_parquet('{app_sql}'){right_where}")
+
+                if not right_selects:
+                    right_selects.append(f"SELECT {left_proj} FROM {prev_cte} LIMIT 0")
 
                 if align_mode == "by_position":
                     proj_cols = ", ".join([f'"{c}"' for c in current_cols])
+                    base_select = f"SELECT {proj_cols} FROM (SELECT {left_proj} FROM {prev_cte}{left_where})"
+                    union_chain = f"\n        {union_kw}\n        ".join([base_select] + right_selects)
                     cte_sql = f"""{curr_cte} AS (
     SELECT row_number() OVER () AS _row_id, * FROM (
-        SELECT {proj_cols} FROM {prev_cte}
-        {union_kw}
-        SELECT {proj_cols} FROM read_parquet('{app_sql}')
+        {union_chain}
     )
 )"""
                 else:
+                    base_select = f"SELECT {left_proj} FROM {prev_cte}{left_where}"
+                    union_chain = f"\n        {union_kw} BY NAME\n        ".join([base_select] + right_selects)
                     cte_sql = f"""{curr_cte} AS (
     SELECT row_number() OVER () AS _row_id, * FROM (
-        SELECT * EXCLUDE(_row_id) FROM {prev_cte}
-        {union_kw} BY NAME
-        SELECT * FROM read_parquet('{app_sql}')
+        {union_chain}
     )
 )"""
                 ctes.append(cte_sql)
 
-                generated.sql = f"{union_kw} {'BY NAME ' if align_mode == 'by_name' else ''}SELECT * FROM read_parquet('{app_sql}')"
-                generated.polars = f'df = pl.concat([df, append_df], how="{"diagonal" if align_mode == "by_name" else "vertical"}")'
-                generated.power_query_m = f'Table.Combine({{Source, AppendTable}})'
-                generated.excel_formula = f'=VSTACK(Table1, Table2)'
+                if add_custom_col and custom_col:
+                    first_sql = dataset_paths.get(raw_ids[0], "").replace("\\", "/") if raw_ids else "append_table"
+                    generated.sql = f"SELECT {left_proj} FROM table UNION ALL BY NAME SELECT {right_proj} FROM read_parquet('{first_sql}')"
+                    generated.polars = f'df = pl.concat([df.with_columns(pl.lit("{primary_val}").alias("{custom_col}")), *[app_df.with_columns(pl.lit("{append_val}").alias("{custom_col}")) for app_df in other_dfs]])'
+                    generated.power_query_m = f'Table.Combine({{Table.AddColumn(Source, "{custom_col}", each "{primary_val}"), ...}})'
+                    generated.excel_formula = f'=VSTACK(HSTACK(Table1, "{primary_val}"), HSTACK(Table2, "{append_val}"))'
+                else:
+                    first_sql = dataset_paths.get(raw_ids[0], "").replace("\\", "/") if raw_ids else "append_table"
+                    generated.sql = f"{union_kw} {'BY NAME ' if align_mode == 'by_name' else ''}SELECT * FROM read_parquet('{first_sql}')"
+                    generated.polars = f'df = pl.concat([df, *other_dfs], how="{"diagonal" if align_mode == "by_name" else "vertical"}")'
+                    generated.power_query_m = f'Table.Combine({{Source, Table2, ...}})'
+                    generated.excel_formula = f'=VSTACK(Table1, Table2, ...)'
+
+            elif stype == "custom_column":
+                new_col = (params.get("new_column") or params.get("column") or params.get("target_column") or "custom_col").strip()
+                raw_val = params.get("value")
+                expr = params.get("expression") or params.get("formula")
+                if expr:
+                    val_sql = expr
+                    val_str = str(expr)
+                else:
+                    escaped_v = str(raw_val if raw_val is not None else "").replace("'", "''")
+                    val_sql = f"'{escaped_v}'"
+                    val_str = str(raw_val)
+
+                proj = [f'"{c}"' for c in current_cols] + [f'{val_sql} AS "{new_col}"']
+                current_cols.append(new_col)
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+
+                generated.sql = f'{val_sql} AS "{new_col}"'
+                generated.polars = f'df = df.with_columns(pl.lit("{val_str}").alias("{new_col}"))'
+                generated.power_query_m = f'Table.AddColumn(Source, "{new_col}", each "{val_str}")'
+                generated.excel_formula = f'="{val_str}"'
+
+            elif stype == "remove_column":
+                to_drop = set(params.get("columns", []) if isinstance(params.get("columns"), list) else [params.get("column")] if params.get("column") else [])
+                keep_selected = bool(params.get("keep_selected"))
+                if keep_selected:
+                    new_cols = [c for c in current_cols if c in to_drop]
+                else:
+                    new_cols = [c for c in current_cols if c not in to_drop]
+                if not new_cols:
+                    new_cols = list(current_cols)
+                current_cols = new_cols
+                proj = [f'"{c}"' for c in current_cols]
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+                generated.sql = f"SELECT {', '.join(proj)} FROM {prev_cte}"
+                generated.polars = f'df = df.select({json.dumps(current_cols)})'
+                generated.power_query_m = f'Table.SelectColumns(Source, {json.dumps(current_cols)})'
+
+            elif stype == "reorder_columns":
+                order = params.get("column_order", [])
+                if isinstance(order, list) and order:
+                    new_cols = [c for c in order if c in current_cols] + [c for c in current_cols if c not in order]
+                    current_cols = new_cols
+                proj = [f'"{c}"' for c in current_cols]
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+                generated.sql = f"SELECT {', '.join(proj)} FROM {prev_cte}"
+                generated.polars = f'df = df.select({json.dumps(current_cols)})'
+                generated.power_query_m = f'Table.ReorderColumns(Source, {json.dumps(current_cols)})'
+
+            elif stype == "promote_headers":
+                cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+                generated.sql = "-- Promote first row as headers"
+                generated.polars = "df = df"
+                generated.power_query_m = "Table.PromoteHeaders(Source)"
+
+            elif stype == "remove_rows":
+                mode = params.get("mode", "top_n")
+                count = max(0, int(params.get("count", 1)))
+                if mode == "top_n":
+                    cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte} OFFSET {count}\n)"
+                elif mode == "keep_top_n":
+                    cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte} LIMIT {count}\n)"
+                elif mode == "blank_rows":
+                    chk_cols = params.get("columns") or list(current_cols)
+                    null_conds = " AND ".join([f'("{c}" IS NULL OR CAST("{c}" AS VARCHAR) = \'\')' for c in chk_cols])
+                    cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte} WHERE NOT ({null_conds})\n)"
+                else:
+                    cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+                generated.sql = cte_sql
+                generated.polars = f'df = df.slice({count})' if mode == 'top_n' else 'df = df'
+                generated.power_query_m = f'Table.Skip(Source, {count})' if mode == 'top_n' else 'Source'
+
+            elif stype == "transpose":
+                cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+                generated.sql = "-- Transpose matrix"
+                generated.polars = "df = df.transpose(include_header=True)"
+                generated.power_query_m = "Table.Transpose(Source)"
+
+            elif stype == "standardize_values":
+                col = params.get("column", current_cols[0] if current_cols else "col")
+                out_col = params.get("output_column") or col
+                mappings = params.get("mappings", [])
+                when_clauses = []
+                for m in mappings:
+                    f_val = str(m.get("from", "")).replace("'", "''")
+                    t_val = str(m.get("to", "")).replace("'", "''")
+                    when_clauses.append(f"WHEN LOWER(TRIM(CAST(\"{col}\" AS VARCHAR))) = LOWER('{f_val}') THEN '{t_val}'")
+                case_expr = f"CASE {' '.join(when_clauses)} ELSE \"{col}\" END" if when_clauses else f'"{col}"'
+                proj = []
+                if out_col in current_cols:
+                    for c in current_cols:
+                        proj.append(f'{case_expr} AS "{c}"' if c == out_col else f'"{c}"')
+                else:
+                    proj = [f'"{c}"' for c in current_cols] + [f'{case_expr} AS "{out_col}"']
+                    current_cols.append(out_col)
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+                generated.sql = f'{case_expr} AS "{out_col}"'
+                generated.polars = f'df = df.with_columns(...) '
+                generated.power_query_m = 'Table.ReplaceValue(Source, ...)'
+
+            elif stype == "impute_missing":
+                col = params.get("column", current_cols[0] if current_cols else "col")
+                out_col = params.get("output_column") or col
+                strat = params.get("strategy", "mean")
+                if strat == "mean":
+                    val_expr = f'COALESCE("{col}", AVG("{col}") OVER ())'
+                elif strat == "median":
+                    val_expr = f'COALESCE("{col}", MEDIAN("{col}") OVER ())'
+                else:
+                    fixed = str(params.get("fixed_value", 0)).replace("'", "''")
+                    val_expr = f'COALESCE("{col}", \'{fixed}\')'
+                proj = []
+                if out_col in current_cols:
+                    for c in current_cols:
+                        proj.append(f'{val_expr} AS "{c}"' if c == out_col else f'"{c}"')
+                else:
+                    proj = [f'"{c}"' for c in current_cols] + [f'{val_expr} AS "{out_col}"']
+                    current_cols.append(out_col)
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}\n)"
+                ctes.append(cte_sql)
+                generated.sql = f'{val_expr} AS "{out_col}"'
+                generated.polars = f'df = df.with_columns(pl.col("{col}").fill_null(strategy="{strat}").alias("{out_col}"))'
+                generated.power_query_m = 'Table.ReplaceValue(Source, null, ...)'
+
+            elif stype == "flag_outliers":
+                col = params.get("column", current_cols[0] if current_cols else "col")
+                out_col = params.get("output_column") or f"{col}_is_outlier"
+                outlier_case = f'CASE WHEN "{col}" < (QUANTILE_CONT("{col}", 0.25) OVER () - 1.5 * (QUANTILE_CONT("{col}", 0.75) OVER () - QUANTILE_CONT("{col}", 0.25) OVER ())) OR "{col}" > (QUANTILE_CONT("{col}", 0.75) OVER () + 1.5 * (QUANTILE_CONT("{col}", 0.75) OVER () - QUANTILE_CONT("{col}", 0.25) OVER ())) THEN TRUE ELSE FALSE END'
+                proj = [f'"{c}"' for c in current_cols] + [f'{outlier_case} AS "{out_col}"']
+                current_cols.append(out_col)
+                filt = f' WHERE NOT ({out_col})' if params.get("filter_outliers") else ''
+                cte_sql = f"{curr_cte} AS (\n    SELECT _row_id, {', '.join(proj)} FROM {prev_cte}{filt}\n)"
+                ctes.append(cte_sql)
+                generated.sql = f'{outlier_case} AS "{out_col}"'
+                generated.polars = f'df = df.with_columns(...) '
+                generated.power_query_m = f'// Flag outliers on {col}'
+
+            elif stype == "top_bottom_n":
+                col = params.get("column", current_cols[0] if current_cols else "col")
+                mode = params.get("mode", "top")
+                n = max(1, int(params.get("n", 10)))
+                dir_str = "DESC" if mode == "top" else "ASC"
+                cte_sql = f"{curr_cte} AS (\n    SELECT * FROM {prev_cte} ORDER BY \"{col}\" {dir_str} NULLS LAST LIMIT {n}\n)"
+                ctes.append(cte_sql)
+                generated.sql = f'SELECT * FROM {prev_cte} ORDER BY "{col}" {dir_str} LIMIT {n}'
+                generated.polars = f'df = df.sort("{col}", descending={ "True" if mode == "top" else "False" }).head({n})'
+                generated.power_query_m = f'Table.FirstN(Table.Sort(Source, {{"{col}", Order.{"Descending" if mode == "top" else "Ascending"}}}), {n})'
 
             elif stype in ["join", "join_builder"]:
                 r_ds_id = params.get("right_dataset_id")
@@ -485,15 +730,30 @@ class StepCompiler:
 
             # Phase 4: Aggregation & Group By
             elif stype in ["group_by", "aggregate"]:
-                group_cols = params.get("group_by_columns", [])
+                group_cols = (
+                    params.get("group_by_columns")
+                    or params.get("group_columns")
+                    or ([params.get("group_by")] if params.get("group_by") else [])
+                )
                 aggs = params.get("aggregations", [])
+                if not aggs and (params.get("agg_column") or params.get("column")):
+                    aggs = [{
+                        "column": params.get("agg_column") or params.get("column"),
+                        "agg_func": params.get("agg_func") or params.get("function") or "sum",
+                        "output_column": params.get("output_column") or params.get("alias"),
+                    }]
 
                 agg_projs = []
                 new_cols = list(group_cols)
                 for agg in aggs:
-                    col = agg["column"]
-                    func = agg["agg_func"].lower()
-                    out_name = agg.get("output_column") or f"{func}_{col}"
+                    col = agg.get("column", "")
+                    func = (agg.get("agg_func") or agg.get("function") or "sum").lower()
+                    out_name = (
+                        agg.get("output_column")
+                        or agg.get("alias")
+                        or agg.get("output_name")
+                        or f"{func}_{col}"
+                    )
 
                     if func == "sum":
                         expr = f'SUM("{col}")'
@@ -501,7 +761,7 @@ class StepCompiler:
                         expr = f'COUNT("{col}")'
                     elif func == "distinct_count":
                         expr = f'COUNT(DISTINCT "{col}")'
-                    elif func == "avg":
+                    elif func in ["avg", "mean"]:
                         expr = f'ROUND(AVG("{col}"), 4)'
                     elif func == "min":
                         expr = f'MIN("{col}")'
@@ -611,6 +871,8 @@ class StepCompiler:
                     pos = params.get("position", "before")
                     part_idx = 1 if pos == "before" else 2
                     expr = f"SPLIT_PART({safe_col}, '{escaped_delim}', {part_idx})"
+                elif op == "clean_spaces":
+                    expr = f"TRIM(REGEXP_REPLACE({safe_col}, '\\s+', ' ', 'g'))"
                 else:
                     expr = f'TRIM({safe_col})'
 
@@ -661,6 +923,9 @@ class StepCompiler:
                 elif op == "fiscal_year":
                     f_start = params.get("fiscal_start_month", 1)
                     expr = f"CASE WHEN DATE_PART('month', {safe_col}) >= {f_start} THEN DATE_PART('year', {safe_col}) + 1 ELSE DATE_PART('year', {safe_col}) END"
+                elif op == "networkdays":
+                    sec_col = params.get("second_column", col)
+                    expr = f"DATE_DIFF('day', {safe_col}, TRY_CAST(\"{sec_col}\" AS DATE))"
                 else:
                     expr = f"DATE_PART('year', {safe_col})"
 
@@ -721,6 +986,8 @@ class StepCompiler:
                     expr = f'FLOOR({safe_c1})'
                 elif op == "abs":
                     expr = f'ABS({safe_c1})'
+                elif op == "clean_numeric":
+                    expr = f"TRY_CAST(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(CAST(\"{col1}\" AS VARCHAR)), '$', ''), '€', ''), '£', ''), '¥', ''), '%', ''), ',', '') AS DOUBLE)"
                 elif op == "mod":
                     expr = f'({safe_c1} % NULLIF({safe_c2}, 0))'
                 elif op == "percent_change":
@@ -852,6 +1119,22 @@ class StepCompiler:
             return f"CAST({safe_col} AS VARCHAR) ILIKE '{escaped_val}%'"
         if op == "ends_with":
             return f"CAST({safe_col} AS VARCHAR) ILIKE '%{escaped_val}'"
+        if op == "not_contains":
+            return f"CAST({safe_col} AS VARCHAR) NOT ILIKE '%{escaped_val}%'"
+        if op == "between":
+            if isinstance(val, (list, tuple)) and len(val) >= 2:
+                return f"{safe_col} BETWEEN {val[0]} AND {val[1]}"
+            parts = str(val).split(",")
+            if len(parts) >= 2:
+                return f"{safe_col} BETWEEN {parts[0].strip()} AND {parts[1].strip()}"
+        if op == "in":
+            items = val if isinstance(val, (list, tuple)) else [v.strip() for v in str(val).split(",")]
+            sql_items = ", ".join(["'" + str(i).replace("'", "''") + "'" for i in items])
+            return f"CAST({safe_col} AS VARCHAR) IN ({sql_items})"
+        if op == "not_in":
+            items = val if isinstance(val, (list, tuple)) else [v.strip() for v in str(val).split(",")]
+            sql_items = ", ".join(["'" + str(i).replace("'", "''") + "'" for i in items])
+            return f"CAST({safe_col} AS VARCHAR) NOT IN ({sql_items})"
         return f"{safe_col} = '{escaped_val}'"
 
     @staticmethod

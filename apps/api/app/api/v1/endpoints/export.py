@@ -1,16 +1,32 @@
 import os
 import io
+import re
 import json
+import tempfile
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.dataset import Dataset
-from app.schemas.export import ExportRequest, CodeExportResponse, RunFullPipelineRequest, RunFullPipelineResponse
+from app.schemas.export import (
+    ExportRequest,
+    CodeExportResponse,
+    RunFullPipelineRequest,
+    RunFullPipelineResponse,
+    DirectDashboardExportRequest,
+)
 from app.services.export_service import export_service
 from app.services.storage import get_storage_service
+from app.services.exporters.dashboard_exporter import (
+    export_dashboard_xlsx,
+    export_dashboard_pptx,
+    export_dashboard_pdf,
+    export_dashboard_sswb_html,
+    export_dashboard_sswb,
+)
 
 router = APIRouter()
+
 
 
 def _get_dataset_context(dataset_id: str, db: Session, steps: list):
@@ -168,3 +184,163 @@ def export_pipeline_spec(req: ExportRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pipeline spec export error: {str(e)}")
+
+
+@router.post("/direct-dashboard")
+def export_direct_dashboard(req: DirectDashboardExportRequest):
+    """
+    Directly exports dashboard content (KPIs, Visualizations, Summary Tables, Underlying Data)
+    into genuine binary .xlsx (Excel), .pptx (PowerPoint), .pdf (Vector PDF), or .csv formats.
+    """
+    raw_title = req.title or req.dataset_name or "Dashboard"
+    safe_title = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_title).strip("_") or "Dashboard"
+    fmt = (req.format or "xlsx").lower()
+    payload = req.model_dump()
+
+    try:
+        if fmt in ["sswb_html", "sswb.html", "packaged_workbook_html"]:
+            with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_dashboard_sswb_html(payload, tmp_path)
+                with open(tmp_path, "rb") as f:
+                    content = f.read()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            filename = f"{safe_title}_packaged_workbook.sswb.html"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="text/html; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        elif fmt == "sswb":
+            with tempfile.NamedTemporaryFile(suffix=".sswb", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_dashboard_sswb(payload, tmp_path)
+                with open(tmp_path, "rb") as f:
+                    content = f.read()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            filename = f"{safe_title}_packaged_workbook.sswb"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="application/json; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        elif fmt in ["html", "dashboard_html"]:
+            with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_dashboard_sswb_html(payload, tmp_path)
+                with open(tmp_path, "rb") as f:
+                    content = f.read()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            filename = f"{safe_title}_dashboard.html"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="text/html; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        elif fmt in ["xlsx", "packaged_workbook", "xlsx_values"]:
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_dashboard_xlsx(payload, tmp_path)
+                with open(tmp_path, "rb") as f:
+                    content = f.read()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            filename = f"{safe_title}_dashboard.xlsx"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        elif fmt == "pptx":
+            with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_dashboard_pptx(payload, tmp_path)
+                with open(tmp_path, "rb") as f:
+                    content = f.read()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            filename = f"{safe_title}_presentation.pptx"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        elif fmt == "pdf":
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_dashboard_pdf(payload, tmp_path)
+                with open(tmp_path, "rb") as f:
+                    content = f.read()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            filename = f"{safe_title}_dashboard.pdf"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        elif fmt == "csv":
+            import csv
+            buf = io.StringIO()
+            cols = req.columns or (list(req.rows[0].keys()) if req.rows else [])
+            writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+            writer.writeheader()
+            for r in req.rows:
+                writer.writerow(r)
+            content = buf.getvalue().encode("utf-8")
+            filename = f"{safe_title}_data.csv"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        else:
+            # Fallback to XLSX
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_dashboard_xlsx(payload, tmp_path)
+                with open(tmp_path, "rb") as f:
+                    content = f.read()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            filename = f"{safe_title}_dashboard.xlsx"
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dashboard export error: {str(e)}")
+

@@ -79,7 +79,14 @@ class XLookupParams(BaseModel):
 class AppendParams(BaseModel):
     append_dataset_id: str
     alignment: Literal["name", "position"] = "name"
+    alignment_mode: Optional[str] = "by_name"
     union_type: Literal["all", "distinct"] = "all"
+    add_custom_column: bool = False
+    custom_column_name: Optional[str] = None
+    primary_value: Optional[str] = None
+    appended_value: Optional[str] = None
+    incremental_mode: Optional[Literal["all", "distinct", "append_new_only", "upsert"]] = "all"
+    key_column: Optional[str] = None
 
 
 class JoinParams(BaseModel):

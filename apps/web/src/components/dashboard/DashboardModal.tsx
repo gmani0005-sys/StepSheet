@@ -5,6 +5,8 @@ import {
   BarChartHorizontal,
   PieChart,
   TrendingUp,
+  ArrowUpRight,
+  ArrowDownRight,
   Plus,
   Trash2,
   Copy,
@@ -40,6 +42,8 @@ import { DashboardVisualizationsPane } from './panes/DashboardVisualizationsPane
 import { DashboardDataPane } from './panes/DashboardDataPane';
 import { SHARE_EXPORT_ENABLED } from '../../config/features';
 import { ExportShareModal } from '../export_share/ExportShareModal';
+import { AiDashboardPromptBar } from './AiDashboardPromptBar';
+import { LocalAiSetupModal } from '../ai/LocalAiSetupModal';
 import {
   exportShareApi,
   DashboardExportData,
@@ -57,6 +61,10 @@ export type CustomVisualType =
   | 'donut'
   | 'pie'
   | 'line_area'
+  | 'stacked_area'
+  | 'waterfall'
+  | 'gauge'
+  | 'funnel'
   | 'treemap'
   | 'table'
   | 'matrix';
@@ -64,6 +72,7 @@ export type CustomVisualType =
 export type VisualAggType = 'sum' | 'count' | 'avg' | 'min' | 'max' | 'distinct';
 
 export type PaletteId =
+  | 'v22'
   | 'classic'
   | 'excel'
   | 'ocean'
@@ -181,6 +190,10 @@ export interface DashboardModalProps {
 }
 
 const COLOR_PALETTES: Record<PaletteId, { name: string; colors: string[] }> = {
+  v22: {
+    name: 'Dashboard V22 (Glassmorphism)',
+    colors: ['#0D9488', '#FB923C', '#10B981', '#F43F5E', '#0284C7', '#8B5CF6', '#F59E0B', '#34D399'],
+  },
   classic: {
     name: 'Classic Analytics',
     colors: ['#118DFF', '#12239E', '#E66C37', '#6B007B', '#E044A7', '#744EC2', '#D9B300', '#D64550'],
@@ -276,6 +289,30 @@ const VISUAL_TYPES: Array<{
     desc: 'Continuous trend line with shaded area gradient',
   },
   {
+    type: 'stacked_area',
+    label: 'Stacked Area Chart',
+    shortLabel: 'Stacked Area',
+    desc: 'Cumulative multi-series area trend breakdown over time or categories',
+  },
+  {
+    type: 'waterfall',
+    label: 'Waterfall Chart (Bridge)',
+    shortLabel: 'Waterfall',
+    desc: 'Variance bridge chart showing positive/negative changes and cumulative totals',
+  },
+  {
+    type: 'gauge',
+    label: 'Radial Gauge / KPI Meter',
+    shortLabel: 'Gauge',
+    desc: 'Arc progress meter comparing current performance against goal/target',
+  },
+  {
+    type: 'funnel',
+    label: 'Funnel Pipeline Visual',
+    shortLabel: 'Funnel',
+    desc: 'Conversion pipeline stages with drop-off percentages and retention tracking',
+  },
+  {
     type: 'treemap',
     label: 'Treemap Hierarchy',
     shortLabel: 'Treemap',
@@ -315,6 +352,32 @@ const DEFAULT_TILE_GAP = 16;
 const CANVAS_GRID_SIZE = 8;
 const SNAP_GUIDE_THRESHOLD = 6;
 
+export function getRowVal(
+  row: Record<string, any> | undefined | null,
+  colName: string | undefined | null
+): any {
+  if (!row || !colName) return undefined;
+  if (row[colName] !== undefined) return row[colName];
+
+  const colLower = colName.toLowerCase().trim();
+  const colClean = colLower.replace(/[\s_\-]/g, '');
+
+  const keys = Object.keys(row);
+  for (const k of keys) {
+    if (k.toLowerCase().trim() === colLower) return row[k];
+  }
+  for (const k of keys) {
+    if (k.toLowerCase().replace(/[\s_\-]/g, '') === colClean) return row[k];
+  }
+  for (const k of keys) {
+    const kClean = k.toLowerCase().replace(/[\s_\-]/g, '');
+    if (kClean.includes(colClean) || colClean.includes(kClean)) {
+      return row[k];
+    }
+  }
+  return undefined;
+}
+
 const ensureVisualCanvasCoords = (
   list: DashboardVisualConfig[]
 ): DashboardVisualConfig[] => {
@@ -325,8 +388,8 @@ const ensureVisualCanvasCoords = (
     const defaultY = 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP);
     return {
       ...v,
-      x: typeof v.x === 'number' && Number.isFinite(v.x) ? Math.max(0, v.x) : defaultX,
-      y: typeof v.y === 'number' && Number.isFinite(v.y) ? Math.max(0, v.y) : defaultY,
+      x: typeof v.x === 'number' && Number.isFinite(v.x) && v.x > 12 ? Math.max(0, v.x) : defaultX,
+      y: typeof v.y === 'number' && Number.isFinite(v.y) && v.y > 12 ? Math.max(0, v.y) : defaultY,
       zIndex: typeof v.zIndex === 'number' && Number.isFinite(v.zIndex) ? v.zIndex : idx + 1,
     };
   });
@@ -442,7 +505,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   const [selectedVisualId, setSelectedVisualId] = useState<string | null>(null);
   const [selectedVisualIds, setSelectedVisualIds] = useState<string[]>([]);
   const [selectedKpiId, setSelectedKpiId] = useState<string | null>(null);
-  const [paletteId, setPaletteId] = useState<PaletteId>('classic');
+  const [paletteId, setPaletteId] = useState<PaletteId>('v22');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
 
   // Export & Share State inside Dashboard
@@ -454,6 +517,48 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   const [copiedLinkFeedback, setCopiedLinkFeedback] = useState(false);
   const downloadMenuRef = useRef<HTMLDivElement>(null);
   const shareMenuRef = useRef<HTMLDivElement>(null);
+  const modalContainerRef = useRef<HTMLDivElement>(null);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isLocalAiSetupOpen, setIsLocalAiSetupOpen] = useState(false);
+
+  const toggleFullScreen = () => {
+    setIsFullScreen((prev) => {
+      const next = !prev;
+      if (next) {
+        if (!document.fullscreenElement && modalContainerRef.current?.requestFullscreen) {
+          modalContainerRef.current.requestFullscreen().catch(() => {});
+        }
+      } else {
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullScreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isOpen) return;
+      if (e.key === 'F11') {
+        e.preventDefault();
+        toggleFullScreen();
+      } else if (e.key === 'Escape' && isFullScreen) {
+        e.preventDefault();
+        toggleFullScreen();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isFullScreen]);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -882,20 +987,23 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     try {
       const raw = localStorage.getItem(STORAGE_KEY_DASHBOARDS);
       const parsed = raw ? JSON.parse(raw) : {};
-      const saved = parsed[dsKey];
-      if (
+      const saved = parsed[dsKey] || (dsKey !== 'default' ? parsed['default'] : null);
+      const colNamesLower = colNames.map((c) => c.toLowerCase().trim());
+      const isSavedValid =
         saved &&
         Array.isArray(saved.visuals) &&
         saved.visuals.length > 0 &&
-        saved.visuals.every(
-          (v: DashboardVisualConfig) =>
-            colNames.includes(v.categoryCol) || colNames.includes(v.valueCol)
-        )
-      ) {
+        saved.visuals.some((v: DashboardVisualConfig) => {
+          const cat = (v.categoryCol || '').toLowerCase().trim();
+          const val = (v.valueCol || '').toLowerCase().trim();
+          return colNamesLower.includes(cat) || colNamesLower.includes(val) || !v.categoryCol;
+        });
+
+      if (isSavedValid) {
         const loadedPalette: PaletteId =
           saved.paletteId && COLOR_PALETTES[saved.paletteId as PaletteId]
             ? (saved.paletteId as PaletteId)
-            : 'classic';
+            : 'v22';
         const loadedTitle =
           typeof saved.dashboardTitle === 'string'
             ? saved.dashboardTitle
@@ -919,14 +1027,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               queryId: p.queryId ?? activeQueryId,
               dashboardTitle: p.dashboardTitle || loadedTitle,
               visuals: ensureVisualCanvasCoords(
-                Array.isArray(p.visuals) && p.visuals.length > 0 ? p.visuals : normalizedVisuals
+                Array.isArray(p.visuals) ? p.visuals : (idx === 0 ? normalizedVisuals : [])
               ),
               kpiCards:
-                Array.isArray(p.kpiCards) && p.kpiCards.length > 0 ? p.kpiCards : loadedKpis,
+                Array.isArray(p.kpiCards) ? p.kpiCards : (idx === 0 ? loadedKpis : []),
               slicerColumns:
-                Array.isArray(p.slicerColumns) && p.slicerColumns.length > 0
+                Array.isArray(p.slicerColumns)
                   ? p.slicerColumns.filter((c: string) => colNames.includes(c))
-                  : loadedSlicers,
+                  : (idx === 0 ? loadedSlicers : []),
               paletteId:
                 p.paletteId && COLOR_PALETTES[p.paletteId as PaletteId]
                   ? p.paletteId
@@ -989,7 +1097,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       visuals: defaultVisuals,
       kpiCards: defaultKpis,
       slicerColumns: defaultSlicers,
-      paletteId: 'classic',
+      paletteId: 'v22',
     };
     setPages([initialPage]);
     setActivePageId('page_1');
@@ -1008,7 +1116,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
   // Sync active page state into pages array & persist dashboard state
   useEffect(() => {
-    if (!isOpen || visuals.length === 0) return;
+    if (!isOpen || pages.length === 0) return;
     const dsKey = selectedDataset?.id || 'default';
     setPages((prevPages) => {
       const updatedPages =
@@ -1365,7 +1473,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     if (!col) return [];
     const set = new Set<string>();
     sourceRows.forEach((r) => {
-      const v = r[col];
+      const v = getRowVal(r, col);
       const norm =
         v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
       set.add(norm);
@@ -1424,7 +1532,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     return sourceRows.filter((r) => {
       for (const [col, selectedVals] of Object.entries(multiSlicerSelections)) {
         if (Array.isArray(selectedVals) && selectedVals.length > 0) {
-          const cell = r[col];
+          const cell = getRowVal(r, col);
           const norm =
             cell === null || cell === undefined || String(cell).trim() === ''
               ? '(Blank)'
@@ -1433,7 +1541,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         }
       }
       if (crossFilter) {
-        const cell = r[crossFilter.column];
+        const cell = getRowVal(r, crossFilter.column);
         const norm =
           cell === null || cell === undefined || String(cell).trim() === ''
             ? '(Blank)'
@@ -1551,24 +1659,46 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
   };
 
-  const computeMetric = (subset: Record<string, any>[], col: string, fn: VisualAggType): number => {
-    if (subset.length === 0) return 0;
-    if (fn === 'count') return subset.length;
-    if (fn === 'distinct') {
-      return new Set(
-        subset
-          .map((r) => r[col])
-          .filter((v) => v !== null && v !== undefined && v !== '')
-          .map((v) => String(v))
-      ).size;
+  const computeMetric = (subset: Record<string, any>[], col: string, fn: VisualAggType | string): number => {
+    if (!subset || subset.length === 0) return 0;
+    const lowerFn = String(fn || 'sum').toLowerCase().trim();
+    if (lowerFn === 'count') {
+      if (!col) return subset.length;
+      const valid = subset.filter((r) => {
+        const val = getRowVal(r, col);
+        return val !== null && val !== undefined && String(val).trim() !== '';
+      });
+      return valid.length > 0 ? valid.length : subset.length;
     }
-    const nums = subset.map((r) => Number(r[col])).filter((n) => !Number.isNaN(n));
+    if (lowerFn === 'distinct' || lowerFn === 'distinct_count' || lowerFn === 'unique') {
+      const set = new Set<string>();
+      for (const r of subset) {
+        const val = getRowVal(r, col);
+        if (val !== null && val !== undefined && String(val).trim() !== '') {
+          set.add(String(val).trim());
+        }
+      }
+      return set.size;
+    }
+    const nums: number[] = [];
+    for (const r of subset) {
+      const val = getRowVal(r, col);
+      if (typeof val === 'number') {
+        if (!Number.isNaN(val)) nums.push(val);
+      } else if (typeof val === 'string') {
+        const cleaned = val.replace(/[$€£¥, %]/g, '').trim();
+        if (cleaned) {
+          const num = Number(cleaned);
+          if (!Number.isNaN(num)) nums.push(num);
+        }
+      }
+    }
     if (nums.length === 0) return 0;
     const sum = nums.reduce((a, b) => a + b, 0);
-    if (fn === 'sum') return Number(sum.toFixed(2));
-    if (fn === 'avg') return Number((sum / nums.length).toFixed(2));
-    if (fn === 'min') return Math.min(...nums);
-    if (fn === 'max') return Math.max(...nums);
+    if (lowerFn === 'sum') return Number(sum.toFixed(2));
+    if (lowerFn === 'avg' || lowerFn === 'mean') return Number((sum / nums.length).toFixed(2));
+    if (lowerFn === 'min') return Math.min(...nums);
+    if (lowerFn === 'max') return Math.max(...nums);
     return Number(sum.toFixed(2));
   };
 
@@ -1590,7 +1720,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     const exportVisuals: DashboardExportVisual[] = visuals.map((vis) => {
       if (vis.type === 'histogram') {
         const nums = filteredRows
-          .map((r) => Number(r[vis.valueCol]))
+          .map((r) => Number(getRowVal(r, vis.valueCol)))
           .filter((n) => !Number.isNaN(n));
         const minVal = nums.length > 0 ? Math.min(...nums) : 0;
         const maxVal = nums.length > 0 ? Math.max(...nums) : 1;
@@ -1631,7 +1761,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       // Group rows for standard visuals
       const catMap = new Map<string, Record<string, any>[]>();
       filteredRows.forEach((r) => {
-        const raw = r[vis.categoryCol];
+        const raw = getRowVal(r, vis.categoryCol);
         const key =
           raw === null || raw === undefined || String(raw).trim() === '' ? '(Blank)' : String(raw);
         if (!catMap.has(key)) catMap.set(key, []);
@@ -1692,7 +1822,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     window.print();
   };
 
-  const handleQuickDownload = async (format: string = 'xlsx_values') => {
+  const handleQuickDownload = async (format: string = 'sswb_html') => {
     setIsDownloadMenuOpen(false);
     try {
       const dData = getDashboardExportData();
@@ -1965,22 +2095,19 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     }
     const newPageId = `page_${nextNum}`;
     const newPageName = `Page ${nextNum}`;
-    const newVisuals = buildDefaultVisuals();
-    const newKpis = buildDefaultKpiCards();
-    const { cat1, cat2 } = getSmartDefaults();
-    const newSlicers = [cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
     const newTitle = `${selectedDataset?.name || 'Executive'} Dashboard - ${newPageName}`;
 
+    // Fresh, clean blank page with no duplicated visuals or KPIs
     const newPage: DashboardPageConfig = {
       id: newPageId,
       name: newPageName,
       datasetId: selectedDataset?.id,
       queryId: activeQueryId,
       dashboardTitle: newTitle,
-      visuals: newVisuals,
-      kpiCards: newKpis,
-      slicerColumns: newSlicers,
-      paletteId,
+      visuals: [],
+      kpiCards: [],
+      slicerColumns: [],
+      paletteId: 'v22',
     };
 
     setPages((prev) => [
@@ -2002,12 +2129,81 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     ]);
     setActivePageId(newPageId);
     setDashboardTitle(newTitle);
-    setVisuals(newVisuals);
-    setKpiCards(newKpis);
-    setSlicerColumns(newSlicers);
+    setVisuals([]);
+    setKpiCards([]);
+    setSlicerColumns([]);
+    setPaletteId('v22');
     setUndoStack([]);
     setRedoStack([]);
-    const firstId = newVisuals[0]?.id || null;
+    setSelectedVisualId(null);
+    setSelectedVisualIds([]);
+    setSelectedKpiId(null);
+    setEditingPageId(null);
+  };
+
+  const handleDuplicatePage = (e: React.MouseEvent<HTMLElement>, pageId: string) => {
+    e.stopPropagation();
+    const sourcePage = pages.find((p) => p.id === pageId);
+    if (!sourcePage) return;
+
+    let nextNum = pages.length + 1;
+    while (pages.some((p) => p.id === `page_${nextNum}`)) {
+      nextNum += 1;
+    }
+    const newPageId = `page_${nextNum}`;
+    const newPageName = `${sourcePage.name} (Copy)`;
+
+    const sourceVisuals = pageId === activePageId ? visuals : (sourcePage.visuals || []);
+    const sourceKpis = pageId === activePageId ? kpiCards : (sourcePage.kpiCards || []);
+    const sourceSlicers = pageId === activePageId ? slicerColumns : (sourcePage.slicerColumns || []);
+
+    const clonedVisuals: DashboardVisualConfig[] = sourceVisuals.map((v, idx) => ({
+      ...v,
+      id: `vis_copy_${Date.now()}_${idx}`,
+    }));
+
+    const clonedKpis: DashboardKpiConfig[] = sourceKpis.map((k, idx) => ({
+      ...k,
+      id: `kpi_copy_${Date.now()}_${idx}`,
+    }));
+
+    const duplicatedPage: DashboardPageConfig = {
+      ...sourcePage,
+      id: newPageId,
+      name: newPageName,
+      dashboardTitle: `${sourcePage.dashboardTitle} (Copy)`,
+      visuals: clonedVisuals,
+      kpiCards: clonedKpis,
+      slicerColumns: [...sourceSlicers],
+      paletteId: sourcePage.paletteId || paletteId || 'v22',
+    };
+
+    setPages((prev) => [
+      ...prev.map((p) =>
+        p.id === activePageId
+          ? {
+              ...p,
+              datasetId: p.datasetId || selectedDataset?.id,
+              queryId: p.queryId !== undefined ? p.queryId : activeQueryId,
+              dashboardTitle,
+              visuals,
+              kpiCards,
+              slicerColumns,
+              paletteId,
+            }
+          : p
+      ),
+      duplicatedPage,
+    ]);
+    setActivePageId(newPageId);
+    setDashboardTitle(duplicatedPage.dashboardTitle);
+    setVisuals(clonedVisuals);
+    setKpiCards(clonedKpis);
+    setSlicerColumns(duplicatedPage.slicerColumns);
+    setPaletteId(duplicatedPage.paletteId);
+    setUndoStack([]);
+    setRedoStack([]);
+    const firstId = clonedVisuals[0]?.id || null;
     setSelectedVisualId(firstId);
     setSelectedVisualIds(firstId ? [firstId] : []);
     setSelectedKpiId(null);
@@ -2523,7 +2719,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     // 1. HISTOGRAM VISUAL
     if (vis.type === 'histogram') {
       const nums = filteredRows
-        .map((r) => Number(r[vis.valueCol]))
+        .map((r) => Number(getRowVal(r, vis.valueCol)))
         .filter((n) => !Number.isNaN(n));
       if (nums.length === 0) {
         return (
@@ -2637,7 +2833,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     // Group rows by categoryCol for standard, table, matrix & multi-series visuals
     const catMap = new Map<string, Record<string, any>[]>();
     filteredRows.forEach((r) => {
-      const raw = r[vis.categoryCol];
+      const raw = getRowVal(r, vis.categoryCol);
       const key =
         raw === null || raw === undefined || String(raw).trim() === '' ? '(Blank)' : String(raw);
       if (!catMap.has(key)) catMap.set(key, []);
@@ -2651,11 +2847,22 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       rows: groupRows,
     }));
 
-    if (vis.sortBy === 'value_desc') items.sort((a, b) => b.value - a.value);
-    else if (vis.sortBy === 'value_asc') items.sort((a, b) => a.value - b.value);
-    else items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
+    const isTrendOrDate =
+      vis.type === 'line_area' ||
+      vis.type === 'stacked_area' ||
+      (vis.categoryCol && /date|time|month|day|year/i.test(vis.categoryCol));
 
-    items = items.slice(0, vis.topN || 10);
+    if (isTrendOrDate && vis.sortBy !== 'value_desc' && vis.sortBy !== 'value_asc') {
+      items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
+    } else if (vis.sortBy === 'value_desc') {
+      items.sort((a, b) => b.value - a.value);
+    } else if (vis.sortBy === 'value_asc') {
+      items.sort((a, b) => a.value - b.value);
+    } else {
+      items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
+    }
+
+    items = items.slice(0, isTrendOrDate ? Math.max(30, vis.topN || 30) : (vis.topN || 10));
     const maxVal = Math.max(1, ...items.map((x) => Math.abs(x.value)));
     const minVal = items.length > 0 ? Math.min(...items.map((x) => x.value)) : 0;
     const totalVal = items.reduce((acc, x) => acc + Math.max(0, x.value), 0) || 1;
@@ -2794,7 +3001,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       const colHeaders = Array.from(
         new Set(
           filteredRows.map((r) => {
-            const v = r[seriesCol];
+            const v = getRowVal(r, seriesCol);
             return v === null || v === undefined || String(v).trim() === ''
               ? '(Blank)'
               : String(v);
@@ -2806,7 +3013,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         const cells: Record<string, number> = {};
         colHeaders.forEach((ch) => {
           const matching = item.rows.filter((r) => {
-            const v = r[seriesCol];
+            const v = getRowVal(r, seriesCol);
             const norm =
               v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
             return norm === ch;
@@ -2824,7 +3031,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       const colTotals: Record<string, number> = {};
       colHeaders.forEach((ch) => {
         const matching = filteredRows.filter((r) => {
-          const v = r[seriesCol];
+          const v = getRowVal(r, seriesCol);
           const norm =
             v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
           return norm === ch;
@@ -2936,7 +3143,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       const seriesKeys = Array.from(
         new Set(
           filteredRows.map((r) => {
-            const v = r[seriesCol];
+            const v = getRowVal(r, seriesCol);
             return v === null || v === undefined || String(v).trim() === ''
               ? '(Blank)'
               : String(v);
@@ -2948,7 +3155,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         const seriesVals: Record<string, number> = {};
         seriesKeys.forEach((sk) => {
           const matching = item.rows.filter((r) => {
-            const v = r[seriesCol];
+            const v = getRowVal(r, seriesCol);
             const norm =
               v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
             return norm === sk;
@@ -3227,19 +3434,19 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                       {lblText}
                     </span>
                   )}
-                  <div
-                    style={{
-                      height: `${hPct}%`,
-                      backgroundColor: colColor,
-                    }}
-                    className={`w-full max-w-[44px] rounded-t transition-all flex flex-col items-center overflow-hidden ${
-                      labelPos === 'inside_center' ? 'justify-center' : 'justify-start pt-1.5'
-                    } ${
-                      isSelected
-                        ? 'ring-2 ring-[#217346] brightness-110'
-                        : 'opacity-90 group-hover:opacity-100'
-                    }`}
-                  >
+                  <div className="w-full max-w-[44px] h-full flex flex-col justify-end items-center">
+                    <div className="w-full h-full max-h-[170px] bg-slate-100/90 rounded-full flex flex-col justify-end p-0.5 relative overflow-hidden group-hover:bg-slate-200/80 transition-colors">
+                      <div
+                        style={{
+                          height: `${hPct}%`,
+                          backgroundColor: colColor,
+                        }}
+                        className={`w-full rounded-full transition-all flex flex-col items-center justify-start pt-1 shadow-xs ${
+                          isSelected
+                            ? 'ring-2 ring-emerald-500 brightness-110 shadow-md shadow-emerald-500/30'
+                            : 'opacity-90 group-hover:opacity-100 group-hover:shadow-sm'
+                        }`}
+                      >
                     {vis.showDataLabels && labelPos !== 'outside_end' && (
                       <span
                         data-testid={`data-label-${vis.id}-${idx}`}
@@ -3248,6 +3455,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         {lblText}
                       </span>
                     )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -3615,6 +3824,223 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       return wrapWithLegend(vis, lineChart, categoryLegendEntries);
     }
 
+    // 8B. STACKED AREA CHART
+    if (vis.type === 'stacked_area') {
+      const maxVal = Math.max(1, ...items.map((it) => it.value));
+      const width = 360;
+      const height = 180;
+      const points = items.map((it, idx) => ({
+        x: items.length > 1 ? (idx / (items.length - 1)) * (width - 40) + 20 : width / 2,
+        y: height - (it.value / maxVal) * (height - 40) - 20,
+        category: it.category,
+        value: it.value,
+      }));
+      const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+      const areaPath = `${linePath} L ${points[points.length - 1].x} ${height - 20} L ${points[0].x} ${height - 20} Z`;
+      const col = getItemColor(vis, items[0]?.category || 'area', 0);
+
+      const stackedAreaChart = (
+        <div className="h-56 flex items-center justify-center p-2">
+          <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+            <defs>
+              <linearGradient id={`grad-stacked-area-${vis.id}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={col} stopOpacity="0.65" />
+                <stop offset="100%" stopColor={col} stopOpacity="0.08" />
+              </linearGradient>
+            </defs>
+            <path d={areaPath} fill={`url(#grad-stacked-area-${vis.id})`} />
+            <path d={linePath} fill="none" stroke={col} strokeWidth="2.5" />
+            {points.map((p, idx) => (
+              <circle
+                key={idx}
+                cx={p.x}
+                cy={p.y}
+                r="4"
+                fill="#FFFFFF"
+                stroke={col}
+                strokeWidth="2"
+                onClick={() => toggleCrossFilter(vis.categoryCol, p.category)}
+                className="cursor-pointer hover:r-5 transition-all"
+              />
+            ))}
+          </svg>
+        </div>
+      );
+      return wrapWithLegend(vis, stackedAreaChart, categoryLegendEntries);
+    }
+
+    // 8C. WATERFALL CHART (VARIANCE BRIDGE)
+    if (vis.type === 'waterfall') {
+      let running = 0;
+      const waterfallData = items.slice(0, 8).map((it) => {
+        const prev = running;
+        const change = it.value;
+        running += change;
+        return {
+          category: it.category,
+          value: change,
+          start: prev,
+          end: running,
+          isTotal: false,
+        };
+      });
+      waterfallData.push({
+        category: 'Total',
+        value: running,
+        start: 0,
+        end: running,
+        isTotal: true,
+      });
+
+      const allEnds = waterfallData.map((d) => Math.max(d.start, d.end));
+      const allStarts = waterfallData.map((d) => Math.min(d.start, d.end, 0));
+      const maxVal = Math.max(1, ...allEnds);
+      const minVal = Math.min(0, ...allStarts);
+      const range = maxVal - minVal || 1;
+
+      const waterfallChart = (
+        <div className="h-56 pt-2 pb-1 flex items-end gap-2 overflow-x-auto">
+          {waterfallData.map((d) => {
+            const isPositive = d.value >= 0;
+            const bottom = ((Math.min(d.start, d.end) - minVal) / range) * 100;
+            const heightPct = Math.max(4, (Math.abs(d.value) / range) * 100);
+            const barColor = d.isTotal ? '#2563EB' : isPositive ? '#107C10' : '#C50F1F';
+
+            return (
+              <div
+                key={d.category}
+                onClick={() => !d.isTotal && toggleCrossFilter(vis.categoryCol, d.category)}
+                className="flex-1 min-w-[48px] h-full flex flex-col justify-end items-center relative group cursor-pointer"
+              >
+                <div
+                  style={{ bottom: `${bottom}%`, height: `${heightPct}%`, backgroundColor: barColor }}
+                  className="w-full rounded-sm absolute transition-all hover:brightness-110 shadow-xs flex flex-col items-center justify-center"
+                >
+                  {vis.showDataLabels && (
+                    <span className="text-[9px] font-mono font-bold text-white px-1 truncate">
+                      {d.isTotal ? formatNum(d.value) : isPositive ? `+${formatNum(d.value)}` : formatNum(d.value)}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[9px] text-[#605E5C] truncate max-w-full font-medium mt-1">
+                  {d.category}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      );
+      return wrapWithLegend(vis, waterfallChart, [
+        { key: 'pos', label: 'Increase (+)', color: '#107C10', filterCol: '' },
+        { key: 'neg', label: 'Decrease (-)', color: '#C50F1F', filterCol: '' },
+        { key: 'tot', label: 'Total', color: '#2563EB', filterCol: '' },
+      ]);
+    }
+
+    // 8D. RADIAL GAUGE / KPI METER
+    if (vis.type === 'gauge') {
+      const metricVal = totalVal;
+      const target = Math.round(metricVal * 1.25) || 1000;
+      const maxGauge = Math.max(target * 1.2, metricVal * 1.2, 1);
+      const pct = Math.min(100, Math.round((metricVal / target) * 100));
+      const angle = Math.min(180, (metricVal / maxGauge) * 180);
+      const targetAngle = Math.min(180, (target / maxGauge) * 180);
+
+      const gaugeChart = (
+        <div className="h-56 flex flex-col items-center justify-center relative p-3">
+          <svg viewBox="0 0 200 120" className="w-48 h-32 overflow-visible">
+            <path
+              d="M 20 100 A 80 80 0 0 1 180 100"
+              fill="none"
+              stroke="#E5E7EB"
+              strokeWidth="16"
+              strokeLinecap="round"
+            />
+            <path
+              d="M 20 100 A 80 80 0 0 1 180 100"
+              fill="none"
+              stroke={pct >= 100 ? '#107C10' : '#217346'}
+              strokeWidth="16"
+              strokeDasharray={`${(angle / 180) * 251.3} 251.3`}
+              strokeLinecap="round"
+            />
+            <line
+              x1="100"
+              y1="100"
+              x2={100 + 88 * Math.cos(Math.PI - (targetAngle * Math.PI) / 180)}
+              y2={100 - 88 * Math.sin((targetAngle * Math.PI) / 180)}
+              stroke="#DC2626"
+              strokeWidth="2.5"
+              strokeDasharray="3 3"
+            />
+          </svg>
+          <div className="text-center mt-[-10px] space-y-0.5">
+            <div className="text-2xl font-black text-[#212121] tracking-tight">
+              {formatNum(metricVal)}
+            </div>
+            <div className="flex items-center justify-center gap-2 text-xs">
+              <span className="text-[#605E5C]">Target: {formatNum(target)}</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${pct >= 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                {pct}% of Goal
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+      return wrapWithLegend(vis, gaugeChart, [
+        { key: 'progress', label: 'Actual Progress', color: '#217346', filterCol: '' },
+        { key: 'target', label: `Target (${formatNum(target)})`, color: '#DC2626', filterCol: '' },
+      ]);
+    }
+
+    // 8E. FUNNEL PIPELINE CHART
+    if (vis.type === 'funnel') {
+      const maxVal = Math.max(1, ...items.map((it) => it.value));
+      const funnelChart = (
+        <div className="h-56 flex flex-col justify-center space-y-2 px-3 py-1">
+          {items.slice(0, 6).map((it, idx, arr) => {
+            const widthPct = Math.max(20, Math.round((it.value / maxVal) * 100));
+            const prevVal = idx > 0 ? arr[idx - 1].value : it.value;
+            const convPct = prevVal > 0 ? Math.round((it.value / prevVal) * 100) : 100;
+            const col = getItemColor(vis, it.category, idx);
+
+            return (
+              <div
+                key={it.category}
+                onClick={() => toggleCrossFilter(vis.categoryCol, it.category)}
+                className="cursor-pointer group space-y-0.5"
+              >
+                <div className="flex items-center justify-between text-xs text-[#212121]">
+                  <span className="font-semibold truncate">{getItemLegendLabel(vis, it.category)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-[11px]">{formatNum(it.value)}</span>
+                    {idx > 0 && (
+                      <span className="text-[10px] px-1 rounded bg-slate-100 text-slate-600 font-mono">
+                        {convPct}% conv.
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="w-full bg-slate-100 h-5 rounded-md overflow-hidden flex justify-center p-0.5">
+                  <div
+                    style={{ width: `${widthPct}%`, backgroundColor: col }}
+                    className="h-full rounded transition-all group-hover:brightness-110 flex items-center justify-center"
+                  >
+                    {vis.showDataLabels && widthPct > 35 && (
+                      <span className="text-[10px] text-white font-mono font-bold drop-shadow">
+                        {formatNum(it.value)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+      return wrapWithLegend(vis, funnelChart, categoryLegendEntries);
+    }
+
     // 9. TREEMAP HIERARCHY VISUAL
     const treemapChart = (
       <div className="flex flex-wrap gap-1.5 h-52 pt-1 content-start overflow-hidden">
@@ -3660,8 +4086,19 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3 sm:p-5">
-      <div className="bg-white border border-[#D4D4D4] rounded-xl w-full max-w-7xl h-[92vh] shadow-2xl overflow-hidden flex flex-col text-[#212121]">
+    <div
+      ref={modalContainerRef}
+      className={`fixed inset-0 z-50 flex items-center justify-center transition-all ${
+        isFullScreen ? 'p-0 bg-black/90' : 'bg-black/75 backdrop-blur-sm p-3 sm:p-5'
+      }`}
+    >
+      <div
+        className={`bg-white shadow-2xl overflow-hidden flex flex-col text-[#212121] transition-all ${
+          isFullScreen
+            ? 'w-screen h-screen max-w-none h-full rounded-none border-0'
+            : 'border border-[#D4D4D4] rounded-xl w-full max-w-7xl h-[92vh]'
+        }`}
+      >
         {/* Top Header */}
         <div className="flex items-center justify-between px-6 py-3.5 border-b border-[#D4D4D4] bg-[#F3F3F3]">
           <div className="flex items-center gap-3">
@@ -3778,12 +4215,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                 <button
                   type="button"
                   data-testid="dashboard-download-btn"
-                  onClick={() => handleQuickDownload('xlsx_values')}
+                  onClick={() => handleQuickDownload('sswb_html')}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#217346] hover:bg-[#185C37] text-white text-xs font-bold rounded-l-md transition-colors"
-                  title="Download Packaged Workbook (.xlsx)"
+                  title="Download StepSheet Universal Packaged Workbook (.sswb.html) — opens on all systems (Windows, Mac, Linux, Mobile)"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download</span>
+                  <span>Download Packaged Workbook</span>
                 </button>
                 <button
                   type="button"
@@ -3799,7 +4236,29 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                 </button>
 
                 {isDownloadMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-gray-200 rounded-lg shadow-xl py-1.5 z-[100] text-xs">
+                  <div className="absolute right-0 top-full mt-1.5 w-72 bg-white border border-gray-200 rounded-lg shadow-xl py-1.5 z-[100] text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickDownload('sswb_html')}
+                      className="w-full text-left px-3 py-2 bg-emerald-50/70 hover:bg-emerald-100/70 flex items-center gap-2.5 text-gray-900 border-b border-emerald-100"
+                    >
+                      <Sparkles className="w-4 h-4 text-[#217346] shrink-0" />
+                      <div>
+                        <div className="font-bold text-[#185C37]">Universal Packaged Workbook (.sswb.html)</div>
+                        <div className="text-[10px] text-gray-600">Opens in all systems (Windows, Mac, Mobile). Interactive visuals, KPIs &amp; full dataset</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickDownload('sswb')}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
+                    >
+                      <Database className="w-4 h-4 text-purple-700 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-gray-900">StepSheet Package (.sswb)</div>
+                        <div className="text-[10px] text-gray-500">Raw package format for StepSheet backup &amp; re-import</div>
+                      </div>
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleOpenExport('files', 'xlsx_values')}
@@ -3814,13 +4273,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     <div className="border-t border-gray-100 my-1" />
                     <button
                       type="button"
-                      onClick={() => handleQuickDownload('xlsx_values')}
+                      onClick={() => handleQuickDownload('xlsx')}
                       className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
                     >
                       <FileSpreadsheet className="w-4 h-4 text-green-700 shrink-0" />
                       <div>
                         <div className="font-semibold text-gray-900">Packaged Workbook (.xlsx)</div>
-                        <div className="text-[10px] text-gray-500">Dashboard summary, KPIs, visual tables &amp; raw data</div>
+                        <div className="text-[10px] text-gray-500">Dashboard summary with native Excel charts, KPIs &amp; raw data</div>
                       </div>
                     </button>
                     <button
@@ -3853,7 +4312,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                       <Presentation className="w-4 h-4 text-orange-600 shrink-0" />
                       <div>
                         <div className="font-semibold text-gray-900">Interactive PowerPoint (.pptx)</div>
-                        <div className="text-[10px] text-gray-500">Presentation deck slides for KPIs and each chart visual</div>
+                        <div className="text-[10px] text-gray-500">Presentation deck with native PowerPoint charts on every slide</div>
                       </div>
                     </button>
                     <button
@@ -3988,6 +4447,24 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
             <button
               type="button"
+              data-testid="dashboard-fullscreen-btn"
+              onClick={toggleFullScreen}
+              title={isFullScreen ? 'Exit Full Screen (Esc)' : 'Expand to Full Screen (F11)'}
+              className={`p-1.5 rounded-lg border transition-colors ${
+                isFullScreen
+                  ? 'bg-[#185C37] text-white border-[#185C37] hover:bg-[#124629]'
+                  : 'text-[#605E5C] hover:text-[#212121] rounded-lg hover:bg-[#E6E6E6] border-[#D4D4D4]'
+              }`}
+            >
+              {isFullScreen ? (
+                <Minimize2 className="w-4 h-4" />
+              ) : (
+                <Maximize2 className="w-4 h-4" />
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={onClose}
               className="text-[#605E5C] hover:text-[#212121] p-1.5 rounded-lg hover:bg-[#E6E6E6]"
             >
@@ -3995,6 +4472,111 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
             </button>
           </div>
         </div>
+
+        
+        {/* AI Dashboard Prompt & Conversational Refinement Bar */}
+        <AiDashboardPromptBar
+          datasetId={selectedDataset?.id || 'active_dataset'}
+          datasetName={selectedDataset?.name || 'Dataset'}
+          columns={columns}
+          rows={sourceRows}
+          selectedVisualId={selectedVisualId}
+          onSelectVisual={(id) => {
+            setSelectedVisualId(id);
+            setSelectedKpiId(null);
+          }}
+          currentDashboard={{
+            dashboardTitle,
+            visuals,
+            kpiCards,
+            slicerColumns,
+            paletteId,
+          }}
+          onApplyGeneratedDashboard={(plan) => {
+            pushUndoSnapshot(visualsRef.current);
+            const adjustedVisuals = ensureVisualCanvasCoords(plan.visuals);
+            setDashboardTitle(plan.dashboardTitle);
+            setVisuals(adjustedVisuals);
+            setKpiCards(plan.kpiCards);
+            setSlicerColumns(plan.slicerColumns);
+            setPaletteId(plan.paletteId);
+            setMultiSlicerSelections({});
+            setCrossFilter(null);
+            setPages((prevPages) =>
+              prevPages.map((p) =>
+                p.id === activePageId
+                  ? {
+                      ...p,
+                      dashboardTitle: plan.dashboardTitle,
+                      visuals: adjustedVisuals,
+                      kpiCards: plan.kpiCards,
+                      slicerColumns: plan.slicerColumns,
+                      paletteId: plan.paletteId,
+                    }
+                  : p
+              )
+            );
+            if (adjustedVisuals[0]) {
+              setSelectedVisualId(adjustedVisuals[0].id);
+              setSelectedVisualIds([adjustedVisuals[0].id]);
+            }
+            try {
+              if (typeof window !== 'undefined' && typeof window.localStorage?.getItem === 'function') {
+                const dsKey = selectedDataset?.id || 'default';
+                const raw = window.localStorage.getItem(STORAGE_KEY_DASHBOARDS);
+                const parsed = raw ? JSON.parse(raw) : {};
+                const currentPagesList = pages.length > 0 ? pages : [{ id: activePageId, name: 'Page 1', datasetId: selectedDataset?.id, queryId: activeQueryId, dashboardTitle: plan.dashboardTitle, visuals: adjustedVisuals, kpiCards: plan.kpiCards, slicerColumns: plan.slicerColumns, paletteId: plan.paletteId }];
+                const updatedPagesList = currentPagesList.map((p) =>
+                  p.id === activePageId
+                    ? {
+                        ...p,
+                        dashboardTitle: plan.dashboardTitle,
+                        visuals: adjustedVisuals,
+                        kpiCards: plan.kpiCards,
+                        slicerColumns: plan.slicerColumns,
+                        paletteId: plan.paletteId,
+                      }
+                    : p
+                );
+                parsed[dsKey] = {
+                  dashboardTitle: plan.dashboardTitle,
+                  visuals: adjustedVisuals,
+                  kpiCards: plan.kpiCards,
+                  slicerColumns: plan.slicerColumns,
+                  paletteId: plan.paletteId,
+                  pages: updatedPagesList,
+                  activePageId: activePageId,
+                };
+                window.localStorage.setItem(STORAGE_KEY_DASHBOARDS, JSON.stringify(parsed));
+              }
+            } catch (err) {
+              console.error('Failed to persist AI dashboard:', err);
+            }
+          }}
+          onApplyPatch={(updated) => {
+            pushUndoSnapshot(visualsRef.current);
+            setDashboardTitle(updated.dashboardTitle);
+            setVisuals(updated.visuals);
+            setKpiCards(updated.kpiCards);
+            setSlicerColumns(updated.slicerColumns);
+            setPaletteId(updated.paletteId);
+            setPages((prevPages) =>
+              prevPages.map((p) =>
+                p.id === activePageId
+                  ? {
+                      ...p,
+                      dashboardTitle: updated.dashboardTitle,
+                      visuals: updated.visuals,
+                      kpiCards: updated.kpiCards,
+                      slicerColumns: updated.slicerColumns,
+                      paletteId: updated.paletteId,
+                    }
+                  : p
+              )
+            );
+          }}
+          onOpenLocalAiSetup={() => setIsLocalAiSetupOpen(true)}
+        />
 
         {/* Multi-Slicer & Cross-Filter Bar */}
         <div className="px-6 py-2.5 bg-[#F8F9FA] border-b border-[#D4D4D4] flex flex-col gap-2">
@@ -4117,36 +4699,69 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         {/* Main Body: Left Canvas + Right Visualizations & Formatting Inspector Pane */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left: Interactive Dashboard Canvas */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[#F3F3F3]">
-            {/* Dynamic KPI Cards Section */}
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 flex-1 min-w-[260px] max-w-xl">
-                  <span className="px-2 py-1 rounded-md bg-[#E6F2EB] text-[#217346] border border-[#217346]/30 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
-                    <Pencil className="w-3 h-3" /> Text Box
-                  </span>
-                  <input
-                    type="text"
-                    aria-label="Dashboard Title"
-                    value={dashboardTitle}
-                    onChange={(e) => setDashboardTitle(e.target.value)}
-                    placeholder="Enter Dashboard Title..."
-                    className="flex-1 bg-white border border-[#D4D4D4] hover:border-[#217346]/60 focus:border-[#217346] focus:ring-2 focus:ring-[#217346]/20 focus:outline-none rounded-lg px-3 py-1.5 text-sm font-extrabold text-[#212121] shadow-sm transition-all"
-                  />
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-br from-[#EFF7F2]/80 via-[#F8FAFC] to-[#EEF2F6] min-h-full">
+            {/* Executive Hero / Profile Banner (Dashboard V22 Glassmorphism) */}
+            <div className="rounded-2xl backdrop-blur-xl bg-white/75 border border-white/60 shadow-xs hover:shadow-md transition-all p-4 mb-2 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 flex-1 min-w-[280px]">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-md shadow-emerald-500/20 shrink-0">
+                  <div className="w-full h-full rounded-[14px] bg-white/95 backdrop-blur-sm flex items-center justify-center text-emerald-700 font-black text-base">
+                    {selectedDataset?.name ? selectedDataset.name.slice(0, 2).toUpperCase() : 'DB'}
+                  </div>
                 </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input
+                      type="text"
+                      aria-label="Dashboard Title"
+                      value={dashboardTitle}
+                      onChange={(e) => setDashboardTitle(e.target.value)}
+                      placeholder="Enter Dashboard Title..."
+                      className="bg-transparent hover:bg-white/60 focus:bg-white border-b border-transparent hover:border-slate-300 focus:border-emerald-500 rounded-md px-1.5 py-0.5 text-base font-black text-slate-800 tracking-tight transition-all focus:outline-none max-w-md truncate"
+                    />
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Live DuckDB OLAP
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 font-medium">
+                    <span>{selectedDataset?.name || 'Dataset'}</span>
+                    <span>•</span>
+                    <span>{filteredRows.length.toLocaleString()} records</span>
+                    <span>•</span>
+                    <span>{columns.length} columns</span>
+                    <span>•</span>
+                    <span className="text-emerald-700 font-semibold">Glassmorphic V22 Theme</span>
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={handleAddKpiCard}
-                  className="text-xs font-semibold text-[#217346] hover:underline flex items-center gap-1 shrink-0"
+                  className="px-3 py-1.5 rounded-xl bg-white/80 hover:bg-white border border-slate-200/80 text-xs font-semibold text-slate-700 hover:text-emerald-700 shadow-2xs flex items-center gap-1.5 transition"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Add KPI Card
+                  <Plus className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Add KPI Card</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddVisual()}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Visual</span>
                 </button>
               </div>
+            </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {kpiCards.map((kpi) => {
+            {/* Dynamic KPI Cards Section */}
+            <div className="space-y-3">
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {kpiCards.map((kpi, kpiIdx) => {
                   const val = computeMetric(filteredRows, kpi.column, kpi.aggFunc);
                   const isKpiSelected = selectedKpiId === kpi.id;
+                  const iconTint = kpiIdx === 0 ? 'bg-emerald-500/10 text-emerald-600' : kpiIdx === 1 ? 'bg-teal-500/10 text-teal-600' : kpiIdx === 2 ? 'bg-orange-500/10 text-orange-600' : 'bg-sky-500/10 text-sky-600';
                   return (
                     <div
                       key={kpi.id}
@@ -4154,65 +4769,131 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         setSelectedKpiId(kpi.id);
                         setSelectedVisualId(null);
                       }}
-                      className={`p-3.5 bg-white rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                      className={`p-5 rounded-2xl backdrop-blur-xl transition-all cursor-pointer flex flex-col justify-between ${
                         isKpiSelected
-                          ? 'border-[#217346] ring-2 ring-[#217346]/25 shadow-md'
-                          : 'border-[#D4D4D4] hover:border-[#217346]/60 shadow-sm'
+                          ? 'bg-white/95 border-2 border-emerald-600 ring-4 ring-emerald-500/20 shadow-lg'
+                          : 'bg-white/75 hover:bg-white/90 border border-white/60 hover:border-emerald-200 shadow-xs hover:shadow-md'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-[#605E5C] truncate">
-                          {kpi.title}
+                        <div>
+                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                            {kpi.title}
+                          </span>
+                          <div
+                            style={{ color: kpi.accentColor || '#0F172A' }}
+                            className="text-2xl font-black font-sans my-1 tracking-tight"
+                          >
+                            {(() => {
+                              const colLower = (kpi.column || '').toLowerCase();
+                              const isCurr = ['amount', 'revenue', 'sales', 'price', 'cost', 'discount', 'spend', 'budget', 'profit'].some((c) => colLower.includes(c));
+                              const prefix = isCurr && (kpi.aggFunc as string) !== 'distinct_count' && (kpi.aggFunc as string) !== 'distinct' && kpi.aggFunc !== 'count' ? '$' : '';
+                              return `${prefix}${formatNum(val)}`;
+                            })()}
+                          </div>
                         </div>
-                        <div
-                          className="flex items-center gap-1 shrink-0"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedKpiId(kpi.id);
-                              setSelectedVisualId(null);
-                            }}
-                            title="Edit KPI Card Title & Metric"
-                            className="p-0.5 text-[#605E5C] hover:text-[#217346] rounded"
+                        <div className="flex items-center gap-1 shrink-0">
+                          <div className={`w-9 h-9 rounded-xl ${iconTint} flex items-center justify-center font-bold`}>
+                            <TrendingUp className="w-4 h-4" />
+                          </div>
+                          <div
+                            className="flex items-center gap-0.5 ml-1"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <Pencil className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDuplicateKpiCard(kpi)}
-                            title="Duplicate KPI Card"
-                            className="p-0.5 text-[#605E5C] hover:text-[#212121] rounded"
-                          >
-                            <Copy className="w-3 h-3" />
-                          </button>
-                          {kpiCards.length > 1 && (
                             <button
                               type="button"
-                              onClick={() => handleRemoveKpiCard(kpi.id)}
-                              title="Remove KPI Card"
-                              className="p-0.5 text-[#605E5C] hover:text-[#C50F1F] rounded"
+                              onClick={() => {
+                                setSelectedKpiId(kpi.id);
+                                setSelectedVisualId(null);
+                              }}
+                              title="Edit KPI Card"
+                              className="p-1 text-slate-400 hover:text-emerald-700 rounded-lg hover:bg-slate-100"
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Pencil className="w-3 h-3" />
                             </button>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateKpiCard(kpi)}
+                              title="Duplicate KPI Card"
+                              className="p-1 text-slate-400 hover:text-slate-800 rounded-lg hover:bg-slate-100"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                            {kpiCards.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveKpiCard(kpi.id)}
+                                title="Remove KPI Card"
+                                className="p-1 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      <div
-                        style={{ color: kpi.accentColor || '#212121' }}
-                        className="text-2xl font-extrabold font-mono my-1"
-                      >
-                        {formatNum(val)}
-                      </div>
+                      {(() => {
+                        const sub = (kpi.subtitle || '').trim();
+                        const match = sub.match(/([+-]?\d+(?:\.\d+)?%)\s*(.*)/i);
+                        if (match) {
+                          const delta = match[1];
+                          const rest = match[2]?.trim().replace(/^vs\s*/i, 'vs ') || '';
+                          const isNegative = delta.startsWith('-');
+                          const Icon = isNegative ? ArrowDownRight : ArrowUpRight;
+                          const badgeClass = isNegative
+                            ? 'bg-rose-50 text-rose-700 border-rose-200/60'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200/60';
+                          return (
+                            <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-slate-100/80">
+                              <span
+                                data-testid={`kpi-delta-badge-${kpi.id}`}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeClass}`}
+                              >
+                                <Icon className="w-3 h-3" /> {delta}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono uppercase font-bold truncate ml-2 text-right">
+                                {rest ? `${kpi.aggFunc} • ${rest}` : kpi.aggFunc}
+                              </span>
+                            </div>
+                          );
+                        }
 
-                      <div className="flex items-center justify-between text-[10px] text-[#605E5C]">
-                        <span className="truncate">{kpi.subtitle}</span>
-                        <span className="font-mono uppercase font-semibold text-[#217346]">
-                          {kpi.aggFunc}
-                        </span>
-                      </div>
+                        const aggUpper = (kpi.aggFunc || 'SUM').toUpperCase().replace('_', ' ');
+                        let label = aggUpper;
+                        let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200/60';
+
+                        if ((kpi.aggFunc as string) === 'distinct_count' || kpi.aggFunc === 'distinct') {
+                          label = 'DISTINCT';
+                          badgeClass = 'bg-sky-50 text-sky-700 border-sky-200/60';
+                        } else if (kpi.aggFunc === 'count') {
+                          label = 'COUNT';
+                          badgeClass = 'bg-orange-50 text-orange-700 border-orange-200/60';
+                        } else if (kpi.aggFunc === 'avg') {
+                          label = 'AVERAGE';
+                          badgeClass = 'bg-teal-50 text-teal-700 border-teal-200/60';
+                        } else if (kpi.aggFunc === 'max') {
+                          label = 'PEAK MAX';
+                          badgeClass = 'bg-amber-50 text-amber-700 border-amber-200/60';
+                        } else if (kpi.aggFunc === 'min') {
+                          label = 'MIN';
+                          badgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-200/60';
+                        }
+
+                        return (
+                          <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-slate-100/80">
+                            <span
+                              data-testid={`kpi-delta-badge-${kpi.id}`}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeClass}`}
+                            >
+                              <Activity className="w-3 h-3" /> {label}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono uppercase font-bold truncate ml-2 text-right">
+                              {sub ? sub : kpi.column || aggUpper}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -4293,6 +4974,39 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                 )
               )}
 
+              {visuals.length === 0 && (
+                <div
+                  data-testid="fresh-page-empty-state"
+                  className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center select-none"
+                >
+                  <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 flex items-center justify-center mb-4 shadow-sm">
+                    <Sparkles className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800 mb-1">
+                    Fresh Canvas — {pages.find((p) => p.id === activePageId)?.name || 'New Page'}
+                  </h3>
+                  <p className="text-xs text-slate-500 max-w-md mb-5 leading-relaxed">
+                    This page is completely fresh and ready for your custom analytics. Use the AI prompt bar above to generate visuals, or add charts and KPI cards manually.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => handleAddVisual()}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" /> Add Visual
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddKpiCard}
+                      className="px-4 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 hover:text-emerald-700 shadow-2xs flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 text-emerald-600" /> Add KPI Card
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {visuals.map((vis, idx) => {
                 const isSelected = !selectedKpiId && vis.id === activeVisual?.id;
                 const isMultiSelected = !selectedKpiId && selectedVisualIds.includes(vis.id);
@@ -4311,8 +5025,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
                 const col = idx % 2;
                 const row = Math.floor(idx / 2);
-                const tileX = vis.x ?? 16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP);
-                const tileY = vis.y ?? 16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP);
+                const tileX = (typeof vis.x === 'number' && Number.isFinite(vis.x) && vis.x > 12) ? vis.x : (16 + col * (DEFAULT_TILE_W + DEFAULT_TILE_GAP));
+                const tileY = (typeof vis.y === 'number' && Number.isFinite(vis.y) && vis.y > 12) ? vis.y : (16 + row * (DEFAULT_TILE_H + DEFAULT_TILE_GAP));
                 const tileW = vis.customWidth || (vis.span === 2 ? 976 : DEFAULT_TILE_W);
                 const tileH = vis.customHeight || DEFAULT_TILE_H;
 
@@ -4336,14 +5050,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                       height: `${tileH}px`,
                       zIndex: isHoverDragging || isResizing ? 50 : isSelected || isMultiSelected ? 20 : vis.zIndex || idx + 1,
                     }}
-                    className={`bg-white rounded-xl border transition-shadow p-4 flex flex-col justify-between select-none ${
+                    className={`rounded-2xl border transition-all p-5 flex flex-col justify-between select-none backdrop-blur-xl ${
                       isHoverDragging
-                        ? 'border-[#217346] ring-4 ring-[#217346]/30 shadow-2xl cursor-grabbing bg-[#F8FDFB]'
+                        ? 'border-emerald-600 ring-4 ring-emerald-500/30 shadow-2xl cursor-grabbing bg-white/95'
                         : isHoverTarget
-                        ? 'border-[#217346] border-dashed ring-2 ring-[#217346]/40 shadow-lg'
+                        ? 'border-emerald-500 border-dashed ring-2 ring-emerald-500/40 shadow-lg bg-white/90'
                         : isSelected || isMultiSelected
-                        ? 'border-[#217346] ring-2 ring-[#217346]/25 shadow-md cursor-grab'
-                        : 'border-[#D4D4D4] hover:border-[#217346]/60 shadow-sm cursor-grab'
+                        ? 'border-emerald-600 ring-2 ring-emerald-500/25 shadow-md cursor-grab bg-white/90'
+                        : 'border-white/60 hover:border-emerald-400 shadow-xs hover:shadow-md cursor-grab bg-white/80'
                     }`}
                   >
                     {/* Tile Header with Multi-Select Toggle, Drag Grip & Inline Edit Title Option */}
@@ -4771,6 +5485,15 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         className="p-0.5 text-[#605E5C] hover:text-[#217346] rounded hover:bg-[#F3F3F3]"
                       >
                         <Pencil className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`duplicate-page-btn-${page.id}`}
+                        onClick={(e) => handleDuplicatePage(e, page.id)}
+                        title={`Duplicate ${page.name}`}
+                        className="p-0.5 text-[#605E5C] hover:text-[#217346] rounded hover:bg-[#F3F3F3]"
+                      >
+                        <Copy className="w-3 h-3" />
                       </button>
                       {pages.length > 1 && (
                         <button

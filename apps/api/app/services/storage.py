@@ -45,7 +45,12 @@ class LocalStorageService(StorageService):
         path = Path(storage_path)
         if path.is_absolute():
             return str(path)
-        return str((self.base_dir / storage_path).resolve())
+        if path.exists():
+            return str(path.resolve())
+        clean_path = storage_path
+        if storage_path.replace("\\", "/").startswith("storage/"):
+            clean_path = storage_path.replace("\\", "/")[8:]
+        return str((self.base_dir / clean_path).resolve())
 
     def delete_file(self, storage_path: str) -> bool:
         try:

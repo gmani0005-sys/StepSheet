@@ -22,6 +22,7 @@ import {
   Unlock,
   Eye,
   EyeOff,
+  Sparkles,
 } from 'lucide-react';
 import { Dataset } from '../../types';
 import { StepDefinition } from '../../types/steps';
@@ -52,6 +53,24 @@ interface FormatOption {
 }
 
 const FORMAT_OPTIONS: FormatOption[] = [
+  {
+    id: 'sswb_html',
+    name: 'Universal Packaged Workbook',
+    extension: '.sswb.html',
+    description: 'Universal interactive report with SVG charts, KPIs, slicers & dataset (opens on any OS & phone)',
+    icon: Sparkles,
+    badge: 'Universal',
+    category: 'document',
+  },
+  {
+    id: 'sswb',
+    name: 'StepSheet Package',
+    extension: '.sswb',
+    description: 'Raw package backup for StepSheet restoration and re-importing',
+    icon: Database,
+    badge: 'StepSheet',
+    category: 'data',
+  },
   {
     id: 'xlsx_values',
     name: 'Packaged Workbook',

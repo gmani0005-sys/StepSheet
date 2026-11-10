@@ -7,6 +7,7 @@ from app.models.template import PipelineTemplate
 from app.models.share import ProjectShare
 from app.models.audit import AuditLog
 from app.models.export_job import ExportJob
+from app.models.ai_credit import AiCreditTransaction
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "ProjectShare",
     "AuditLog",
     "ExportJob",
+    "AiCreditTransaction",
 ]

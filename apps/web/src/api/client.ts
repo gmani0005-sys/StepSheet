@@ -753,4 +753,198 @@ export const api = {
       () => localEngine.listAuditLogs(projectId, action)
     );
   },
+
+  // -------------------------------------------------------------------------
+  // Local AI & Ollama Runtime Management (Section 19)
+  // -------------------------------------------------------------------------
+
+  async getLocalAiSystemCheck(): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/local/system-check`);
+        if (!res.ok) throw new Error('Failed to retrieve system hardware check');
+        return res.json();
+      },
+      () => localEngine.getLocalAiSystemCheck()
+    );
+  },
+
+  async startLocalAiService(): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/local/start-service`, {
+          method: 'POST',
+          headers: { ...getAuthHeader() },
+        });
+        if (!res.ok) throw new Error('Failed to start local Ollama service');
+        return res.json();
+      },
+      () => localEngine.startLocalAiService()
+    );
+  },
+
+  async getLocalAiModelsCatalog(): Promise<any[]> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/local/models-catalog`);
+        if (!res.ok) throw new Error('Failed to load local models catalog');
+        return res.json();
+      },
+      () => localEngine.getLocalAiModelsCatalog()
+    );
+  },
+
+  async pullLocalAiModel(modelTag: string): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/local/pull-model`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({ model_tag: modelTag }),
+        });
+        if (!res.ok) throw new Error('Failed to initiate model pull');
+        return res.json();
+      },
+      () => localEngine.pullLocalAiModel(modelTag)
+    );
+  },
+
+  async getLocalAiPullStatus(modelTag: string): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/local/pull-status/${encodeURIComponent(modelTag)}`);
+        if (!res.ok) throw new Error('Failed to fetch pull status');
+        return res.json();
+      },
+      () => localEngine.getLocalAiPullStatus(modelTag)
+    );
+  },
+
+  async testLocalAiHealth(modelTag?: string): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/local/health-test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({ model_tag: modelTag }),
+        });
+        if (!res.ok) throw new Error('Health test failed');
+        return res.json();
+      },
+      () => localEngine.testLocalAiHealth(modelTag)
+    );
+  },
+
+  async getAiEntitlements(provider: string = 'ollama'): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/local/entitlements?provider=${provider}`, {
+          headers: { ...getAuthHeader() },
+        });
+        if (!res.ok) throw new Error('Failed to fetch entitlements');
+        return res.json();
+      },
+      () => localEngine.getAiEntitlements(provider)
+    );
+  },
+
+  // -------------------------------------------------------------------------
+  // Feature A: Chat with Data
+  // -------------------------------------------------------------------------
+
+  async executeChatQuery(
+    datasetId: string,
+    prompt: string,
+    modelTag?: string,
+    context?: { columns?: any[]; rows?: any[]; datasetName?: string; targetId?: string }
+  ): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/chat-query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({
+            dataset_id: datasetId,
+            prompt,
+            model_tag: modelTag,
+            columns: context?.columns,
+            sample_rows: context?.rows ? context.rows.slice(0, 100) : undefined,
+            dataset_name: context?.datasetName,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Failed to execute data query');
+        }
+        return res.json();
+      },
+      () => localEngine.executeChatQuery(datasetId, prompt, context)
+    );
+  },
+
+  // -------------------------------------------------------------------------
+  // Feature B: Plain-Text to Interactive Dashboard & Conversational Patches
+  // -------------------------------------------------------------------------
+
+  async generateAiDashboard(
+    datasetId: string,
+    prompt?: string,
+    modelTag?: string,
+    context?: { columns?: any[]; rows?: any[]; datasetName?: string; targetId?: string }
+  ): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/generate-dashboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({
+            dataset_id: datasetId,
+            prompt,
+            model_tag: modelTag,
+            columns: context?.columns,
+            sample_rows: context?.rows ? context.rows.slice(0, 100) : undefined,
+            dataset_name: context?.datasetName,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Failed to generate AI dashboard');
+        }
+        return res.json();
+      },
+      () => localEngine.generateAiDashboard(datasetId, prompt, context)
+    );
+  },
+
+  async patchAiDashboard(
+    datasetId: string,
+    prompt: string,
+    currentDashboard: any,
+    modelTag?: string,
+    context?: { columns?: any[]; rows?: any[]; datasetName?: string; targetId?: string }
+  ): Promise<any> {
+    return withFallback(
+      async () => {
+        const res = await fetch(`${API_BASE}/ai/patch-dashboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({
+            dataset_id: datasetId,
+            prompt,
+            current_dashboard: currentDashboard,
+            model_tag: modelTag,
+            columns: context?.columns,
+            sample_rows: context?.rows ? context.rows.slice(0, 100) : undefined,
+            dataset_name: context?.datasetName,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Failed to apply dashboard patch');
+        }
+        return res.json();
+      },
+      () => localEngine.patchAiDashboard(datasetId, prompt, currentDashboard, context)
+    );
+  },
 };

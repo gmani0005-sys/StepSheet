@@ -8,6 +8,8 @@ import {
   Trash2,
   Plus,
   AlertCircle,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 
@@ -68,14 +70,86 @@ export const EditStepModal: React.FC = () => {
     return arr.includes(item) ? arr.filter((x) => x !== item) : [...arr, item];
   };
 
+  // Compute all available columns merging base dataset schema, current store columns, and step references
+  const availableColumns = React.useMemo(() => {
+    const map = new Map<string, { name: string; type?: string; data_type?: string }>();
+    if (selectedDataset?.schema_metadata) {
+      selectedDataset.schema_metadata.forEach((c) => {
+        if (c.name && !map.has(c.name)) {
+          map.set(c.name, { name: c.name, type: (c as any).type || c.data_type, data_type: c.data_type || (c as any).type });
+        }
+      });
+    }
+    columns.forEach((c) => {
+      if (c.name && !map.has(c.name)) {
+        map.set(c.name, { name: c.name, type: (c as any).type || c.data_type, data_type: c.data_type || (c as any).type });
+      }
+    });
+    if (editingStep?.params) {
+      const p = editingStep.params;
+      if (p.column && !map.has(p.column)) map.set(p.column, { name: p.column });
+      if (p.target_column && !map.has(p.target_column)) map.set(p.target_column, { name: p.target_column });
+      if (p.value_column && !map.has(p.value_column)) map.set(p.value_column, { name: p.value_column });
+      if (Array.isArray(p.group_by_columns)) {
+        p.group_by_columns.forEach((c: string) => {
+          if (c && !map.has(c)) map.set(c, { name: c });
+        });
+      }
+      if (Array.isArray(p.group_columns)) {
+        p.group_columns.forEach((c: string) => {
+          if (c && !map.has(c)) map.set(c, { name: c });
+        });
+      }
+      if (typeof p.group_by === 'string' && !map.has(p.group_by)) {
+        map.set(p.group_by, { name: p.group_by });
+      }
+      if (Array.isArray(p.aggregations)) {
+        p.aggregations.forEach((a: any) => {
+          if (a.column && !map.has(a.column)) map.set(a.column, { name: a.column });
+        });
+      }
+      if (Array.isArray(p.index_columns)) {
+        p.index_columns.forEach((c: string) => {
+          if (c && !map.has(c)) map.set(c, { name: c });
+        });
+      }
+      if (p.pivot_column && !map.has(p.pivot_column)) map.set(p.pivot_column, { name: p.pivot_column });
+      if (Array.isArray(p.partition_by)) {
+        p.partition_by.forEach((c: string) => {
+          if (c && !map.has(c)) map.set(c, { name: c });
+        });
+      }
+      if (p.order_by && !map.has(p.order_by)) map.set(p.order_by, { name: p.order_by });
+    }
+    return Array.from(map.values());
+  }, [selectedDataset, columns, editingStep]);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (jsonError && activeTab === 'raw') return;
 
+    const finalParams = { ...params };
+    if (editingStep.type === 'group_by' && Array.isArray(finalParams.aggregations)) {
+      finalParams.aggregations = finalParams.aggregations.map((a: any) => {
+        const fn = (a.agg_func || a.function || 'sum').toLowerCase();
+        const col = a.column || (availableColumns[0]?.name || 'val');
+        const out = a.output_column || a.alias || a.output_name || `${fn}_${col}`;
+        return {
+          ...a,
+          column: col,
+          agg_func: fn,
+          function: fn,
+          output_column: out,
+          alias: out,
+          output_name: out,
+        };
+      });
+    }
+
     await updateStep(editingStep.id, {
       label: label.trim() || editingStep.label,
       enabled,
-      params,
+      params: finalParams,
     });
   };
 
@@ -150,7 +224,7 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('left_key_col', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -328,7 +402,7 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('left_key_col', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -526,7 +600,7 @@ export const EditStepModal: React.FC = () => {
                       }}
                       className="col-span-5 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
                     >
-                      {columns.map((c) => (
+                      {availableColumns.map((c) => (
                         <option key={c.name} value={c.name}>
                           {c.name}
                         </option>
@@ -684,9 +758,9 @@ export const EditStepModal: React.FC = () => {
                 onChange={(e) => handleParamChange('column', e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <option key={c.name} value={c.name}>
-                    {c.name} ({c.data_type})
+                    {c.name} ({c.data_type || c.type || 'text'})
                   </option>
                 ))}
               </select>
@@ -718,7 +792,7 @@ export const EditStepModal: React.FC = () => {
                 onChange={(e) => handleParamChange('column', e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
@@ -747,7 +821,7 @@ export const EditStepModal: React.FC = () => {
                 onChange={(e) => handleParamChange('column', e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
@@ -798,7 +872,7 @@ export const EditStepModal: React.FC = () => {
                 onChange={(e) => handleParamChange('column', e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
@@ -848,7 +922,7 @@ export const EditStepModal: React.FC = () => {
                 Columns to Check for Duplicates
               </label>
               <div className="max-h-36 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <label
                     key={c.name}
                     className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
@@ -868,28 +942,39 @@ export const EditStepModal: React.FC = () => {
             </div>
             <div>
               <label className="text-xs font-medium text-slate-300 block mb-1">Keep Occurrence</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => handleParamChange('keep', 'first')}
-                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                  className={`py-2 px-2 text-xs rounded-lg border font-medium ${
                     (params.keep || 'first') === 'first'
                       ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
                       : 'bg-slate-950 border-slate-800 text-slate-400'
                   }`}
                 >
-                  Keep First Row
+                  Keep First
                 </button>
                 <button
                   type="button"
                   onClick={() => handleParamChange('keep', 'last')}
-                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                  className={`py-2 px-2 text-xs rounded-lg border font-medium ${
                     params.keep === 'last'
                       ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
                       : 'bg-slate-950 border-slate-800 text-slate-400'
                   }`}
                 >
-                  Keep Last Row
+                  Keep Last
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleParamChange('keep', 'duplicates_only')}
+                  className={`py-2 px-2 text-xs rounded-lg border font-medium ${
+                    params.keep === 'duplicates_only'
+                      ? 'bg-amber-600/20 border-amber-500 text-amber-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Duplicates Only
                 </button>
               </div>
             </div>
@@ -909,7 +994,7 @@ export const EditStepModal: React.FC = () => {
                 }
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
@@ -956,7 +1041,7 @@ export const EditStepModal: React.FC = () => {
                 onChange={(e) => handleParamChange('column', e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
@@ -1079,7 +1164,7 @@ export const EditStepModal: React.FC = () => {
                         }}
                         className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
                       >
-                        {columns.map((c) => (
+                        {availableColumns.map((c) => (
                           <option key={c.name} value={c.name}>
                             {c.name}
                           </option>
@@ -1163,7 +1248,7 @@ export const EditStepModal: React.FC = () => {
         const aggs: any[] =
           Array.isArray(params.aggregations) && params.aggregations.length > 0
             ? params.aggregations
-            : [{ column: columns[0]?.name || '', agg_func: 'sum', output_column: 'total' }];
+            : [{ column: availableColumns[0]?.name || 'val', agg_func: 'sum', function: 'sum', output_column: `sum_${availableColumns[0]?.name || 'val'}` }];
 
         return (
           <div className="space-y-3.5">
@@ -1172,7 +1257,7 @@ export const EditStepModal: React.FC = () => {
                 Group By Columns
               </label>
               <div className="max-h-28 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <label
                     key={c.name}
                     className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
@@ -1183,6 +1268,7 @@ export const EditStepModal: React.FC = () => {
                       onChange={() => {
                         const next = toggleArrayItem(groupCols, c.name);
                         updateParams({ group_by_columns: next, group_columns: next });
+                        setLabel(`Group by ${next.join(', ') || 'all rows'} (${aggs.map((a) => `${a.agg_func || a.function || 'sum'}_${a.column || 'col'}`).join(', ')})`);
                       }}
                       className="rounded border-slate-700 bg-slate-900 text-emerald-500"
                     />
@@ -1197,17 +1283,21 @@ export const EditStepModal: React.FC = () => {
                 <label className="text-xs font-medium text-slate-300">Summary Aggregations</label>
                 <button
                   type="button"
-                  onClick={() =>
-                    handleParamChange('aggregations', [
+                  onClick={() => {
+                    const fallbackCol = availableColumns[0]?.name || 'val';
+                    const nextAggs = [
                       ...aggs,
                       {
-                        column: columns[0]?.name || '',
+                        column: fallbackCol,
                         agg_func: 'sum',
                         function: 'sum',
-                        output_column: `sum_${columns[0]?.name || 'col'}`,
+                        output_column: `sum_${fallbackCol}`,
+                        alias: `sum_${fallbackCol}`,
                       },
-                    ])
-                  }
+                    ];
+                    handleParamChange('aggregations', nextAggs);
+                    setLabel(`Group by ${groupCols.join(', ') || 'columns'} (${nextAggs.map((a) => `${a.agg_func || a.function || 'sum'}_${a.column || 'col'}`).join(', ')})`);
+                  }}
                   className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
                 >
                   <Plus size={12} /> Add Aggregation
@@ -1222,13 +1312,27 @@ export const EditStepModal: React.FC = () => {
                     <select
                       value={agg.column || ''}
                       onChange={(e) => {
+                        const newCol = e.target.value;
+                        const fn = agg.agg_func || agg.function || 'sum';
+                        const currentOut = agg.output_column || agg.alias || agg.output_name || '';
+                        let newOut = `${fn}_${newCol}`;
+                        if (currentOut && !currentOut.startsWith(`${fn}_`) && !currentOut.endsWith(`_${agg.column}`)) {
+                          newOut = currentOut;
+                        }
                         const next = [...aggs];
-                        next[idx] = { ...next[idx], column: e.target.value };
+                        next[idx] = {
+                          ...next[idx],
+                          column: newCol,
+                          output_column: newOut,
+                          alias: newOut,
+                          output_name: newOut,
+                        };
                         handleParamChange('aggregations', next);
+                        setLabel(`Group by ${groupCols.join(', ') || 'columns'} (${next.map((a) => `${a.agg_func || a.function || 'sum'}_${a.column || 'col'}`).join(', ')})`);
                       }}
                       className="col-span-4 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
                     >
-                      {columns.map((c) => (
+                      {availableColumns.map((c) => (
                         <option key={c.name} value={c.name}>
                           {c.name}
                         </option>
@@ -1237,13 +1341,32 @@ export const EditStepModal: React.FC = () => {
                     <select
                       value={agg.agg_func || agg.function || 'sum'}
                       onChange={(e) => {
+                        const newFunc = e.target.value;
+                        const oldFunc = agg.agg_func || agg.function || 'sum';
+                        const col = agg.column || availableColumns[0]?.name || 'val';
+                        const currentOut = agg.output_column || agg.alias || agg.output_name || '';
+
+                        let newOut = `${newFunc}_${col}`;
+                        if (
+                          currentOut &&
+                          !currentOut.startsWith(`${oldFunc}_`) &&
+                          currentOut !== `total_${col}` &&
+                          currentOut !== `${oldFunc}_col`
+                        ) {
+                          newOut = currentOut;
+                        }
+
                         const next = [...aggs];
                         next[idx] = {
                           ...next[idx],
-                          agg_func: e.target.value,
-                          function: e.target.value,
+                          agg_func: newFunc,
+                          function: newFunc,
+                          output_column: newOut,
+                          alias: newOut,
+                          output_name: newOut,
                         };
                         handleParamChange('aggregations', next);
+                        setLabel(`Group by ${groupCols.join(', ') || 'columns'} (${next.map((a) => `${a.agg_func || a.function || 'sum'}_${a.column || 'col'}`).join(', ')})`);
                       }}
                       className="col-span-3 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-200"
                     >
@@ -1264,6 +1387,7 @@ export const EditStepModal: React.FC = () => {
                           ...next[idx],
                           output_column: e.target.value,
                           alias: e.target.value,
+                          output_name: e.target.value,
                         };
                         handleParamChange('aggregations', next);
                       }}
@@ -1272,12 +1396,11 @@ export const EditStepModal: React.FC = () => {
                     {aggs.length > 1 && (
                       <button
                         type="button"
-                        onClick={() =>
-                          handleParamChange(
-                            'aggregations',
-                            aggs.filter((_, i) => i !== idx)
-                          )
-                        }
+                        onClick={() => {
+                          const next = aggs.filter((_, i) => i !== idx);
+                          handleParamChange('aggregations', next);
+                          setLabel(`Group by ${groupCols.join(', ') || 'columns'} (${next.map((a) => `${a.agg_func || a.function || 'sum'}_${a.column || 'col'}`).join(', ')})`);
+                        }}
                         className="col-span-1 text-slate-500 hover:text-rose-400 flex justify-center"
                       >
                         <Trash2 size={13} />
@@ -1329,7 +1452,7 @@ export const EditStepModal: React.FC = () => {
                   }
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1348,7 +1471,7 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('order_by', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1373,7 +1496,7 @@ export const EditStepModal: React.FC = () => {
                 Partition By Columns (Optional Grouping)
               </label>
               <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <label
                     key={c.name}
                     className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
@@ -1407,7 +1530,7 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('column', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1486,7 +1609,7 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('end_date_column', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1557,7 +1680,7 @@ export const EditStepModal: React.FC = () => {
                       }
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                     >
-                      {columns.map((c) => (
+                      {availableColumns.map((c) => (
                         <option key={c.name} value={c.name}>
                           {c.name}
                         </option>
@@ -1595,7 +1718,7 @@ export const EditStepModal: React.FC = () => {
                       onChange={(e) => handleParamChange('column2', e.target.value)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                     >
-                      {columns.map((c) => (
+                      {availableColumns.map((c) => (
                         <option key={c.name} value={c.name}>
                           {c.name}
                         </option>
@@ -1663,7 +1786,7 @@ export const EditStepModal: React.FC = () => {
                 onChange={(e) => handleParamChange('column', e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
               >
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
@@ -1717,7 +1840,7 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('column', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1755,7 +1878,7 @@ export const EditStepModal: React.FC = () => {
                     onChange={(e) => handleParamChange('other_column', e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                   >
-                    {columns.map((c) => (
+                    {availableColumns.map((c) => (
                       <option key={c.name} value={c.name}>
                         {c.name}
                       </option>
@@ -1798,7 +1921,7 @@ export const EditStepModal: React.FC = () => {
                 Row Index Columns (Rows Zone)
               </label>
               <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <label
                     key={c.name}
                     className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
@@ -1827,7 +1950,7 @@ export const EditStepModal: React.FC = () => {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
                 >
                   <option value="">(None — Summary Only)</option>
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1843,7 +1966,7 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('value_column', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
                 >
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1877,7 +2000,7 @@ export const EditStepModal: React.FC = () => {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
                 >
                   <option value="">(None)</option>
-                  {columns.map((c) => (
+                  {availableColumns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}
                     </option>
@@ -1931,7 +2054,7 @@ export const EditStepModal: React.FC = () => {
                 Identifier Columns to Keep
               </label>
               <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <label
                     key={c.name}
                     className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
@@ -1954,7 +2077,7 @@ export const EditStepModal: React.FC = () => {
                 Value Columns to Unpivot
               </label>
               <div className="max-h-24 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
-                {columns.map((c) => (
+                {availableColumns.map((c) => (
                   <label
                     key={c.name}
                     className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
@@ -1994,6 +2117,583 @@ export const EditStepModal: React.FC = () => {
                   onChange={(e) => handleParamChange('value_column', e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
                 />
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'custom_column': {
+        const colName = params.new_column || params.column || params.target_column || 'custom_col';
+        const isFormulaMode = Boolean(params.expression || params.formula);
+        const colVal = params.value !== undefined ? String(params.value) : '';
+        const expr = params.expression || params.formula || '';
+        const dataType = params.data_type || 'string';
+
+        return (
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                New Column Name
+              </label>
+              <input
+                type="text"
+                value={colName}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  updateParams({ new_column: val, column: val, target_column: val });
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                placeholder="e.g. Total_Amount, Profit_Margin, Custom_Tag"
+              />
+            </div>
+
+            <div className="flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  updateParams({ expression: undefined, formula: undefined, value: params.value ?? '' });
+                }}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${
+                  !isFormulaMode
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Custom Static Value
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  updateParams({
+                    expression: params.expression || `[${availableColumns[0]?.name || 'col'}]`,
+                    value: undefined,
+                  });
+                }}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${
+                  isFormulaMode
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Formula Expression
+              </button>
+            </div>
+
+            {!isFormulaMode ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">
+                    Static Value
+                  </label>
+                  <input
+                    type="text"
+                    value={colVal}
+                    onChange={(e) => updateParams({ value: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                    placeholder="Enter manual value"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">
+                    Data Type
+                  </label>
+                  <select
+                    value={dataType}
+                    onChange={(e) => updateParams({ data_type: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                  >
+                    <option value="string">Text / String</option>
+                    <option value="integer">Integer Number</option>
+                    <option value="float">Decimal / Float</option>
+                    <option value="date">Date</option>
+                    <option value="boolean">Boolean</option>
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Custom Formula Expression
+                </label>
+                <textarea
+                  rows={3}
+                  value={expr}
+                  onChange={(e) => updateParams({ expression: e.target.value, formula: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs font-mono text-emerald-300 focus:outline-none focus:border-emerald-500"
+                  placeholder="e.g. [Price] * [Quantity] or UPPER([Status])"
+                />
+                <div>
+                  <span className="text-[11px] text-slate-400 block mb-1">Insert Column Token:</span>
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                    {availableColumns.map((c) => (
+                      <button
+                        key={c.name}
+                        type="button"
+                        onClick={() => {
+                          const nextExpr = `${expr} [${c.name}]`.trim();
+                          updateParams({ expression: nextExpr, formula: nextExpr });
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-300 border border-slate-700"
+                      >
+                        [{c.name}]
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'remove_column': {
+        const cols: string[] = Array.isArray(params.columns)
+          ? params.columns
+          : params.column
+          ? [params.column]
+          : [];
+        const isKeep = Boolean(params.keep_selected);
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Operation Mode
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateParams({ keep_selected: false })}
+                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                    !isKeep
+                      ? 'bg-rose-600/20 border-rose-500 text-rose-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Drop Selected Columns
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateParams({ keep_selected: true })}
+                  className={`py-2 px-3 text-xs rounded-lg border font-medium ${
+                    isKeep
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Keep Only Selected Columns
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Select Columns ({cols.length} selected)
+              </label>
+              <div className="max-h-48 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg grid grid-cols-2 gap-1.5">
+                {availableColumns.map((c) => (
+                  <label
+                    key={c.name}
+                    className="flex items-center gap-2 p-1 rounded hover:bg-slate-900 text-xs text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={cols.includes(c.name)}
+                      onChange={() =>
+                        updateParams({ columns: toggleArrayItem(cols, c.name) })
+                      }
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500"
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'reorder_columns': {
+        const order: string[] = Array.isArray(params.column_order)
+          ? params.column_order
+          : availableColumns.map((c) => c.name);
+        const moveCol = (index: number, dir: 'up' | 'down') => {
+          const target = dir === 'up' ? index - 1 : index + 1;
+          if (target < 0 || target >= order.length) return;
+          const next = [...order];
+          const [moved] = next.splice(index, 1);
+          next.splice(target, 0, moved);
+          updateParams({ column_order: next });
+        };
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-slate-300">
+                Column Sequence (Order in result)
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  updateParams({ column_order: availableColumns.map((c) => c.name) })
+                }
+                className="text-[11px] text-emerald-400 hover:underline"
+              >
+                Reset to default
+              </button>
+            </div>
+            <div className="max-h-56 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
+              {order.map((col, idx) => (
+                <div
+                  key={col}
+                  className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded text-xs text-slate-200"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-slate-500 text-[10px] w-4">{idx + 1}.</span>
+                    <span>{col}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => moveCol(idx, 'up')}
+                      className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-20"
+                    >
+                      <ArrowUp size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === order.length - 1}
+                      onClick={() => moveCol(idx, 'down')}
+                      className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-20"
+                    >
+                      <ArrowDown size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      case 'promote_headers': {
+        return (
+          <div className="space-y-3 p-4 bg-slate-950 border border-slate-800 rounded-lg">
+            <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold">
+              <Check size={14} /> Use First Row as Headers
+            </div>
+            <p className="text-xs text-slate-400">
+              This step takes the values in row 1 of the dataset and assigns them as column headers, removing the first row from data rows.
+            </p>
+          </div>
+        );
+      }
+
+      case 'remove_rows': {
+        const mode = params.mode || 'top_n';
+        const count = params.count ?? 1;
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Row Operation
+              </label>
+              <select
+                value={mode}
+                onChange={(e) => updateParams({ mode: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                <option value="top_n">Remove Top N Rows</option>
+                <option value="bottom_n">Remove Bottom N Rows</option>
+                <option value="keep_top_n">Keep Top N Rows</option>
+                <option value="keep_bottom_n">Keep Bottom N Rows</option>
+                <option value="blank_rows">Remove Blank / Empty Rows</option>
+              </select>
+            </div>
+            {mode !== 'blank_rows' && (
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Number of Rows (N)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={count}
+                  onChange={(e) => updateParams({ count: Math.max(1, parseInt(e.target.value) || 1) })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono"
+                />
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'transpose': {
+        return (
+          <div className="space-y-3 p-4 bg-slate-950 border border-slate-800 rounded-lg">
+            <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold">
+              <Check size={14} /> Transpose Matrix
+            </div>
+            <p className="text-xs text-slate-400">
+              Rotates the table 90 degrees: columns become rows, and rows become columns. An 'Attribute' column will contain original headers.
+            </p>
+          </div>
+        );
+      }
+
+      case 'standardize_values': {
+        const col = params.column || availableColumns[0]?.name || '';
+        const targetCol = params.output_column || col;
+        const mapping = params.mapping || {};
+        const entries = Object.entries(mapping);
+
+        const setMappingEntry = (fromVal: string, toVal: string) => {
+          const next = { ...mapping, [fromVal]: toVal };
+          updateParams({ mapping: next });
+        };
+        const removeMappingEntry = (fromVal: string) => {
+          const next = { ...mapping };
+          delete next[fromVal];
+          updateParams({ mapping: next });
+        };
+
+        return (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Source Column
+                </label>
+                <select
+                  value={col}
+                  onChange={(e) => updateParams({ column: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {availableColumns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Output Column
+                </label>
+                <input
+                  type="text"
+                  value={targetCol}
+                  onChange={(e) => updateParams({ output_column: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-300">
+                  Value Standardization Mappings ({entries.length})
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setMappingEntry(`From_${entries.length + 1}`, `To_${entries.length + 1}`)}
+                  className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1"
+                >
+                  <Plus size={11} /> Add Mapping
+                </button>
+              </div>
+              <div className="max-h-48 overflow-y-auto p-2 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+                {entries.map(([fromKey, toVal], idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={fromKey}
+                      placeholder="Original value"
+                      onChange={(e) => {
+                        const newKey = e.target.value;
+                        const next = { ...mapping };
+                        delete next[fromKey];
+                        next[newKey] = toVal;
+                        updateParams({ mapping: next });
+                      }}
+                      className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+                    />
+                    <span className="text-slate-500 text-xs">&rarr;</span>
+                    <input
+                      type="text"
+                      value={String(toVal)}
+                      placeholder="Clean standardized value"
+                      onChange={(e) => setMappingEntry(fromKey, e.target.value)}
+                      className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 font-semibold text-emerald-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeMappingEntry(fromKey)}
+                      className="p-1 text-slate-500 hover:text-rose-400"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'impute_missing': {
+        const col = params.column || availableColumns[0]?.name || '';
+        const strategy = params.strategy || 'mean';
+        const fillVal = params.value ?? '0';
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Column to Impute
+              </label>
+              <select
+                value={col}
+                onChange={(e) => updateParams({ column: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                {availableColumns.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Imputation Strategy
+              </label>
+              <select
+                value={strategy}
+                onChange={(e) => updateParams({ strategy: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                <option value="mean">Mean (Average of column)</option>
+                <option value="median">Median (Middle value)</option>
+                <option value="mode">Mode (Most frequent)</option>
+                <option value="fixed">Fixed Custom Value</option>
+              </select>
+            </div>
+            {strategy === 'fixed' && (
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Replacement Value
+                </label>
+                <input
+                  type="text"
+                  value={fillVal}
+                  onChange={(e) => updateParams({ value: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                />
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'flag_outliers': {
+        const col = params.column || availableColumns[0]?.name || '';
+        const mult = params.iqr_multiplier ?? 1.5;
+        const outCol = params.output_column || `is_outlier_${col}`;
+        return (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Numeric Column
+                </label>
+                <select
+                  value={col}
+                  onChange={(e) => updateParams({ column: e.target.value, output_column: `is_outlier_${e.target.value}` })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {availableColumns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  IQR Multiplier (Default 1.5)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  value={mult}
+                  onChange={(e) => updateParams({ iqr_multiplier: parseFloat(e.target.value) || 1.5 })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">
+                Outlier Flag Column Name (TRUE / FALSE)
+              </label>
+              <input
+                type="text"
+                value={outCol}
+                onChange={(e) => updateParams({ output_column: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              />
+            </div>
+          </div>
+        );
+      }
+
+      case 'top_bottom_n': {
+        const col = params.column || availableColumns[0]?.name || '';
+        const mode = params.mode || 'top';
+        const n = params.n ?? 10;
+        return (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Direction
+                </label>
+                <select
+                  value={mode}
+                  onChange={(e) => updateParams({ mode: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  <option value="top">Top (Highest)</option>
+                  <option value="bottom">Bottom (Lowest)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Number (N)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={n}
+                  onChange={(e) => updateParams({ n: Math.max(1, parseInt(e.target.value) || 1) })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Rank Column
+                </label>
+                <select
+                  value={col}
+                  onChange={(e) => updateParams({ column: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+                >
+                  {availableColumns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

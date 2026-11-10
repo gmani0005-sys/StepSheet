@@ -53,23 +53,32 @@ export const RightPanel: React.FC = () => {
 
   const stepCategories = [
     {
-      category: 'Cleaning & Shape',
+      category: 'Cleaning & Hygiene',
       icon: Filter,
       items: [
-        { id: 'filter_rows', name: 'Filter Rows', desc: 'Keep or remove rows by visual rule conditions' },
-        { id: 'sort_rows', name: 'Sort Rows', desc: 'Sort ascending or descending by column' },
-        { id: 'change_type', name: 'Change Type', desc: 'Convert text, number, date, or boolean' },
-        { id: 'rename_column', name: 'Rename Column', desc: 'Change column headers cleanly' },
-        { id: 'remove_duplicates', name: 'Remove Duplicates', desc: 'Deduplicate on key columns, keep first or last' },
-        { id: 'fill_down', name: 'Fill Down / Up', desc: 'Propagate values to fill missing blanks' },
-        { id: 'replace_values', name: 'Replace Values', desc: 'Find and replace values or nulls' },
-        { id: 'split_column', name: 'Split Column', desc: 'Split by delimiter into multiple columns' },
-        { id: 'pivot', name: 'Pivot Table', desc: 'Reshape rows into columns with aggregation' },
-        { id: 'unpivot', name: 'Unpivot Columns', desc: 'Melt multiple columns into rows' },
+        { id: 'remove_duplicates', name: 'Remove Duplicates', desc: 'Deduplicate on key columns, keep first, last, or audit duplicates only' },
+        { id: 'impute_missing', name: 'Handle Missing / Imputation', desc: 'Replace nulls with column Mean, Median, Mode, or fixed value' },
+        { id: 'standardize_values', name: 'Standardize Values', desc: 'Map category misspellings or inconsistent text to clean standard names' },
+        { id: 'replace_values', name: 'Replace Values', desc: 'Find and replace values or nulls across any column' },
+        { id: 'fill_down', name: 'Fill Down / Up', desc: 'Propagate values down or up to fill blank empty cells' },
       ],
     },
     {
-      category: 'Lookup & Join',
+      category: 'Table Structure & Shape',
+      icon: SlidersHorizontal,
+      items: [
+        { id: 'remove_column', name: 'Manage Columns (Remove/Keep)', desc: 'Remove unwanted columns or keep only a selected subset' },
+        { id: 'reorder_columns', name: 'Reorder Columns', desc: 'Change the left-to-right display order of columns' },
+        { id: 'promote_headers', name: 'Promote Headers', desc: 'Use values from the first data row as new column headers' },
+        { id: 'remove_rows', name: 'Remove Rows', desc: 'Drop leading top N rows, trailing bottom N rows, or empty lines' },
+        { id: 'change_type', name: 'Change Column Type', desc: 'Convert text, number, date, or boolean' },
+        { id: 'rename_column', name: 'Rename Column', desc: 'Change column headers cleanly' },
+        { id: 'split_column', name: 'Split Column', desc: 'Split text by delimiter into multiple columns' },
+        { id: 'transpose', name: 'Transpose Table', desc: 'Swap rows and columns into an attribute-value matrix' },
+      ],
+    },
+    {
+      category: 'Lookup & Combine',
       icon: GitBranch,
       items: [
         {
@@ -83,18 +92,21 @@ export const RightPanel: React.FC = () => {
           desc: 'Classic vertical lookup by column index number (col_index_num) & exact/approximate match',
         },
         { id: 'join', name: 'Join Builder', desc: 'Combine datasets with Venn diagrams and health check' },
-        { id: 'append', name: 'Append (Union)', desc: 'Stack tables with column name alignment' },
+        { id: 'append', name: 'Append (Union)', desc: 'Stack tables vertically with monthly discriminator & incremental key deduplication' },
       ],
     },
     {
-      category: 'Logical & Conditional',
+      category: 'Logical & Formulas',
       icon: Sparkles,
       items: [
+        { id: 'custom_column', name: 'Custom Column', desc: 'Add a new column populated with fixed value (e.g. Month) or Excel formula' },
         { id: 'conditional', name: 'IF / IFS / SWITCH', desc: 'Visual rule rows with conditions and default fallback' },
+        { id: 'math_transform', name: 'Numeric & Math', desc: 'Arithmetic (+, -, *, /), round, abs, percent change, clean currency' },
+        { id: 'flag_outliers', name: 'Detect Outliers (IQR)', desc: 'Flag statistical anomalies exceeding 1.5x Interquartile Range' },
       ],
     },
     {
-      category: 'Aggregation & Summary',
+      category: 'Aggregation & Analysis',
       icon: Calculator,
       items: [
         {
@@ -102,29 +114,18 @@ export const RightPanel: React.FC = () => {
           name: 'PivotTable Builder',
           desc: 'Interactive Excel PivotTable with Rows, Columns, Values, Filters & Grand Totals',
         },
+        { id: 'unpivot', name: 'Unpivot Columns', desc: 'Melt multiple columns into rows (normalize wide tables)' },
         { id: 'group_by', name: 'Group By & Aggregate', desc: 'SUM, COUNT, DISTINCT COUNT, AVG, MIN, MAX' },
         { id: 'window_calc', name: 'Window Calculations', desc: 'Running total, Rank, Moving average, Lag / Lead' },
+        { id: 'top_bottom_n', name: 'Top / Bottom N Analysis', desc: 'Filter table down to the top or bottom N records ranked by column' },
       ],
     },
     {
-      category: 'Text & String',
+      category: 'Text & Date Operations',
       icon: Type,
       items: [
-        { id: 'text_transform', name: 'Text Operations', desc: 'Trim, uppercase, lowercase, proper case, substring, concat' },
-      ],
-    },
-    {
-      category: 'Date & Time',
-      icon: Calendar,
-      items: [
-        { id: 'date_transform', name: 'Date & Time Operations', desc: 'Extract parts, EOMONTH, DATEDIF, add time, fiscal year' },
-      ],
-    },
-    {
-      category: 'Numeric & Math',
-      icon: TrendingUp,
-      items: [
-        { id: 'math_transform', name: 'Numeric & Math', desc: 'Arithmetic (+, -, *, /), round, abs, percent change, bins' },
+        { id: 'text_transform', name: 'Text Hygiene & Ops', desc: 'Trim, collapse spaces, clean non-printable, case conversion, concat' },
+        { id: 'date_transform', name: 'Date & Time Operations', desc: 'Extract parts, EOMONTH, NETWORKDAYS working days, add interval' },
       ],
     },
   ];

@@ -2540,11 +2540,12 @@ function profileDatasetFields(cols: any[], rows: any[]) {
     if (isAId && !isBId) return 1;
     if (!isAId && isBId) return -1;
     const getScore = (col: string) => {
-      if (col.includes('product') || col.includes('item')) return 10;
-      if (col.includes('category')) return 9;
-      if (col.includes('region') || col.includes('country') || col.includes('city')) return 8;
-      if (col.includes('customer') || col.includes('client')) return 7;
-      if (col.includes('status')) return 6;
+      // Broad business categories take highest priority for primaryDim
+      if (col.includes('category') || col.includes('segment') || col.includes('department') || col.includes('type') || col.includes('division')) return 10;
+      if (col.includes('region') || col.includes('country') || col.includes('city') || col.includes('channel')) return 8;
+      if (col.includes('product') || col.includes('item') || col.includes('sku')) return 6;
+      if (col.includes('customer') || col.includes('client') || col.includes('account')) return 5;
+      if (col.includes('status') || col.includes('tier') || col.includes('stage')) return 4;
       return 1;
     };
     return getScore(bLower) - getScore(aLower);
@@ -4811,9 +4812,15 @@ export const localEngine = {
       });
     }
 
-    // 2. Build Slicers (pick 1 to 3 suitable dimensions)
+    // 2. Resolve Multi-Tier Dimensions for Cohesive Dashboard Experience
     const nonIdDims = profile.dimensions.filter((d) => !d.toLowerCase().endsWith('_id') && !d.toLowerCase().endsWith('id'));
-    const slicerCandidates = nonIdDims.length > 0 ? nonIdDims.slice(0, 3) : profile.dimensions.slice(0, 3);
+    const compDim = secondaryDim && secondaryDim !== primaryDim ? secondaryDim : primaryDim;
+    const granularDim = nonIdDims.find((d) => /customer|client|product|item|sku|account|user|sub_category/i.test(d)) || compDim;
+    const geoDim = nonIdDims.find((d) => /region|country|state|city|channel|territory|location|market/i.test(d)) || compDim;
+    const statusDim = profile.dimensions.find((d) => /status|stage|priority|fulfillment|state|tier|payment/i.test(d)) || null;
+
+    // Slicers: Cohesively include [primaryDim, geoDim, granularDim] so highlighted customers & categories are filterable
+    const slicerCandidates = Array.from(new Set([primaryDim, geoDim, granularDim].filter(Boolean)));
     const slicerColumns = slicerCandidates.length > 0 ? slicerCandidates : (cols.slice(0, 2).map((c: any) => c.name));
 
     // 3. Domain Awareness & Dynamic Narrative Insight Calculation
@@ -4828,11 +4835,6 @@ export const localEngine = {
     let totalPrimarySum = 0;
     let topGeo = 'Primary Region';
     let topGeoCount = 0;
-
-    const compDim = secondaryDim && secondaryDim !== primaryDim ? secondaryDim : primaryDim;
-    const granularDim = nonIdDims.find((d) => /product|item|customer|client|sku|account|user|sub_category/i.test(d)) || compDim;
-    const geoDim = nonIdDims.find((d) => /region|country|state|city|channel|territory|location|market/i.test(d)) || compDim;
-    const statusDim = profile.dimensions.find((d) => /status|stage|priority|fulfillment|state|tier|payment/i.test(d)) || null;
 
     if (Array.isArray(rows) && rows.length > 0 && primaryMeasure) {
       const catMap = new Map<string, number>();
@@ -4873,7 +4875,11 @@ export const localEngine = {
     }
 
     const avgValNum = Array.isArray(rows) && rows.length > 0 ? (totalPrimarySum / rows.length).toFixed(2) : '0';
-    const narrativeInsight = `${topCategory} is the leading revenue driver generating ${topCategoryPct} of total volume. Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions. Across all ${rows ? rows.length : 0} records, the per-record benchmark stands at ${avgValNum}.`;
+    const topPctNum = totalPrimarySum > 0 ? (topCategorySum / totalPrimarySum) * 100 : 0;
+    const driverSentence = topPctNum >= 15
+      ? `${topCategory} is the leading revenue driver generating ${topCategoryPct} of total volume.`
+      : `Volume is distributed across ${primaryDim}, led by ${topCategory} (${topCategoryPct}).`;
+    const narrativeInsight = `${driverSentence} Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions. Across all ${rows ? rows.length : 0} records, the per-record benchmark stands at ${avgValNum}.`;
 
     // 4. Build 6 Multi-Tier Complementary Visuals (Executive Grid V22)
     const visuals: any[] = [];
@@ -4896,6 +4902,7 @@ export const localEngine = {
         w: 12,
         h: 4,
         sortBy: 'category_asc',
+        legendPosition: 'hide',
       });
     } else {
       visuals.push({

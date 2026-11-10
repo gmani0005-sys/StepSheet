@@ -993,7 +993,15 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     const dsKey = selectedDataset?.id || 'default';
     const colNames = columns.map((c) => c.name);
     const { cat1, cat2 } = getSmartDefaults();
-    const defaultSlicers = [cat1, cat2].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+    const entityCol = columns.find(
+      (c) =>
+        /customer|client|account|product|item|user/i.test(c.name) &&
+        !c.name.toLowerCase().endsWith('_id') &&
+        c.name.toLowerCase() !== 'id'
+    )?.name;
+    const defaultSlicers = [cat1, cat2, entityCol].filter(
+      (v, i, a): v is string => Boolean(v) && a.indexOf(v) === i
+    );
 
     // If the user explicitly changed the Active Sheet or Connection/Query dropdown on the current page,
     // bind the newly selected sheet/query to the active page while preserving all other pages.
@@ -1604,7 +1612,29 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           cell === null || cell === undefined || String(cell).trim() === ''
             ? '(Blank)'
             : String(cell);
-        if (norm !== crossFilter.value) return false;
+        if (norm !== crossFilter.value) {
+          // If crossFilter.value is a month or quarter (e.g. 2023-01 or 2023-Q1), match the row date to the period
+          let matchesPeriod = false;
+          if (/^\d{4}-\d{2}$/.test(crossFilter.value)) {
+            const d = new Date(cell);
+            if (!isNaN(d.getTime())) {
+              const p = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+              matchesPeriod = p === crossFilter.value;
+            }
+          } else if (/^\d{4}-Q[1-4]$/.test(crossFilter.value)) {
+            const d = new Date(cell);
+            if (!isNaN(d.getTime())) {
+              const q = `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
+              matchesPeriod = q === crossFilter.value;
+            }
+          } else if (/^\d{4}$/.test(crossFilter.value)) {
+            const d = new Date(cell);
+            if (!isNaN(d.getTime())) {
+              matchesPeriod = String(d.getFullYear()) === crossFilter.value;
+            }
+          }
+          if (!matchesPeriod) return false;
+        }
       }
       return true;
     });
@@ -1631,6 +1661,20 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   const getItemLegendLabel = (vis: DashboardVisualConfig, key: string): string => {
     if (vis.customLegendLabels && vis.customLegendLabels[key]) {
       return vis.customLegendLabels[key];
+    }
+    // Format YYYY-MM to MMM YYYY (e.g. 2023-01 -> Jan 2023)
+    if (/^\d{4}-\d{2}$/.test(key)) {
+      const [y, m] = key.split('-');
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const mIdx = parseInt(m, 10) - 1;
+      if (mIdx >= 0 && mIdx < 12) {
+        return `${monthNames[mIdx]} ${y}`;
+      }
+    }
+    // Format YYYY-Q# to Q# YYYY (e.g. 2023-Q1 -> Q1 2023)
+    if (/^\d{4}-Q[1-4]$/.test(key)) {
+      const [y, q] = key.split('-');
+      return `${q} ${y}`;
     }
     return key;
   };
@@ -2888,12 +2932,71 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       return wrapWithLegend(vis, histChart, histLegendEntries);
     }
 
+    // Check if category is a date or timestamp column
+    const isCategoryDate =
+      Boolean(vis.categoryCol && /date|time|timestamp|order_date|created_at|updated_at/i.test(vis.categoryCol)) ||
+      columns.some(
+        (c) =>
+          c.name === vis.categoryCol &&
+          ['date', 'timestamp'].includes(String(c.data_type || '').toLowerCase())
+      );
+
+    const isTrendOrDate =
+      vis.type === 'line_area' ||
+      vis.type === 'stacked_area' ||
+      isCategoryDate;
+
+    // Determine calendar date aggregation interval (Year, Quarter, Month)
+    let dateInterval: 'month' | 'quarter' | 'year' = 'month';
+    if (isCategoryDate) {
+      let minYear = 9999;
+      let maxYear = 0;
+      let validDateCount = 0;
+      for (const r of filteredRows) {
+        const raw = getRowVal(r, vis.categoryCol);
+        if (!raw) continue;
+        const d = new Date(raw);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          if (y >= 1990 && y <= 2100) {
+            if (y < minYear) minYear = y;
+            if (y > maxYear) maxYear = y;
+            validDateCount++;
+          }
+        }
+      }
+      if (validDateCount > 0 && maxYear - minYear > 3) {
+        dateInterval = maxYear - minYear > 6 ? 'year' : 'quarter';
+      } else {
+        dateInterval = 'month';
+      }
+    }
+
     // Group rows by categoryCol for standard, table, matrix & multi-series visuals
     const catMap = new Map<string, Record<string, any>[]>();
     filteredRows.forEach((r) => {
       const raw = getRowVal(r, vis.categoryCol);
-      const key =
-        raw === null || raw === undefined || String(raw).trim() === '' ? '(Blank)' : String(raw);
+      let key: string;
+      if (raw === null || raw === undefined || String(raw).trim() === '') {
+        key = '(Blank)';
+      } else if (isCategoryDate) {
+        const d = new Date(raw);
+        if (!isNaN(d.getTime()) && d.getFullYear() >= 1990 && d.getFullYear() <= 2100) {
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          if (dateInterval === 'year') {
+            key = String(y);
+          } else if (dateInterval === 'quarter') {
+            key = `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+          } else {
+            key = `${y}-${String(m).padStart(2, '0')}`;
+          }
+        } else {
+          key = String(raw);
+        }
+      } else {
+        key = String(raw);
+      }
       if (!catMap.has(key)) catMap.set(key, []);
       catMap.get(key)!.push(r);
     });
@@ -2905,11 +3008,6 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       rows: groupRows,
     }));
 
-    const isTrendOrDate =
-      vis.type === 'line_area' ||
-      vis.type === 'stacked_area' ||
-      (vis.categoryCol && /date|time|month|day|year/i.test(vis.categoryCol));
-
     if (isTrendOrDate && vis.sortBy !== 'value_desc' && vis.sortBy !== 'value_asc') {
       items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
     } else if (vis.sortBy === 'value_desc') {
@@ -2920,7 +3018,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
     }
 
-    items = items.slice(0, isTrendOrDate ? Math.max(30, vis.topN || 30) : (vis.topN || 10));
+    items = items.slice(0, isTrendOrDate ? Math.max(36, vis.topN || 36) : (vis.topN || 10));
     const maxVal = Math.max(1, ...items.map((x) => Math.abs(x.value)));
     const minVal = items.length > 0 ? Math.min(...items.map((x) => x.value)) : 0;
     const totalVal = items.reduce((acc, x) => acc + Math.max(0, x.value), 0) || 1;
@@ -3462,7 +3560,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           })}
         </div>
       );
-      return wrapWithLegend(vis, barChart, categoryLegendEntries);
+      const showBarLegend = !isTrendOrDate && vis.legendPosition && vis.legendPosition !== 'hide' && items.length <= 10;
+      return wrapWithLegend(vis, barChart, showBarLegend ? categoryLegendEntries : []);
     }
 
     // 6. VERTICAL COLUMN CHART
@@ -3533,7 +3632,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           </div>
         </div>
       );
-      return wrapWithLegend(vis, colChart, categoryLegendEntries);
+      const showColLegend = !isTrendOrDate && vis.legendPosition && vis.legendPosition !== 'hide' && items.length <= 10;
+      return wrapWithLegend(vis, colChart, showColLegend ? categoryLegendEntries : []);
     }
 
     // 7. DONUT & PIE CHARTS (SVG)
@@ -3879,7 +3979,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           </svg>
         </div>
       );
-      return wrapWithLegend(vis, lineChart, categoryLegendEntries);
+      return wrapWithLegend(vis, lineChart, []);
     }
 
     // 8B. STACKED AREA CHART
@@ -3924,7 +4024,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           </svg>
         </div>
       );
-      return wrapWithLegend(vis, stackedAreaChart, categoryLegendEntries);
+      return wrapWithLegend(vis, stackedAreaChart, []);
     }
 
     // 8C. WATERFALL CHART (VARIANCE BRIDGE)
@@ -4819,25 +4919,51 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               const numCols = columns.filter((c: any) => {
                 const dt = String(c.data_type || c.type || '').toLowerCase();
                 const name = String(c.name || '').toLowerCase();
-                return ['amount', 'revenue', 'sales', 'profit', 'quantity', 'balance', 'salary'].some(k => name.includes(k)) || ['integer', 'float', 'number'].includes(dt);
+                return ['amount', 'revenue', 'sales', 'profit', 'quantity', 'balance', 'salary', 'credit_limit'].some(k => name.includes(k)) || ['integer', 'float', 'number'].includes(dt);
               });
               const primaryMeas = numCols[0]?.name || columns.find((c: any) => !String(c.name || '').toLowerCase().endsWith('id'))?.name;
               const catCols = columns.filter((c: any) => {
                 const name = String(c.name || '').toLowerCase();
                 return !name.endsWith('_id') && name !== 'id' && !numCols.some((nc: any) => nc.name === c.name);
               });
-              const primaryD = catCols[0]?.name || columns[0]?.name;
-              const geoD = catCols.find((c: any) => /region|country|state|city|channel/i.test(String(c.name || '')))?.name || catCols[1]?.name;
+
+              const isBroadCat = (name: string) =>
+                /^(category|segment|type|department|division|group|tier|status|channel|market|class|stage)$/i.test(name) ||
+                /(category|segment|department|division|tier|channel)/i.test(name);
+              const isGeoCol = (name: string) =>
+                /region|country|state|city|territory|location|zone|area/i.test(name);
+              const isGranularEntity = (name: string) =>
+                /customer|client|account|product|item|sku|vendor|supplier|user|rep|employee/i.test(name);
+              const isDateCol = (name: string) =>
+                /date|time|timestamp|day|month|year|period/i.test(name);
+
+              // Prioritize broad strategic categories for Executive Takeaway, then geo, then others
+              const primaryD =
+                catCols.find((c: any) => isBroadCat(c.name) && !isDateCol(c.name))?.name ||
+                catCols.find((c: any) => !isGranularEntity(c.name) && !isDateCol(c.name) && !isGeoCol(c.name))?.name ||
+                catCols.find((c: any) => isGeoCol(c.name))?.name ||
+                catCols.find((c: any) => !isDateCol(c.name))?.name ||
+                columns[0]?.name;
+
+              const geoD =
+                catCols.find((c: any) => isGeoCol(c.name) && c.name !== primaryD)?.name ||
+                catCols.find((c: any) => isGeoCol(c.name))?.name;
+
+              const entityD =
+                catCols.find((c: any) => isGranularEntity(c.name) && c.name !== primaryD)?.name;
 
               let topCatName = '';
               let topCatSum = 0;
               let totalMeasSum = 0;
               let topGeoName = '';
               let topGeoCount = 0;
+              let topEntityName = '';
+              let topEntitySum = 0;
 
               if (primaryMeas) {
                 const catMap = new Map<string, number>();
                 const geoMap = new Map<string, number>();
+                const entityMap = new Map<string, number>();
                 for (const r of filteredRows) {
                   const v = Number(r[primaryMeas]) || 0;
                   totalMeasSum += v;
@@ -4848,6 +4974,10 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                   if (geoD) {
                     const gk = String(r[geoD] ?? 'General');
                     geoMap.set(gk, (geoMap.get(gk) || 0) + 1);
+                  }
+                  if (entityD) {
+                    const ek = String(r[entityD] ?? 'Other');
+                    entityMap.set(ek, (entityMap.get(ek) || 0) + v);
                   }
                 }
                 for (const [k, v] of catMap.entries()) {
@@ -4862,11 +4992,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     topGeoName = k;
                   }
                 }
+                for (const [k, v] of entityMap.entries()) {
+                  if (v > topEntitySum) {
+                    topEntitySum = v;
+                    topEntityName = k;
+                  }
+                }
               }
 
-              const topCatPct = totalMeasSum > 0 ? `${((topCatSum / totalMeasSum) * 100).toFixed(1)}%` : '0%';
+              const topCatNumPct = totalMeasSum > 0 ? (topCatSum / totalMeasSum) * 100 : 0;
+              const topCatPct = totalMeasSum > 0 ? `${topCatNumPct.toFixed(1)}%` : '0%';
               const avgDeal = filteredRows.length > 0 ? (totalMeasSum / filteredRows.length) : 0;
-              const isCurr = primaryMeas && ['amount', 'revenue', 'sales', 'price', 'cost', 'spend', 'budget', 'salary'].some(k => primaryMeas.toLowerCase().includes(k));
+              const isCurr = primaryMeas && ['amount', 'revenue', 'sales', 'price', 'cost', 'spend', 'budget', 'salary', 'credit_limit'].some(k => primaryMeas.toLowerCase().includes(k));
               const prefix = isCurr ? '$' : '';
 
               const isSalesDomain = columns.some((c: any) => /sales|order|revenue|amount|customer|product/i.test(String(c.name || '')));
@@ -4894,9 +5031,23 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         <p className="text-xs text-slate-700 font-medium leading-relaxed">
                           {topCatName ? (
                             <>
-                              <strong className="text-slate-900 font-bold">{topCatName}</strong> is the primary volume driver contributing{' '}
-                              <strong className="text-emerald-700 font-bold">{prefix}{formatNum(topCatSum)} ({topCatPct})</strong> of overall{' '}
-                              {primaryMeas}.{' '}
+                              {topCatNumPct >= 15 ? (
+                                <>
+                                  <strong className="text-slate-900 font-bold">{topCatName}</strong> is the primary volume driver contributing{' '}
+                                  <strong className="text-emerald-700 font-bold">{prefix}{formatNum(topCatSum)} ({topCatPct})</strong> of overall{' '}
+                                  {primaryMeas}.{' '}
+                                </>
+                              ) : (
+                                <>
+                                  Volume is distributed across {primaryD}, led by <strong className="text-slate-900 font-bold">{topCatName}</strong> with{' '}
+                                  <strong className="text-emerald-700 font-bold">{prefix}{formatNum(topCatSum)} ({topCatPct})</strong> of overall {primaryMeas}.{' '}
+                                </>
+                              )}
+                              {topEntityName && (
+                                <>
+                                  Key account driver is <strong className="text-slate-900 font-bold">{topEntityName}</strong> ({prefix}{formatNum(topEntitySum)}).{' '}
+                                </>
+                              )}
                               {topGeoName && (
                                 <>
                                   Regional activity is led by <strong className="text-slate-900 font-bold">{topGeoName}</strong> across{' '}

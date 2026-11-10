@@ -418,7 +418,10 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
         # 3. Dimensions Resolution
         cat_candidates = [d for d in dimensions if not any(k in d.lower() for k in ["_id", "id", "_code", "_key", "uuid", "hash"])]
         preferred_dims = cat_candidates if cat_candidates else dimensions
-        primary_dim = preferred_dims[0] if preferred_dims else (columns[0]["name"] if columns else "Category")
+
+        # Prioritize broad business categories (category, segment, type, department, division, tier, group)
+        broad_cats = [d for d in preferred_dims if any(k in d.lower() for k in ["category", "segment", "department", "division", "type", "tier", "channel", "group"])]
+        primary_dim = broad_cats[0] if broad_cats else preferred_dims[0] if preferred_dims else (columns[0]["name"] if columns else "Category")
 
         for d in dimensions:
             clean_d = re.sub(r"[^a-z0-9]", "", d.lower())
@@ -426,23 +429,13 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
                 primary_dim = d
                 break
 
-        # Granular dimension (product, item, customer, client)
-        granular_dim = primary_dim
-        for d in preferred_dims:
-            if any(k in d.lower() for k in ["product", "item", "customer", "client", "sku", "account", "user"]):
-                granular_dim = d
-                break
-        if granular_dim == primary_dim and len(preferred_dims) > 1:
-            granular_dim = preferred_dims[1]
+        # Granular dimension (customer, product, item, client, account)
+        granular_candidates = [d for d in preferred_dims if any(k in d.lower() for k in ["customer", "client", "product", "item", "sku", "account", "user"])]
+        granular_dim = granular_candidates[0] if granular_candidates else (preferred_dims[1] if len(preferred_dims) > 1 else primary_dim)
 
         # Geographic / Channel dimension
-        geo_dim = primary_dim
-        for d in preferred_dims:
-            if any(k in d.lower() for k in ["region", "country", "state", "city", "channel", "territory", "location", "market"]):
-                geo_dim = d
-                break
-        if geo_dim == primary_dim and len(preferred_dims) > 2:
-            geo_dim = preferred_dims[2]
+        geo_candidates = [d for d in preferred_dims if any(k in d.lower() for k in ["region", "country", "state", "city", "channel", "territory", "location", "market"])]
+        geo_dim = geo_candidates[0] if geo_candidates else (preferred_dims[2] if len(preferred_dims) > 2 else primary_dim)
 
         # Status / Pipeline dimension
         status_dim = None
@@ -534,6 +527,7 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
                     x=16,
                     y=16,
                     sortBy="category_asc",
+                    legendPosition="hide",
                 )
             )
         else:
@@ -689,9 +683,17 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
             )
         )
 
-        # Slicers
+        # Slicers: Cohesively include [primary_dim, geo_dim, granular_dim]
+        slicers = []
+        for d in [primary_dim, geo_dim, granular_dim]:
+            if d and d not in slicers:
+                slicers.append(d)
         non_id_dims = [d for d in dimensions if not any(k in d.lower() for k in ["_id", "id", "_code"])]
-        slicers = (non_id_dims[:3] if non_id_dims else dimensions[:3]) or [c["name"] for c in columns[:2]]
+        for d in non_id_dims:
+            if d not in slicers and len(slicers) < 3:
+                slicers.append(d)
+        if not slicers:
+            slicers = [c["name"] for c in columns[:2]]
 
         clean_name = dataset_name.replace("_", " ").replace("-", " ").title()
         title = f"{clean_name} Executive Dashboard & Revenue Intelligence" if is_sales else f"{clean_name} Executive Dashboard"

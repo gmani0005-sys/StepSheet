@@ -1324,6 +1324,7 @@ describe('StepSheet Workbench', () => {
         { category: 'Electronics', amount: null },
         { category: 'Books', amount: 50 },
         { category: 'Books', amount: 9999 }, // Outlier
+        { category: 'Toys', amount: 55 },
       ],
     });
 
@@ -1355,6 +1356,7 @@ describe('StepSheet Workbench', () => {
         { category: 'Electronics', amount: null },
         { category: 'Books', amount: 50 },
         { category: 'Books', amount: 9999 },
+        { category: 'Toys', amount: 55 },
       ],
     };
 

@@ -69,7 +69,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const res = await api.exportCode(dataset.id, steps);
       setCodeBundle(res);
     } catch (err: any) {
-      alert('Failed to generate code bundle');
+      alert(err?.message || 'Failed to generate code bundle');
     } finally {
       setIsLoadingCode(false);
     }
@@ -81,7 +81,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const blob = await api.exportExcel(dataset.id, steps, includeFormulas, includeDocs);
       downloadBlob(blob, `${dataset.name}_export.xlsx`);
     } catch (err: any) {
-      alert('Failed to export Excel file');
+      alert(err?.message || 'Failed to export Excel file');
     } finally {
       setIsExporting(null);
     }
@@ -93,7 +93,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const blob = await api.exportCsv(dataset.id, steps);
       downloadBlob(blob, `${dataset.name}_export.csv`);
     } catch (err: any) {
-      alert('Failed to export CSV file');
+      alert(err?.message || 'Failed to export CSV file');
     } finally {
       setIsExporting(null);
     }
@@ -105,7 +105,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const blob = await api.exportParquet(dataset.id, steps);
       downloadBlob(blob, `${dataset.name}_export.parquet`);
     } catch (err: any) {
-      alert('Failed to export Parquet file');
+      alert(err?.message || 'Failed to export Parquet file');
     } finally {
       setIsExporting(null);
     }
@@ -117,7 +117,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const blob = await api.exportJson(dataset.id, steps);
       downloadBlob(blob, `${dataset.name}_export.json`);
     } catch (err: any) {
-      alert('Failed to export JSON file');
+      alert(err?.message || 'Failed to export JSON file');
     } finally {
       setIsExporting(null);
     }
@@ -129,7 +129,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const blob = await api.exportPipelineSpec(dataset.id, steps);
       downloadBlob(blob, `${dataset.name}_pipeline.json`);
     } catch (err: any) {
-      alert('Failed to export Pipeline JSON');
+      alert(err?.message || 'Failed to export Pipeline JSON');
     } finally {
       setIsExporting(null);
     }
@@ -141,7 +141,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const res = await api.runFullPipeline(dataset.id, steps);
       setRunFullResult(res);
     } catch (err: any) {
-      alert('Failed to execute full pipeline');
+      alert(err?.message || 'Failed to execute full pipeline');
     } finally {
       setIsRunningFull(false);
     }

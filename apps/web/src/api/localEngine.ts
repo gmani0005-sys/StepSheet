@@ -10,6 +10,29 @@ import {
   SortCondition,
 } from '../types';
 import { GeneratedCode, StepDefinition, StepSummary } from '../types/steps';
+import { evaluateFormula, formulaResultToCell, isFxError } from '../engine/formula';
+import {
+  parseSharedNumber,
+  looksNumericForImport,
+  parseSharedDate,
+  toISODate,
+  properCase,
+  trimCollapse,
+  datedif,
+  eomonth,
+  addMonthsClamped,
+  addYearsClamped,
+  fiscalYearLabel,
+  networkdays,
+  excelWeekNum,
+  weekdaySun0,
+  daysBetweenUTC,
+  isBlank,
+  cleanFloat,
+  roundHalfAwayFromZero,
+  roundUpAwayFromZero,
+  roundDownTowardZero,
+} from '../engine/values';
 
 const LOCAL_DATASETS_KEY = 'stepsheet_local_datasets_v1';
 const LOCAL_TEMPLATES_KEY = 'stepsheet_local_templates_v2';
@@ -38,16 +61,29 @@ function inferDataType(values: any[]): DataType {
       allDate = false;
       continue;
     }
+    if (typeof val === 'number') {
+      if (!Number.isInteger(val)) allInt = false;
+      allBool = false;
+      allDate = false;
+      continue;
+    }
     const str = String(val).trim();
     if (str.toLowerCase() !== 'true' && str.toLowerCase() !== 'false') {
       allBool = false;
     }
-    const num = Number(str);
-    if (Number.isNaN(num) || str === '') {
+    // Values that import type-inference would keep as text (leading zeros,
+    // scientific notation, overlong ids) should not be reported as numeric.
+    if (!looksNumericForImport(str)) {
       allInt = false;
       allFloat = false;
-    } else if (!Number.isInteger(num)) {
-      allInt = false;
+    } else {
+      const num = Number(str.replace(/[,$€£¥₹%() ]/g, ''));
+      if (Number.isNaN(num)) {
+        allInt = false;
+        allFloat = false;
+      } else if (!Number.isInteger(num)) {
+        allInt = false;
+      }
     }
     if (!/^\d{4}-\d{2}-\d{2}/.test(str)) {
       allDate = false;
@@ -203,6 +239,71 @@ function buildSampleDatasets(): StoredLocalDataset[] {
 
 let memoryDatasets: StoredLocalDataset[] | null = null;
 
+// IndexedDB backing store: localStorage has a ~5MB quota that a handful of
+// real datasets blow past easily. IndexedDB has no such limit, so it is the
+// durable store once localStorage can no longer hold the data. Degrades
+// gracefully when IndexedDB isn't available (Node/jsdom test environments,
+// private-mode restrictions): everything still works from the in-memory
+// cache and localStorage for that session.
+const IDB_DB_NAME = 'stepsheet_local_db';
+const IDB_STORE_NAME = 'kv';
+const indexedDbAvailable = typeof indexedDB !== 'undefined';
+let pendingPersistenceWarning = false;
+
+function openIdb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (!indexedDbAvailable) {
+      reject(new Error('IndexedDB is not available in this environment'));
+      return;
+    }
+    const req = indexedDB.open(IDB_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE_NAME)) {
+        req.result.createObjectStore(IDB_STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbPut(key: string, value: any): Promise<void> {
+  const db = await openIdb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+    tx.objectStore(IDB_STORE_NAME).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close?.();
+}
+
+async function idbGet<T>(key: string): Promise<T | null> {
+  const db = await openIdb();
+  const result = await new Promise<T | null>((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_NAME, 'readonly');
+    const req = tx.objectStore(IDB_STORE_NAME).get(key);
+    req.onsuccess = () => resolve((req.result as T) ?? null);
+    req.onerror = () => reject(req.error);
+  });
+  db.close?.();
+  return result;
+}
+
+/** Record a failed save clearly (audit log) instead of silently losing data. */
+function reportPersistenceFailure(detail: string) {
+  pendingPersistenceWarning = true;
+  try {
+    logAudit('dataset.persistence_failed', { detail }, 'dataset');
+  } catch {}
+  // eslint-disable-next-line no-console
+  console.error('[StepSheet] Failed to persist datasets:', detail);
+}
+
+export function hasPendingPersistenceWarning(): boolean {
+  return pendingPersistenceWarning;
+}
+
 function getStoredDatasets(): StoredLocalDataset[] {
   if (memoryDatasets) return memoryDatasets;
   try {
@@ -211,8 +312,30 @@ function getStoredDatasets(): StoredLocalDataset[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         memoryDatasets = parsed;
+        // Background-hydrate from IndexedDB too, in case localStorage holds
+        // a stale/truncated copy from a prior quota failure.
+        if (indexedDbAvailable) {
+          idbGet<StoredLocalDataset[]>(LOCAL_DATASETS_KEY)
+            .then((idbCopy) => {
+              if (Array.isArray(idbCopy) && idbCopy.length > (memoryDatasets?.length ?? 0)) {
+                memoryDatasets = idbCopy;
+              }
+            })
+            .catch(() => {});
+        }
         return memoryDatasets;
       }
+    } else if (indexedDbAvailable) {
+      // localStorage is empty (e.g. it was too small to hold anything) -
+      // nothing synchronous to return yet, but kick off IDB hydration for
+      // the next call.
+      idbGet<StoredLocalDataset[]>(LOCAL_DATASETS_KEY)
+        .then((idbCopy) => {
+          if (Array.isArray(idbCopy) && idbCopy.length > 0 && !memoryDatasets) {
+            memoryDatasets = idbCopy;
+          }
+        })
+        .catch(() => {});
     }
   } catch {}
   const seeded = buildSampleDatasets();
@@ -223,9 +346,31 @@ function getStoredDatasets(): StoredLocalDataset[] {
 
 function saveStoredDatasets(datasets: StoredLocalDataset[]) {
   memoryDatasets = datasets;
+  let localStorageOk = true;
+  let localStorageError: unknown = null;
   try {
     localStorage.setItem(LOCAL_DATASETS_KEY, JSON.stringify(datasets));
-  } catch {}
+  } catch (e) {
+    localStorageOk = false;
+    localStorageError = e;
+  }
+
+  if (indexedDbAvailable) {
+    // IndexedDB has no practical quota like localStorage's ~5MB, so it is
+    // the durable backing store; write to it every time so it never falls
+    // behind, and never silently swallow a failure.
+    idbPut(LOCAL_DATASETS_KEY, datasets).catch((e) => {
+      if (!localStorageOk) {
+        reportPersistenceFailure(
+          `localStorage failed (${String(localStorageError)}) and IndexedDB also failed (${String(e)}). Changes may be lost on reload.`
+        );
+      }
+    });
+  } else if (!localStorageOk) {
+    reportPersistenceFailure(
+      `localStorage failed (${String(localStorageError)}) and IndexedDB is unavailable in this environment. Changes may be lost on reload.`
+    );
+  }
 }
 
 function getStoredAuditLogs(): any[] {
@@ -313,61 +458,160 @@ function logAudit(action: string, details: Record<string, any> = {}, resourceTyp
   } catch {}
 }
 
-function parseDelimitedText(text: string, delimiter = ','): Record<string, any>[] {
-  const lines = text
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return [];
-
-  const splitLine = (line: string): string[] => {
-    const res: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
+/** Full-text CSV/TSV tokenizer. Handles quoted fields containing embedded
+ * newlines correctly (it does NOT split into lines before parsing quotes). */
+function parseCsvCells(text: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let field = '';
+  let row: string[] = [];
+  let inQuotes = false;
+  let sawAnything = false;
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if (inQuotes) {
       if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
         }
-      } else if (ch === delimiter && !inQuotes) {
-        res.push(current.trim());
-        current = '';
-      } else {
-        current += ch;
+        inQuotes = false;
+        i++;
+        continue;
       }
+      field += ch;
+      i++;
+      continue;
     }
-    res.push(current.trim());
-    return res;
-  };
-
-  const headers = splitLine(lines[0]).map((h, i) => h || `column_${i + 1}`);
-  const rows: Record<string, any>[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = splitLine(lines[i]);
-    const row: Record<string, any> = {};
-    headers.forEach((h, idx) => {
-      const rawVal = values[idx] ?? '';
-      if (rawVal === '') {
-        row[h] = null;
-      } else if (rawVal.toLowerCase() === 'true') {
-        row[h] = true;
-      } else if (rawVal.toLowerCase() === 'false') {
-        row[h] = false;
-      } else if (!Number.isNaN(Number(rawVal)) && rawVal.trim() !== '') {
-        row[h] = Number(rawVal);
-      } else {
-        row[h] = rawVal;
-      }
-    });
-    rows.push(row);
+    if (ch === '"') {
+      inQuotes = true;
+      sawAnything = true;
+      i++;
+      continue;
+    }
+    if (ch === delimiter) {
+      row.push(field);
+      field = '';
+      sawAnything = true;
+      i++;
+      continue;
+    }
+    if (ch === '\r' || ch === '\n') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(field);
+      field = '';
+      // drop fully blank rows (no delimiter seen, empty field)
+      if (row.length > 1 || row[0] !== '') rows.push(row);
+      row = [];
+      i++;
+      continue;
+    }
+    field += ch;
+    sawAnything = true;
+    i++;
+  }
+  if (field !== '' || row.length > 0) {
+    row.push(field);
+    if (row.length > 1 || row[0] !== '') rows.push(row);
   }
   return rows;
+}
+
+/** Detect comma vs semicolon vs tab delimiter from the header line. */
+function detectDelimiter(headerLine: string): string {
+  const counts: Record<string, number> = {
+    ',': (headerLine.match(/,/g) || []).length,
+    ';': (headerLine.match(/;/g) || []).length,
+    '\t': (headerLine.match(/\t/g) || []).length,
+  };
+  let best = ',';
+  let bestCount = counts[','];
+  for (const d of [';', '\t']) {
+    if (counts[d] > bestCount) {
+      best = d;
+      bestCount = counts[d];
+    }
+  }
+  return best;
+}
+
+function parseDelimitedText(text: string, delimiter?: string): Record<string, any>[] {
+  const cleaned = text.replace(/^﻿/, '');
+  if (!cleaned.trim()) return [];
+  const firstLineEnd = cleaned.search(/[\r\n]/);
+  const headerSample = firstLineEnd === -1 ? cleaned : cleaned.slice(0, firstLineEnd);
+  const delim = delimiter || detectDelimiter(headerSample);
+
+  const cells = parseCsvCells(cleaned, delim);
+  if (cells.length === 0) return [];
+
+  const headerRow = cells[0];
+  const headers = headerRow.map((h, i) => h.trim() || `column_${i + 1}`);
+  const dataRows = cells.slice(1);
+  const colCount = headers.length;
+
+  const colRawValues: string[][] = headers.map(() => []);
+  dataRows.forEach((r) => {
+    for (let c = 0; c < colCount; c++) {
+      colRawValues[c].push((r[c] ?? '').trim());
+    }
+  });
+
+  const colIsNumeric = colRawValues.map((vals) => {
+    const nonBlank = vals.filter((v) => v !== '');
+    if (nonBlank.length === 0) return false;
+    return nonBlank.every((v) => looksNumericForImport(v));
+  });
+  const colIsBool = colRawValues.map((vals, idx) => {
+    if (colIsNumeric[idx]) return false;
+    const nonBlank = vals.filter((v) => v !== '');
+    if (nonBlank.length === 0) return false;
+    return nonBlank.every((v) => /^(true|false)$/i.test(v));
+  });
+
+  return dataRows.map((r) => {
+    const row: Record<string, any> = {};
+    headers.forEach((h, idx) => {
+      const raw = (r[idx] ?? '').trim();
+      if (raw === '') {
+        row[h] = null;
+      } else if (colIsBool[idx]) {
+        row[h] = raw.toLowerCase() === 'true';
+      } else if (colIsNumeric[idx]) {
+        row[h] = parseSharedNumber(raw);
+      } else {
+        row[h] = raw;
+      }
+    });
+    return row;
+  });
+}
+
+/** Decode a CSV/text file's bytes, auto-detecting UTF-8 vs Windows-1252
+ * and stripping a UTF-8 BOM. Never silently drops rows on bad bytes. */
+async function readTextWithEncodingDetection(file: File): Promise<string> {
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    return file.text();
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    bytes = bytes.slice(3);
+  }
+  try {
+    const strict = new TextDecoder('utf-8', { fatal: true });
+    return strict.decode(bytes);
+  } catch {
+    try {
+      const latin1 = new TextDecoder('windows-1252');
+      return latin1.decode(bytes);
+    } catch {
+      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    }
+  }
 }
 
 function normalizeUniqueValueKey(val: any): string {
@@ -391,9 +635,20 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
 
   const aStr = rowVal === null || rowVal === undefined ? '' : String(rowVal);
   const bStr = targetVal === null || targetVal === undefined ? '' : String(targetVal);
-  const aNum = Number(rowVal);
-  const bNum = Number(targetVal);
-  const bothNum = !Number.isNaN(aNum) && !Number.isNaN(bNum) && aStr.trim() !== '' && bStr.trim() !== '';
+  const aBlank = isBlank(rowVal);
+  const bBlank = isBlank(targetVal);
+  const aNumRaw = aBlank ? null : parseSharedNumber(rowVal);
+  const bNumRaw = bBlank ? null : parseSharedNumber(targetVal);
+  const bothNum = aNumRaw !== null && bNumRaw !== null;
+  const aNum = aNumRaw ?? 0;
+  const bNum = bNumRaw ?? 0;
+  const isOrderOp = ['gt', '>', 'gte', '>=', 'lt', '<', 'lte', '<='].includes(operator);
+  // Empty comparison value on an order operator compares with 0 when the
+  // row value is numeric, else is simply false (SPEC.md).
+  const emptyOrderCase = isOrderOp && bBlank;
+  const orderNumeric = emptyOrderCase ? aNumRaw !== null : bothNum;
+  const aOrd: number | string = orderNumeric ? aNum : aStr.toLowerCase();
+  const bOrd: number | string = orderNumeric ? (emptyOrderCase ? 0 : bNum) : bStr.toLowerCase();
 
   switch (operator) {
     case 'eq':
@@ -413,16 +668,16 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
       return aStr.toLowerCase().endsWith(bStr.toLowerCase());
     case 'gt':
     case '>':
-      return bothNum ? aNum > bNum : aStr > bStr;
+      return emptyOrderCase && aNumRaw === null ? false : aOrd > bOrd;
     case 'gte':
     case '>=':
-      return bothNum ? aNum >= bNum : aStr >= bStr;
+      return emptyOrderCase && aNumRaw === null ? false : aOrd >= bOrd;
     case 'lt':
     case '<':
-      return bothNum ? aNum < bNum : aStr < bStr;
+      return emptyOrderCase && aNumRaw === null ? false : aOrd < bOrd;
     case 'lte':
     case '<=':
-      return bothNum ? aNum <= bNum : aStr <= bStr;
+      return emptyOrderCase && aNumRaw === null ? false : aOrd <= bOrd;
     case 'between': {
       if (Array.isArray(targetVal)) {
         const [low, high] = targetVal.map(Number);
@@ -452,6 +707,10 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
 }
 
 function evaluateFormulaForRow(expression: string, row: Record<string, any>): any {
+  return formulaResultToCell(evaluateFormula(expression, row));
+}
+
+function legacyEvaluateFormulaForRow(expression: string, row: Record<string, any>): any {
   const expr = expression.trim();
   if (!expr) return null;
 
@@ -716,22 +975,40 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
     }
     case 'math_transform': {
       const col1 = p.column1 || p.column || 'amount';
-      const col2 = p.column2 || p.operand || 1;
+      const col2 = p.column2;
       const target = p.output_column || p.target_column || col1 || 'calc_col';
       const mathOp = p.math_operator || '+';
-      const expr =
-        p.expression ||
-        (p.operation === 'arithmetic'
-          ? `"${col1}" ${mathOp} "${col2}"`
-          : `${col1} ${p.operation || '+'} ${p.operand ?? 1}`);
+      const op = p.operation || 'add';
+      const decimals = p.decimals ?? 2;
+      let excelFormula: string;
+      let expr: string;
+      if (op === 'formula' && p.expression) {
+        expr = p.expression.startsWith('=') ? p.expression.slice(1) : p.expression;
+        excelFormula = `=${expr}`;
+      } else if (op === 'arithmetic') {
+        const rhs = col2 ? `[@[${col2}]]` : String(p.operand ?? 1);
+        expr = `"${col1}" ${mathOp} ${col2 ? `"${col2}"` : p.operand ?? 1}`;
+        excelFormula = `=[@[${col1}]] ${mathOp} ${rhs}`;
+      } else if (op === 'round' || op === 'roundup' || op === 'rounddown') {
+        const fn = op.toUpperCase();
+        expr = `${fn}(${col1}, ${decimals})`;
+        excelFormula = `=${fn}([@[${col1}]], ${decimals})`;
+      } else if (op === 'abs') {
+        expr = `ABS(${col1})`;
+        excelFormula = `=ABS([@[${col1}]])`;
+      } else if (op === 'percent_change') {
+        const rhs = col2 ? `[@[${col2}]]` : String(p.operand ?? 0);
+        expr = `(${col2 || p.operand} - "${col1}") / ABS("${col1}") * 100`;
+        excelFormula = `=IFERROR((${rhs} - [@[${col1}]]) / ABS([@[${col1}]]) * 100, "")`;
+      } else {
+        expr = `${col1} ${op} ${p.operand ?? 1}`;
+        excelFormula = `=[@[${col1}]] ${mathOp} ${p.operand ?? 1}`;
+      }
       return {
         sql: `SELECT *, (${expr}) AS "${target}" FROM prev_step`,
         polars: `df = df.with_columns((${expr}).alias("${target}"))`,
         power_query_m: `Table.AddColumn(PrevStep, "${target}", each ${expr})`,
-        excel_formula:
-          p.operation === 'arithmetic'
-            ? `=[@[${col1}]] ${mathOp} [@[${col2}]]`
-            : `=[@[${col1}]]`,
+        excel_formula: excelFormula,
       };
     }
     case 'sort_rows': {
@@ -752,12 +1029,34 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
         : p.group_by
         ? [p.group_by]
         : ['region'];
-      const groups = rawGroups.length > 0 ? rawGroups.join('", "') : '1';
+      const aggs: any[] =
+        Array.isArray(p.aggregations) && p.aggregations.length > 0
+          ? p.aggregations
+          : [{ column: p.agg_column || 'amount', agg_func: p.agg_func || 'sum', output_column: p.alias }];
+      const sqlAggs = aggs
+        .map((a) => `${(a.agg_func || a.function || 'sum').toUpperCase()}("${a.column}") AS "${a.output_column || a.output_name || a.alias || `${a.agg_func || 'sum'}_${a.column}`}"`)
+        .join(', ');
+      const criteria = rawGroups.map((g) => `Table1[${g}], [@[${g}]]`).join(', ');
+      const excelFns: string[] = aggs.map((a) => {
+        const fn = (a.agg_func || a.function || 'sum').toLowerCase();
+        const col = a.column;
+        const fnMap: Record<string, string> = {
+          sum: 'SUMIFS',
+          avg: 'AVERAGEIFS',
+          mean: 'AVERAGEIFS',
+          min: 'MINIFS',
+          max: 'MAXIFS',
+        };
+        if (fn === 'count') return `=COUNTIFS(${criteria})`;
+        if (fn === 'distinct_count') return `=SUMPRODUCT(1/COUNTIFS(Table1[${col}], Table1[${col}]))`;
+        const excelFn = fnMap[fn] || 'SUMIFS';
+        return `=${excelFn}(Table1[${col}], ${criteria})`;
+      });
       return {
-        sql: `SELECT "${groups}", COUNT(*) AS count FROM prev_step GROUP BY "${groups}"`,
-        polars: `df = df.group_by(${JSON.stringify(rawGroups)}).agg(pl.all().sum())`,
-        power_query_m: `Table.Group(PrevStep, {${rawGroups.map((g) => `"${g}"`).join(', ')}}, {{"Total", each List.Sum([amount]), type number}})`,
-        excel_formula: `=SUMIFS(Table1[amount], Table1[${rawGroups[0] || 'region'}], [@[${rawGroups[0] || 'region'}]])`,
+        sql: `SELECT ${rawGroups.map((g) => `"${g}"`).join(', ')}, ${sqlAggs} FROM prev_step GROUP BY ${rawGroups.map((g) => `"${g}"`).join(', ')}`,
+        polars: `df = df.group_by(${JSON.stringify(rawGroups)}).agg(${aggs.map((a) => `pl.col("${a.column}").${(a.agg_func || a.function || 'sum') === 'avg' ? 'mean' : (a.agg_func || a.function || 'sum')}().alias("${a.output_column || a.alias || a.column}")`).join(', ')})`,
+        power_query_m: `Table.Group(PrevStep, {${rawGroups.map((g) => `"${g}"`).join(', ')}}, {${aggs.map((a) => `{"${a.output_column || a.alias || a.column}", each List.${(a.agg_func || 'sum') === 'avg' ? 'Average' : 'Sum'}([${a.column}]), type number}`).join(', ')}})`,
+        excel_formula: excelFns.join(' ; '),
       };
     }
     case 'join': {
@@ -811,27 +1110,50 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
       };
     }
     case 'conditional': {
-      const outCol = p.new_column || p.target_column || 'conditional_col';
-      const firstRule = (p.rules || p.clauses || [])[0] || {};
-      const cCol = firstRule.column || p.column || 'amount';
-      const cVal = firstRule.value ?? p.value ?? '100';
-      const cRes = firstRule.result ?? firstRule.then_value ?? p.then_value ?? 'High';
+      const outCol = p.new_column || p.output_column || p.target_column || 'conditional_col';
+      const rules = (p.rules || p.clauses || []).length
+        ? p.rules || p.clauses
+        : [{ column: p.column || 'amount', operator: p.operator || 'gte', value: p.value ?? '100', result: p.then_value ?? 'High' }];
+      const elseVal = p.else_value ?? 'Other';
+      const opMap: Record<string, string> = { eq: '=', '==': '=', neq: '<>', '!=': '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
+      const quote = (v: any) => (v !== undefined && v !== null && parseSharedNumber(v) !== null ? String(v) : `"${v}"`);
+      const condStr = (c: any) => `[@[${c.column}]]${opMap[c.operator] || '='}${quote(c.value)}`;
+      let excelFormula = '';
+      for (let i = 0; i < rules.length; i++) {
+        excelFormula += `IF(${condStr(rules[i])},${quote(rules[i].result ?? rules[i].then_value)},`;
+      }
+      excelFormula += quote(elseVal) + ')'.repeat(rules.length);
+      const sqlCase = rules
+        .map((c: any) => `WHEN "${c.column}" ${opMap[c.operator] || '='} '${c.value}' THEN '${c.result ?? c.then_value}'`)
+        .join(' ');
       return {
-        sql: `SELECT *, CASE WHEN "${cCol}" >= '${cVal}' THEN '${cRes}' ELSE '${p.else_value ?? 'Standard'}' END AS "${outCol}" FROM prev_step`,
-        polars: `df = df.with_columns(pl.when(pl.col("${cCol}") >= "${cVal}").then(pl.lit("${cRes}")).otherwise(pl.lit("${p.else_value ?? 'Standard'}")).alias("${outCol}"))`,
-        power_query_m: `Table.AddColumn(PrevStep, "${outCol}", each if [${cCol}] >= "${cVal}" then "${cRes}" else "${p.else_value ?? 'Standard'}")`,
-        excel_formula: `=IF([@[${cCol}]] >= "${cVal}", "${cRes}", "${p.else_value ?? 'Standard'}")`,
+        sql: `SELECT *, CASE ${sqlCase} ELSE '${elseVal}' END AS "${outCol}" FROM prev_step`,
+        polars: `df = df.with_columns(pl.when(${rules.map((c: any) => `pl.col("${c.column}") ${opMap[c.operator] || '=='} ${JSON.stringify(c.value)}`).join(').then(...).when(')}).then(${JSON.stringify(rules[0].result ?? rules[0].then_value)}).otherwise(${JSON.stringify(elseVal)}).alias("${outCol}"))`,
+        power_query_m: `Table.AddColumn(PrevStep, "${outCol}", each ${rules.map((c: any) => `if [${c.column}] ${opMap[c.operator] || '='} ${quote(c.value)} then ${quote(c.result ?? c.then_value)} else `).join('')}${quote(elseVal)})`,
+        excel_formula: `=${excelFormula}`,
       };
     }
     case 'window_calc': {
-      const fn = (p.calc_type || p.function || p.window_type || 'running_total').toUpperCase();
+      const fn = (p.calc_type || p.function || p.window_type || 'running_total').toLowerCase();
       const valCol = p.value_column || (p.output_column ? p.target_column : p.column) || 'amount';
-      const outCol = p.output_column || (p.value_column ? p.target_column : undefined) || `${fn.toLowerCase()}_${valCol}`;
+      const outCol = p.output_column || (p.value_column ? p.target_column : undefined) || `${fn}_${valCol}`;
+      const partitionCols: string[] = Array.isArray(p.partition_by) ? p.partition_by : [];
+      const partitionSql = partitionCols.length ? ` PARTITION BY ${partitionCols.map((c) => `"${c}"`).join(', ')}` : '';
+      const excelByFn: Record<string, string> = {
+        rank: `=RANK.EQ([@[${p.order_by || valCol}]], Table1[${p.order_by || valCol}], ${p.order_direction === 'desc' ? 0 : 1})`,
+        running_total: `=SUM(Table1[[${valCol}]:[@[${valCol}]]])`,
+        running_avg: `=AVERAGE(Table1[[${valCol}]:[@[${valCol}]]])`,
+        moving_avg: `=AVERAGE(OFFSET([@[${valCol}]], -${Math.max(1, Number(p.window_size ?? 3)) - 1}, 0, ${Math.max(1, Number(p.window_size ?? 3))}, 1))`,
+        lag: `=OFFSET([@[${valCol}]], -${Number(p.offset ?? 1)}, 0)`,
+        lead: `=OFFSET([@[${valCol}]], ${Number(p.offset ?? 1)}, 0)`,
+        row_number: `=ROW()-ROW(Table1[#Headers])`,
+        percent_of_total: `=[@[${valCol}]]/SUM(Table1[${valCol}])`,
+      };
       return {
-        sql: `SELECT *, SUM("${valCol}") OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "${outCol}" FROM prev_step`,
-        polars: `df = df.with_columns(pl.col("${valCol}").cum_sum().alias("${outCol}"))`,
-        power_query_m: `// Window ${fn} on ${valCol} as ${outCol}\nPrevStep`,
-        excel_formula: `=SUM($C$2:C2)`,
+        sql: `SELECT *, ${fn.toUpperCase()}("${valCol}") OVER (${partitionSql.trim()} ORDER BY "${p.order_by || valCol}" ${(p.order_direction || 'asc').toUpperCase()}) AS "${outCol}" FROM prev_step`,
+        polars: `df = df.with_columns(pl.col("${valCol}").${fn === 'running_total' ? 'cum_sum' : fn}().alias("${outCol}"))`,
+        power_query_m: `// Window ${fn} on ${valCol} as ${outCol}${partitionCols.length ? ` partitioned by ${partitionCols.join(', ')}` : ''}\nPrevStep`,
+        excel_formula: excelByFn[fn] || `=SUM($C$2:C2)`,
       };
     }
     case 'pivot': {
@@ -884,12 +1206,89 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
     }
     case 'custom_column': {
       const colName = p.new_column || p.column || p.target_column || 'custom_col';
-      const val = p.value !== undefined ? String(p.value) : p.expression || '';
+      const expr = p.expression || p.formula;
+      if (expr) {
+        const bare = expr.startsWith('=') ? expr.slice(1) : expr;
+        return {
+          sql: `-- Formula Builder expression evaluated by the engine, not translated to SQL verbatim\nSELECT *, (${bare}) AS "${colName}" FROM prev_step`,
+          polars: `# Formula Builder expression: ${bare}\ndf = df.with_columns(pl.lit(None).alias("${colName}"))`,
+          power_query_m: `Table.AddColumn(PrevStep, "${colName}", each /* ${bare} */ null)`,
+          excel_formula: `=${bare}`,
+        };
+      }
+      const val = p.value !== undefined ? String(p.value) : '';
       return {
         sql: `SELECT *, '${val}' AS "${colName}" FROM prev_step`,
         polars: `df = df.with_columns(pl.lit("${val}").alias("${colName}"))`,
         power_query_m: `Table.AddColumn(PrevStep, "${colName}", each "${val}")`,
         excel_formula: `="${val}"`,
+      };
+    }
+    case 'text_transform': {
+      const col = p.column || 'text_col';
+      const op = p.operation || 'upper';
+      const target = p.output_column || p.target_column || col;
+      const excelByOp: Record<string, string> = {
+        upper: `=UPPER([@[${col}]])`,
+        uppercase: `=UPPER([@[${col}]])`,
+        lower: `=LOWER([@[${col}]])`,
+        lowercase: `=LOWER([@[${col}]])`,
+        trim: `=TRIM([@[${col}]])`,
+        clean: `=CLEAN(TRIM([@[${col}]]))`,
+        title: `=PROPER([@[${col}]])`,
+        proper: `=PROPER([@[${col}]])`,
+        left: `=LEFT([@[${col}]], ${p.length ?? 5})`,
+        right: `=RIGHT([@[${col}]], ${p.length ?? 5})`,
+        mid: `=MID([@[${col}]], ${p.start ?? 1}, ${p.length ?? 5})`,
+        length: `=LEN([@[${col}]])`,
+        concat: `=[@[${col}]]&"${p.concat_separator ?? ' '}"&${(p.concat_columns || []).map((c: string) => `[@[${c}]]`).join('&')}`,
+      };
+      return {
+        sql: `SELECT *, ${op.toUpperCase()}("${col}") AS "${target}" FROM prev_step`,
+        polars: `df = df.with_columns(pl.col("${col}").str.${op === 'upper' ? 'to_uppercase' : op === 'lower' ? 'to_lowercase' : op}().alias("${target}"))`,
+        power_query_m: `Table.TransformColumns(PrevStep, {{"${col}", Text.${op === 'upper' ? 'Upper' : op === 'lower' ? 'Lower' : 'Proper'}, type text}})`,
+        excel_formula: excelByOp[op] || `=TRIM([@[${col}]])`,
+      };
+    }
+    case 'date_transform': {
+      const col = p.column || 'date_col';
+      const op = p.operation || p.part || 'extract_part';
+      const datePart = p.date_part || p.part || 'year';
+      const target = p.output_column || p.target_column || `${col}_${datePart}`;
+      const excelByOp: Record<string, string> = {
+        eomonth: `=EOMONTH([@[${col}]], ${p.amount ?? 0})`,
+        datedif: `=DATEDIF([@[${col}]], [@[${p.second_column || 'end_date'}]], "${(p.unit || 'd')[0]}")`,
+        networkdays: `=NETWORKDAYS([@[${col}]], [@[${p.second_column || 'end_date'}]])`,
+        add_time: `=EDATE([@[${col}]], ${p.unit === 'month' ? p.amount ?? 0 : p.unit === 'year' ? (p.amount ?? 0) * 12 : 0})${p.unit === 'day' ? ` + ${p.amount ?? 0}` : ''}`,
+        fiscal_year: `="FY"&(YEAR([@[${col}]])+IF(MONTH([@[${col}]])>=${p.fiscal_start_month ?? 4},1,0))`,
+        extract_part:
+          datePart === 'year'
+            ? `=YEAR([@[${col}]])`
+            : datePart === 'month'
+            ? `=MONTH([@[${col}]])`
+            : datePart === 'day'
+            ? `=DAY([@[${col}]])`
+            : datePart === 'weekday'
+            ? `=WEEKDAY([@[${col}]], 1)-1`
+            : datePart === 'week'
+            ? `=WEEKNUM([@[${col}]], 1)`
+            : `=TEXT([@[${col}]], "yyyy-mm-dd")`,
+      };
+      return {
+        sql: `SELECT *, ${op === 'extract_part' ? `EXTRACT(${datePart} FROM "${col}")` : `${op.toUpperCase()}("${col}")`} AS "${target}" FROM prev_step`,
+        polars: `df = df.with_columns(pl.col("${col}").dt.${datePart === 'year' ? 'year' : datePart === 'month' ? 'month' : datePart === 'day' ? 'day' : 'strftime("%Y-%m-%d")'}().alias("${target}"))`,
+        power_query_m: `Table.AddColumn(PrevStep, "${target}", each Date.${datePart === 'year' ? 'Year' : datePart === 'month' ? 'Month' : 'Day'}([${col}]))`,
+        excel_formula: excelByOp[op] || excelByOp.extract_part,
+      };
+    }
+    case 'remove_duplicates': {
+      const cols: string[] = Array.isArray(p.columns) && p.columns.length > 0 ? p.columns : ['*all columns*'];
+      const keep = p.keep_mode || p.keep || 'first';
+      return {
+        sql: `SELECT DISTINCT ON (${cols.map((c) => `"${c}"`).join(', ')}) * FROM prev_step`,
+        polars: `df = df.unique(subset=${JSON.stringify(cols)}, keep="${keep === 'last' ? 'last' : 'first'}")`,
+        power_query_m: `Table.Distinct(PrevStep, {${cols.map((c) => `"${c}"`).join(', ')}})`,
+        excel_formula: `=UNIQUE(Table1, FALSE, FALSE)  // key columns: ${cols.join(', ')}, keep=${keep}`,
       };
     }
     case 'remove_column': {
@@ -1048,16 +1447,22 @@ function executePipelineSteps(
         if (col) {
           rows = rows.map((r) => {
             const val = r[col];
-            if (val === null || val === undefined || val === '') return { ...r, [col]: null };
+            if (isBlank(val)) return { ...r, [col]: null };
             let nextVal: any = val;
             if (targetType === 'integer') {
-              const parsed = parseInt(String(val), 10);
-              nextVal = Number.isNaN(parsed) ? null : parsed;
+              const parsed = parseSharedNumber(val);
+              // integer truncates only if the value is a whole number, else blank (SPEC.md)
+              nextVal = parsed !== null && Number.isInteger(parsed) ? parsed : null;
             } else if (targetType === 'float') {
-              const parsed = Number(val);
-              nextVal = Number.isNaN(parsed) ? null : parsed;
+              nextVal = parseSharedNumber(val);
             } else if (targetType === 'boolean') {
-              nextVal = String(val).toLowerCase() === 'true' || val === 1 || val === '1';
+              const s = String(val).trim().toLowerCase();
+              if (['true', 'yes', 'y', '1'].includes(s)) nextVal = true;
+              else if (['false', 'no', 'n', '0'].includes(s)) nextVal = false;
+              else nextVal = null;
+            } else if (targetType === 'date') {
+              const d = parseSharedDate(val, { asDateStep: true });
+              nextVal = d ? toISODate(d) : null;
             } else {
               nextVal = String(val);
             }
@@ -1134,18 +1539,18 @@ function executePipelineSteps(
         if (keep === 'duplicates_only') {
           const counts = new Map<string, number>();
           rows.forEach((r) => {
-            const key = cols.map((c) => String(r[c] ?? '')).join('||');
+            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
             counts.set(key, (counts.get(key) || 0) + 1);
           });
           rows = rows.filter((r) => {
-            const key = cols.map((c) => String(r[c] ?? '')).join('||');
+            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
             return (counts.get(key) || 0) > 1;
           });
         } else if (keep === 'last') {
           const reversed: Record<string, any>[] = [];
           for (let i = rows.length - 1; i >= 0; i--) {
             const r = rows[i];
-            const key = cols.map((c) => String(r[c] ?? '')).join('||');
+            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
             if (!seen.has(key)) {
               seen.add(key);
               reversed.push(r);
@@ -1154,7 +1559,7 @@ function executePipelineSteps(
           rows = reversed.reverse();
         } else {
           rows = rows.filter((r) => {
-            const key = cols.map((c) => String(r[c] ?? '')).join('||');
+            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -1265,7 +1670,7 @@ function executePipelineSteps(
         const col2 = p.column2;
         const op = p.operation || 'add';
         const mathOp = p.math_operator || '+';
-        const operand = Number(p.operand ?? 0);
+        const operand = p.operand !== undefined && p.operand !== '' ? parseSharedNumber(p.operand) : null;
         const decimals = p.decimals !== undefined ? Number(p.decimals) : 2;
         const targetCol = p.output_column || p.target_column || col1 || 'calculated';
 
@@ -1273,9 +1678,12 @@ function executePipelineSteps(
           if (op === 'formula' && p.expression) {
             return { ...r, [targetCol]: evaluateFormulaForRow(p.expression, r) };
           }
-          const v1 = Number(r[col1] ?? 0) || 0;
+
+          const raw1 = r[col1];
+          const v1 = isBlank(raw1) ? null : parseSharedNumber(raw1);
 
           if (op === 'bin') {
+            if (v1 === null) return { ...r, [targetCol]: null };
             const bins: Array<{ max: number; label: string }> = Array.isArray(p.bins) ? p.bins : [];
             const sortedBins = [...bins].sort((a, b) => Number(a.max) - Number(b.max));
             for (const b of sortedBins) {
@@ -1286,45 +1694,59 @@ function executePipelineSteps(
             return { ...r, [targetCol]: p.bin_other || 'High' };
           }
 
-          let res = v1;
+          if (op === 'clean_numeric') {
+            const num = parseSharedNumber(raw1);
+            return { ...r, [targetCol]: num === null ? null : cleanFloat(num) };
+          }
+
+          if (op === 'abs') {
+            return { ...r, [targetCol]: v1 === null ? null : Math.abs(v1) };
+          }
+          if (op === 'round') {
+            if (v1 === null) return { ...r, [targetCol]: null };
+            const d = p.decimals !== undefined ? decimals : operand ?? 0;
+            return { ...r, [targetCol]: roundHalfAwayFromZero(v1, d) };
+          }
+          if (op === 'roundup') {
+            if (v1 === null) return { ...r, [targetCol]: null };
+            const d = p.decimals !== undefined ? decimals : operand ?? 0;
+            return { ...r, [targetCol]: roundUpAwayFromZero(v1, d) };
+          }
+          if (op === 'rounddown') {
+            if (v1 === null) return { ...r, [targetCol]: null };
+            const d = p.decimals !== undefined ? decimals : operand ?? 0;
+            return { ...r, [targetCol]: roundDownTowardZero(v1, d) };
+          }
+
+          if (v1 === null) return { ...r, [targetCol]: null };
+
+          let res: number | null = v1;
           if (op === 'arithmetic') {
-            const v2 = col2 && col2 in r ? Number(r[col2] ?? 0) || 0 : Number(col2 ?? operand) || 0;
+            const raw2 = col2 && col2 in r ? r[col2] : col2;
+            const v2 = isBlank(raw2) ? (operand ?? 0) : parseSharedNumber(raw2);
+            if (v2 === null) return { ...r, [targetCol]: null };
             if (mathOp === '+') res = v1 + v2;
             else if (mathOp === '-') res = v1 - v2;
             else if (mathOp === '*') res = v1 * v2;
-            else if (mathOp === '/') res = v2 !== 0 ? v1 / v2 : 0;
+            else if (mathOp === '/') res = v2 !== 0 ? v1 / v2 : null; // DIV/0 -> blank in steps (SPEC.md)
           } else if (op === 'percent_change') {
-            const v2 = col2 && col2 in r ? Number(r[col2] ?? 0) || 0 : operand;
-            res = v1 !== 0 ? ((v2 - v1) / Math.abs(v1)) * 100 : 0;
+            const raw2 = col2 && col2 in r ? r[col2] : col2;
+            const v2 = isBlank(raw2) ? (operand ?? 0) : parseSharedNumber(raw2);
+            if (v2 === null) return { ...r, [targetCol]: null };
+            res = v1 !== 0 ? ((v2 - v1) / Math.abs(v1)) * 100 : null;
+            if (res !== null) return { ...r, [targetCol]: roundHalfAwayFromZero(res, decimals) };
+            return { ...r, [targetCol]: null };
           } else if (op === 'add' || op === '+') {
-            res = v1 + operand;
+            res = v1 + (operand ?? 0);
           } else if (op === 'subtract' || op === '-') {
-            res = v1 - operand;
+            res = v1 - (operand ?? 0);
           } else if (op === 'multiply' || op === '*') {
-            res = v1 * operand;
+            res = v1 * (operand ?? 0);
           } else if (op === 'divide' || op === '/') {
-            res = operand !== 0 ? v1 / operand : 0;
-          } else if (op === 'round') {
-            const d = p.decimals !== undefined ? decimals : operand || 0;
-            return { ...r, [targetCol]: Number(v1.toFixed(Math.max(0, Math.min(10, d)))) };
-          } else if (op === 'roundup') {
-            return { ...r, [targetCol]: Math.ceil(v1) };
-          } else if (op === 'rounddown') {
-            return { ...r, [targetCol]: Math.floor(v1) };
-          } else if (op === 'abs') {
-            return { ...r, [targetCol]: Math.abs(v1) };
-          } else if (op === 'clean_numeric') {
-            const raw = String(r[col1] ?? '').trim();
-            const isPercent = raw.includes('%');
-            const cleaned = raw.replace(/[$€£¥, ]/g, '').replace(/%/g, '');
-            let num = Number(cleaned);
-            if (Number.isNaN(num)) num = 0;
-            if (isPercent) num = num / 100;
-            return { ...r, [targetCol]: num };
+            res = operand !== null && operand !== 0 ? v1 / operand : null;
           }
 
-          const d = Number.isFinite(decimals) ? Math.max(0, Math.min(10, decimals)) : 4;
-          return { ...r, [targetCol]: Number.isFinite(res) ? Number(res.toFixed(d)) : null };
+          return { ...r, [targetCol]: res === null ? null : cleanFloat(res) };
         });
         break;
       }
@@ -1339,10 +1761,10 @@ function executePipelineSteps(
             let out: any = s;
             if (op === 'upper' || op === 'uppercase') out = s.toUpperCase();
             else if (op === 'lower' || op === 'lowercase') out = s.toLowerCase();
-            else if (op === 'trim') out = s.trim();
+            else if (op === 'trim') out = trimCollapse(s);
             else if (op === 'clean') out = s.replace(/[\x00-\x1F\x7F]/g, '').trim();
             else if (op === 'title' || op === 'proper') {
-              out = s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+              out = properCase(s);
             } else if (op === 'left') {
               const len = Math.max(0, Number(p.length ?? 5));
               out = s.slice(0, len);
@@ -1396,68 +1818,46 @@ function executePipelineSteps(
 
         if (col) {
           rows = rows.map((r) => {
-            const d = new Date(String(r[col] ?? ''));
-            if (Number.isNaN(d.getTime())) return { ...r, [targetCol]: null };
+            const d = parseSharedDate(r[col], { asDateStep: true });
+            if (!d) return { ...r, [targetCol]: null };
             let out: any = null;
 
             if (op === 'eomonth') {
-              const eom = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
-              out = eom.toISOString().slice(0, 10);
+              out = toISODate(eomonth(d, Number(p.amount ?? 0)));
             } else if (op === 'datedif') {
               const secCol = p.second_column;
-              const d2 = secCol && r[secCol] ? new Date(String(r[secCol])) : new Date();
-              if (Number.isNaN(d2.getTime())) {
-                out = null;
+              const d2 = secCol ? parseSharedDate(r[secCol], { asDateStep: true }) : null;
+              if (!d2) {
+                out = null; // blank/unparseable second date -> blank, never "today" (SPEC.md)
               } else {
-                const diffDays = Math.round((d2.getTime() - d.getTime()) / 86400000);
-                const unit = p.unit || 'day';
-                if (unit === 'year') out = Number((diffDays / 365.25).toFixed(1));
-                else if (unit === 'month') out = Number((diffDays / 30.4375).toFixed(1));
-                else out = diffDays;
+                out = datedif(d, d2, p.unit || 'day');
               }
             } else if (op === 'networkdays') {
               const secCol = p.second_column;
-              const d2 = secCol && r[secCol] ? new Date(String(r[secCol])) : new Date();
-              if (Number.isNaN(d2.getTime())) {
-                out = null;
-              } else {
-                let start = new Date(Math.min(d.getTime(), d2.getTime()));
-                const end = new Date(Math.max(d.getTime(), d2.getTime()));
-                let workDays = 0;
-                while (start <= end) {
-                  const day = start.getUTCDay();
-                  if (day !== 0 && day !== 6) workDays++;
-                  start.setUTCDate(start.getUTCDate() + 1);
-                }
-                out = d.getTime() > d2.getTime() ? -workDays : workDays;
-              }
+              const d2 = secCol ? parseSharedDate(r[secCol], { asDateStep: true }) : null;
+              out = d2 ? networkdays(d, d2) : null;
             } else if (op === 'add_time') {
               const amt = Number(p.amount ?? 0);
               const unit = p.unit || 'day';
-              const copy = new Date(d.getTime());
-              if (unit === 'year') copy.setUTCFullYear(copy.getUTCFullYear() + amt);
-              else if (unit === 'month') copy.setUTCMonth(copy.getUTCMonth() + amt);
-              else copy.setUTCDate(copy.getUTCDate() + amt);
-              out = copy.toISOString().slice(0, 10);
+              if (unit === 'year') out = toISODate(addYearsClamped(d, amt));
+              else if (unit === 'month') out = toISODate(addMonthsClamped(d, amt));
+              else {
+                const copy = new Date(d.getTime());
+                copy.setUTCDate(copy.getUTCDate() + amt);
+                out = toISODate(copy);
+              }
             } else if (op === 'fiscal_year') {
-              const startMonth = Number(p.fiscal_start_month ?? 4);
-              const m = d.getUTCMonth() + 1;
-              const y = d.getUTCFullYear();
-              const fy = m >= startMonth && startMonth > 1 ? y + 1 : y;
-              out = `FY${fy}`;
+              out = fiscalYearLabel(d, Number(p.fiscal_start_month ?? 4));
             } else {
               // extract_part or legacy year/month/day/quarter
               if (datePart === 'year') out = d.getUTCFullYear();
               else if (datePart === 'month') out = d.getUTCMonth() + 1;
               else if (datePart === 'day') out = d.getUTCDate();
               else if (datePart === 'quarter') out = Math.floor(d.getUTCMonth() / 3) + 1;
-              else if (datePart === 'week') {
-                const startOfYear = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-                const days = Math.floor((d.getTime() - startOfYear.getTime()) / 86400000);
-                out = Math.ceil((days + startOfYear.getUTCDay() + 1) / 7);
-              } else if (datePart === 'day_name') out = dayNames[d.getUTCDay()];
-              else if (datePart === 'weekday') out = d.getUTCDay();
-              else out = d.toISOString().slice(0, 10);
+              else if (datePart === 'week') out = excelWeekNum(d);
+              else if (datePart === 'day_name') out = dayNames[weekdaySun0(d)];
+              else if (datePart === 'weekday') out = weekdaySun0(d);
+              else out = toISODate(d);
             }
 
             return { ...r, [targetCol]: out };
@@ -1477,13 +1877,18 @@ function executePipelineSteps(
           },
         ];
         const elseVal = p.else_value ?? 'Other';
+        // If every rule result and the else value parse as numbers, the
+        // output column is numeric (SPEC.md).
+        const allOutcomes = [...clauses.map((c: any) => c.result ?? c.then_value), elseVal];
+        const allNumeric = allOutcomes.every((v) => v !== undefined && v !== null && parseSharedNumber(v) !== null);
+        const coerce = (v: any) => (allNumeric ? parseSharedNumber(v) : v);
         rows = rows.map((r) => {
           for (const c of clauses) {
             if (c && c.column && evaluateRowCondition(r[c.column], c.operator || 'eq', c.value)) {
-              return { ...r, [targetCol]: c.result ?? c.then_value ?? 'True' };
+              return { ...r, [targetCol]: coerce(c.result ?? c.then_value ?? 'True') };
             }
           }
-          return { ...r, [targetCol]: elseVal };
+          return { ...r, [targetCol]: coerce(elseVal) };
         });
         break;
       }
@@ -1516,7 +1921,7 @@ function executePipelineSteps(
 
         const groups = new Map<string, Record<string, any>[]>();
         rows.forEach((r) => {
-          const key = groupCols.length > 0 ? groupCols.map((c) => String(r[c] ?? '')).join('||') : '__ALL__';
+          const key = groupCols.length > 0 ? groupCols.map((c) => String(r[c] ?? '').toLowerCase()).join('||') : '__ALL__';
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key)!.push(r);
         });
@@ -1530,15 +1935,31 @@ function executePipelineSteps(
           aggs.forEach((agg) => {
             const fn = (agg.agg_func || agg.function || 'sum').toLowerCase();
             const alias = agg.output_column || agg.output_name || agg.alias || `${fn}_${agg.column}`;
-            const rawVals = gRows.map((x) => x[agg.column]).filter((v) => v !== null && v !== undefined && v !== '');
-            const nums = rawVals.map((x) => Number(x)).filter((n) => !Number.isNaN(n));
-            if (fn === 'count') base[alias] = gRows.length;
-            else if (fn === 'distinct_count') base[alias] = new Set(rawVals.map((v) => String(v))).size;
-            else if (fn === 'sum') base[alias] = Number(nums.reduce((a, b) => a + b, 0).toFixed(2));
+            const rawVals = gRows.map((x) => x[agg.column]).filter((v) => !isBlank(v));
+            const nums = rawVals.map((x) => parseSharedNumber(x)).filter((n): n is number => n !== null);
+            if (fn === 'count') base[alias] = rawVals.length;
+            else if (fn === 'distinct_count') base[alias] = new Set(rawVals.map((v) => String(v).toLowerCase())).size;
+            else if (fn === 'sum') base[alias] = nums.length ? cleanFloat(nums.reduce((a, b) => a + b, 0)) : null;
             else if (fn === 'avg' || fn === 'mean')
-              base[alias] = nums.length ? Number((nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2)) : 0;
-            else if (fn === 'min') base[alias] = nums.length ? Math.min(...nums) : (rawVals[0] ?? null);
-            else if (fn === 'max') base[alias] = nums.length ? Math.max(...nums) : (rawVals[rawVals.length - 1] ?? null);
+              base[alias] = nums.length ? cleanFloat(nums.reduce((a, b) => a + b, 0) / nums.length) : null;
+            else if (fn === 'min' || fn === 'max') {
+              if (rawVals.length === 0) {
+                base[alias] = null;
+              } else if (nums.length === rawVals.length) {
+                base[alias] = fn === 'min' ? Math.min(...nums) : Math.max(...nums);
+              } else {
+                const dates = rawVals.map((v) => parseSharedDate(v));
+                if (dates.every((d) => d !== null)) {
+                  const sorted = rawVals
+                    .map((v, i) => ({ v, t: (dates[i] as Date).getTime() }))
+                    .sort((a, b) => a.t - b.t);
+                  base[alias] = fn === 'min' ? sorted[0].v : sorted[sorted.length - 1].v;
+                } else {
+                  const sorted = [...rawVals].sort((a, b) => String(a).localeCompare(String(b)));
+                  base[alias] = fn === 'min' ? sorted[0] : sorted[sorted.length - 1];
+                }
+              }
+            }
           });
           groupedRows.push(base);
         });
@@ -1552,28 +1973,20 @@ function executePipelineSteps(
         const outCol =
           p.output_column || (p.value_column ? p.target_column : undefined) || `${fn}_${valCol}`;
         const partitionCols: string[] = Array.isArray(p.partition_by) ? p.partition_by.filter(Boolean) : [];
-        const orderCol: string | undefined = p.order_by;
+        const orderCol: string | undefined = p.order_by || undefined;
         const orderDir = (p.order_direction || 'asc').toLowerCase();
         const winSize = Math.max(1, Number(p.window_size ?? 3));
         const offsetCount = Math.max(1, Number(p.offset ?? 1));
+        // For rank, the ranking value is order_by's column when given,
+        // otherwise target_column (SPEC.md).
+        const rankCol = fn === 'rank' && orderCol ? orderCol : valCol;
 
-        // Optional sort by order_by before window calculation
-        if (orderCol) {
-          rows.sort((a, b) => {
-            const va = a[orderCol];
-            const vb = b[orderCol];
-            if (va === vb) return 0;
-            if (va === null || va === undefined) return 1;
-            if (vb === null || vb === undefined) return -1;
-            const cmp =
-              typeof va === 'number' && typeof vb === 'number'
-                ? va - vb
-                : String(va).localeCompare(String(vb), undefined, { numeric: true });
-            return orderDir === 'desc' ? -cmp : cmp;
-          });
-        }
+        // Window steps never change row order (SPEC.md): compute against an
+        // "evaluation order" of original indices, then write results back
+        // into the untouched `rows` array.
+        const nextRows = rows.map((r) => ({ ...r }));
 
-        // Partition rows into groups while preserving original index
+        // Partition original-index positions, preserving file order.
         const partitions = new Map<string, number[]>();
         rows.forEach((r, idx) => {
           const key =
@@ -1584,39 +1997,93 @@ function executePipelineSteps(
           partitions.get(key)!.push(idx);
         });
 
-        const nextRows = rows.map((r) => ({ ...r }));
-        partitions.forEach((indices) => {
-          const groupTotal = indices.reduce(
-            (acc, rIdx) => acc + (Number(nextRows[rIdx][valCol] ?? 0) || 0),
-            0
-          );
+        const sortIndices = (indices: number[], byCol: string | undefined): number[] => {
+          if (!byCol) return indices;
+          const withKey = indices.map((idx) => ({
+            idx,
+            num: parseSharedNumber(rows[idx][byCol]),
+            raw: rows[idx][byCol],
+          }));
+          withKey.sort((a, b) => {
+            const aBlank = isBlank(a.raw);
+            const bBlank = isBlank(b.raw);
+            if (aBlank && bBlank) return 0;
+            if (aBlank) return 1;
+            if (bBlank) return -1;
+            let cmp: number;
+            if (a.num !== null && b.num !== null) cmp = a.num - b.num;
+            else cmp = String(a.raw).localeCompare(String(b.raw), undefined, { numeric: true });
+            return orderDir === 'desc' ? -cmp : cmp;
+          });
+          return withKey.map((w) => w.idx);
+        };
+
+        partitions.forEach((originalIndices) => {
+          const evalOrder = sortIndices(originalIndices, orderCol);
+
+          if (fn === 'rank') {
+            // Dense rank with ties sharing a rank; direction honoured;
+            // blank values get a blank rank.
+            const ranked = originalIndices
+              .filter((idx) => !isBlank(rows[idx][rankCol]))
+              .map((idx) => ({ idx, num: parseSharedNumber(rows[idx][rankCol]), raw: rows[idx][rankCol] }));
+            ranked.sort((a, b) => {
+              let cmp: number;
+              if (a.num !== null && b.num !== null) cmp = a.num - b.num;
+              else cmp = String(a.raw).localeCompare(String(b.raw), undefined, { numeric: true });
+              return orderDir === 'desc' ? -cmp : cmp;
+            });
+            let rank = 0;
+            let prevKey: string | null = null;
+            ranked.forEach(({ idx, num, raw }) => {
+              const key = num !== null ? String(num) : String(raw);
+              if (key !== prevKey) {
+                rank++;
+                prevKey = key;
+              }
+              nextRows[idx][outCol] = rank;
+            });
+            originalIndices.forEach((idx) => {
+              if (isBlank(rows[idx][rankCol])) nextRows[idx][outCol] = null;
+            });
+            return;
+          }
+
+          const numAt = (idx: number): number | null => {
+            const v = rows[idx][valCol];
+            return isBlank(v) ? null : parseSharedNumber(v);
+          };
+          const groupNums = evalOrder.map((idx) => numAt(idx)).filter((n): n is number => n !== null);
+          const groupTotal = groupNums.reduce((a, b) => a + b, 0);
           let running = 0;
-          indices.forEach((rIdx, pos) => {
-            const v = Number(nextRows[rIdx][valCol] ?? 0) || 0;
-            running += v;
-            if (fn === 'row_number' || fn === 'rank') {
-              nextRows[rIdx][outCol] = pos + 1;
+          let runningCount = 0;
+
+          evalOrder.forEach((idx, pos) => {
+            const v = numAt(idx);
+            if (v !== null) {
+              running += v;
+              runningCount++;
+            }
+            if (fn === 'row_number') {
+              nextRows[idx][outCol] = pos + 1;
             } else if (fn === 'percent_of_total') {
-              nextRows[rIdx][outCol] =
-                groupTotal !== 0 ? Number(((v / groupTotal) * 100).toFixed(2)) : 0;
-            } else if (fn === 'moving_avg' || fn === 'running_avg') {
-              const startPos = fn === 'moving_avg' ? Math.max(0, pos - winSize + 1) : 0;
-              const sliceIdx = indices.slice(startPos, pos + 1);
-              const sliceSum = sliceIdx.reduce(
-                (acc, sIdx) => acc + (Number(nextRows[sIdx][valCol] ?? 0) || 0),
-                0
-              );
-              nextRows[rIdx][outCol] = Number((sliceSum / sliceIdx.length).toFixed(2));
+              nextRows[idx][outCol] = v === null || groupTotal === 0 ? null : cleanFloat((v / groupTotal) * 100);
+            } else if (fn === 'moving_avg') {
+              const startPos = Math.max(0, pos - winSize + 1);
+              const sliceIdx = evalOrder.slice(startPos, pos + 1);
+              const sliceNums = sliceIdx.map((sIdx) => numAt(sIdx)).filter((n): n is number => n !== null);
+              nextRows[idx][outCol] = sliceNums.length ? cleanFloat(sliceNums.reduce((a, b) => a + b, 0) / sliceNums.length) : null;
+            } else if (fn === 'running_avg') {
+              nextRows[idx][outCol] = runningCount ? cleanFloat(running / runningCount) : null;
             } else if (fn === 'lag') {
-              const prevIdx = pos - offsetCount >= 0 ? indices[pos - offsetCount] : -1;
-              nextRows[rIdx][outCol] = prevIdx >= 0 ? (nextRows[prevIdx][valCol] ?? null) : null;
+              const prevIdx = pos - offsetCount >= 0 ? evalOrder[pos - offsetCount] : -1;
+              nextRows[idx][outCol] = prevIdx >= 0 ? rows[prevIdx][valCol] ?? null : null;
             } else if (fn === 'lead') {
-              const nextIdx =
-                pos + offsetCount < indices.length ? indices[pos + offsetCount] : -1;
-              nextRows[rIdx][outCol] = nextIdx >= 0 ? (nextRows[nextIdx][valCol] ?? null) : null;
+              const nextIdx = pos + offsetCount < evalOrder.length ? evalOrder[pos + offsetCount] : -1;
+              nextRows[idx][outCol] = nextIdx >= 0 ? rows[nextIdx][valCol] ?? null : null;
             } else {
               // running_total / running_sum
-              nextRows[rIdx][outCol] = Number(running.toFixed(2));
+              nextRows[idx][outCol] = runningCount ? cleanFloat(running) : null;
             }
           });
         });
@@ -1642,23 +2109,27 @@ function executePipelineSteps(
               : rows;
 
           const overallSum = workingRows.reduce((acc, r) => {
-            const n = Number(r[valCol]);
-            return acc + (Number.isNaN(n) ? 0 : n);
+            const n = isBlank(r[valCol]) ? null : parseSharedNumber(r[valCol]);
+            return acc + (n ?? 0);
           }, 0);
 
-          const computeAgg = (subset: Record<string, any>[]): number => {
-            if (subset.length === 0) return 0;
+          const computeAgg = (subset: Record<string, any>[]): number | null => {
+            if (subset.length === 0) return null;
             if (aggFn === 'count') return subset.length;
-            const nums = subset.map((m) => Number(m[valCol])).filter((n) => !Number.isNaN(n));
-            if (nums.length === 0) return 0;
+            const nums = subset
+              .map((m) => m[valCol])
+              .filter((v) => !isBlank(v))
+              .map((v) => parseSharedNumber(v))
+              .filter((n): n is number => n !== null);
+            if (nums.length === 0) return null;
             const sum = nums.reduce((a, b) => a + b, 0);
-            if (aggFn === 'avg') return Number((sum / nums.length).toFixed(2));
+            if (aggFn === 'avg') return cleanFloat(sum / nums.length);
             if (aggFn === 'min') return Math.min(...nums);
             if (aggFn === 'max') return Math.max(...nums);
             if (aggFn === 'pct_total') {
-              return overallSum !== 0 ? Number(((sum / overallSum) * 100).toFixed(2)) : 0;
+              return overallSum !== 0 ? cleanFloat((sum / overallSum) * 100) : null;
             }
-            return Number(sum.toFixed(2));
+            return cleanFloat(sum);
           };
 
           const pivotValues = pivotCol
@@ -1671,8 +2142,15 @@ function executePipelineSteps(
                       : String(v);
                   })
                 )
-              ).slice(0, 25)
+              )
             : [`${aggFn.toUpperCase()}_${valCol}`];
+
+          // No silent column cap: fail clearly instead (SPEC.md).
+          if (pivotValues.length > 200) {
+            throw new Error(
+              `Pivot would produce ${pivotValues.length} columns, which is over the 200-column limit. Filter the data or choose a different pivot column.`
+            );
+          }
 
           const groups = new Map<string, Record<string, any>[]>();
           workingRows.forEach((r) => {
@@ -1779,7 +2257,7 @@ function executePipelineSteps(
 
       case 'xlookup': {
         const rightId = p.lookup_dataset_id || p.right_dataset_id;
-        const rightDs = allDatasets.find((d) => d.meta.id === rightId) || allDatasets[1] || allDatasets[0];
+        const rightDs = allDatasets.find((d) => d.meta.id === rightId);
         if (rightDs) {
           const leftKey = p.left_key_col || p.lookup_column || p.left_key || p.lookup_key || 'customer_id';
           const rightKey =
@@ -1798,14 +2276,16 @@ function executePipelineSteps(
 
           const lookupMap = new Map<string, Record<string, any>>();
           orderedRightRows.forEach((rr) => {
-            const k = String(rr[rightKey] ?? '').trim();
+            if (isBlank(rr[rightKey])) return;
+            const k = String(rr[rightKey]).trim().toLowerCase();
             if (!lookupMap.has(k)) {
               lookupMap.set(k, rr);
             }
           });
 
           const findXlookupMatch = (rawVal: any): Record<string, any> | undefined => {
-            const keyStr = String(rawVal ?? '').trim();
+            if (isBlank(rawVal)) return undefined;
+            const keyStr = String(rawVal).trim().toLowerCase();
             const exact = lookupMap.get(keyStr);
             if (exact || matchMode === 0) return exact;
 
@@ -1859,7 +2339,7 @@ function executePipelineSteps(
                     : col in merged && col !== rightKey
                     ? `lookup_${col}`
                     : col;
-                merged[targetName] = match ? (match[col] ?? fallback) : fallback;
+                merged[targetName] = match ? (match[col] ?? null) : fallback;
               });
             } else if (match) {
               Object.keys(match).forEach((k) => {
@@ -1876,7 +2356,7 @@ function executePipelineSteps(
 
       case 'vlookup': {
         const rightId = p.lookup_dataset_id || p.right_dataset_id;
-        const rightDs = allDatasets.find((d) => d.meta.id === rightId) || allDatasets[1] || allDatasets[0];
+        const rightDs = allDatasets.find((d) => d.meta.id === rightId);
         if (rightDs) {
           const leftKey = p.left_key_col || p.lookup_column || p.left_key || p.lookup_key || 'customer_id';
           const rightSchema = rightDs.meta.schema_metadata || [];
@@ -1885,8 +2365,8 @@ function executePipelineSteps(
           const colIdx1 = Math.max(1, Number(p.col_index_num ?? 2));
           const resolvedColFromIndex = rightSchema[colIdx1 - 1]?.name;
           const retCol =
-            p.return_column ||
             resolvedColFromIndex ||
+            p.return_column ||
             (Array.isArray(p.return_columns) ? p.return_columns[0] : undefined) ||
             rightSchema[Math.min(1, rightSchema.length - 1)]?.name ||
             rightKey;
@@ -1899,32 +2379,36 @@ function executePipelineSteps(
 
           const exactMap = new Map<string, Record<string, any>>();
           rightDs.rows.forEach((rr) => {
-            const k = String(rr[rightKey] ?? '').trim();
+            if (isBlank(rr[rightKey])) return;
+            const k = String(rr[rightKey]).trim().toLowerCase();
             if (!exactMap.has(k)) {
               exactMap.set(k, rr);
             }
           });
 
           const findVlookupMatch = (rawVal: any): Record<string, any> | undefined => {
-            const keyStr = String(rawVal ?? '').trim();
+            if (isBlank(rawVal)) return undefined;
+            const keyStr = String(rawVal).trim().toLowerCase();
             const exact = exactMap.get(keyStr);
             if (exact || !rangeLookup) return exact;
 
-            // Approximate match (TRUE): largest key <= lookup_value
-            const numVal = Number(keyStr);
-            if (!Number.isNaN(numVal)) {
+            // Approximate match (TRUE): largest key <= lookup_value.
+            // Numeric keys are compared numerically only; never fall back
+            // to text comparison for numeric keys (SPEC.md).
+            const numVal = parseSharedNumber(rawVal);
+            if (numVal !== null) {
               const smaller = rightDs.rows
-                .map((rr) => ({ row: rr, num: Number(rr[rightKey]) }))
-                .filter((c) => !Number.isNaN(c.num) && c.num <= numVal)
+                .filter((rr) => !isBlank(rr[rightKey]))
+                .map((rr) => ({ row: rr, num: parseSharedNumber(rr[rightKey]) }))
+                .filter((c): c is { row: Record<string, any>; num: number } => c.num !== null && c.num <= (numVal as number))
                 .sort((a, b) => b.num - a.num);
-              if (smaller.length > 0) return smaller[0].row;
+              return smaller[0]?.row;
             }
+            // Non-numeric keys: text-based "largest key <= value"
             const strSmaller = rightDs.rows
-              .filter((rr) => String(rr[rightKey] ?? '').trim().localeCompare(keyStr) <= 0)
+              .filter((rr) => !isBlank(rr[rightKey]) && String(rr[rightKey]).trim().toLowerCase().localeCompare(keyStr) <= 0)
               .sort((a, b) =>
-                String(b[rightKey] ?? '')
-                  .trim()
-                  .localeCompare(String(a[rightKey] ?? '').trim())
+                String(b[rightKey]).trim().toLowerCase().localeCompare(String(a[rightKey]).trim().toLowerCase())
               );
             return strSmaller[0];
           };
@@ -1933,7 +2417,7 @@ function executePipelineSteps(
             const match = findVlookupMatch(lr[leftKey]);
             return {
               ...lr,
-              [outCol]: match ? (match[retCol] ?? fallback) : fallback,
+              [outCol]: match ? (match[retCol] ?? null) : fallback,
             };
           });
         }
@@ -1942,7 +2426,7 @@ function executePipelineSteps(
 
       case 'join': {
         const rightId = p.right_dataset_id || p.lookup_dataset_id;
-        const rightDs = allDatasets.find((d) => d.meta.id === rightId) || allDatasets[1] || allDatasets[0];
+        const rightDs = allDatasets.find((d) => d.meta.id === rightId);
         if (rightDs) {
           const joinType = (p.join_type || 'left').toLowerCase();
           const rawPairs: any[] =
@@ -1955,20 +2439,19 @@ function executePipelineSteps(
                   },
                 ];
 
-          const normalizeJoinKey = (row: Record<string, any>, isLeft: boolean): string => {
-            return rawPairs
-              .map((kp) => {
-                const col = isLeft
-                  ? kp.left_col || kp.left_key || 'customer_id'
-                  : kp.right_col || kp.right_key || 'customer_id';
-                const val = row[col];
-                if (val === null || val === undefined) return '__NULL__';
-                let s = String(val);
-                if (kp.trim_whitespace !== false) s = s.trim();
-                if (kp.case_insensitive) s = s.toLowerCase();
-                return s;
-              })
-              .join('||');
+          // Join keys are always case-insensitive and trimmed, and a blank
+          // key never matches anything (SPEC.md).
+          const normalizeJoinKey = (row: Record<string, any>, isLeft: boolean): string | null => {
+            const parts: string[] = [];
+            for (const kp of rawPairs) {
+              const col = isLeft
+                ? kp.left_col || kp.left_key || 'customer_id'
+                : kp.right_col || kp.right_key || 'customer_id';
+              const val = row[col];
+              if (isBlank(val)) return null;
+              parts.push(String(val).trim().toLowerCase());
+            }
+            return parts.join('||');
           };
 
           const rightKeySet = new Set(
@@ -1986,6 +2469,7 @@ function executePipelineSteps(
             const seen = new Set<string>();
             sourceRightRows = sourceRightRows.filter((rr) => {
               const k = normalizeJoinKey(rr, false);
+              if (k === null) return true;
               if (seen.has(k)) return false;
               seen.add(k);
               return true;
@@ -1993,9 +2477,10 @@ function executePipelineSteps(
           }
 
           if (joinType === 'cross') {
+            // No row cap: every left row crossed with every right row (SPEC.md).
             const crossed: Record<string, any>[] = [];
             rows.forEach((lr) => {
-              sourceRightRows.slice(0, 50).forEach((rr) => {
+              sourceRightRows.forEach((rr) => {
                 const merged = { ...lr };
                 selectedRightCols.forEach((col) => {
                   const outCol = col in merged ? `${col}${suffixRight}` : col;
@@ -2008,23 +2493,37 @@ function executePipelineSteps(
             break;
           }
 
-          // Build multimap for right rows
+          // Build multimap for right rows (blank keys are never indexed, so
+          // they never match anything, including other blank keys).
           const rightMap = new Map<string, Record<string, any>[]>();
           sourceRightRows.forEach((rr) => {
             const k = normalizeJoinKey(rr, false);
+            if (k === null) return;
             if (!rightMap.has(k)) rightMap.set(k, []);
             rightMap.get(k)!.push(rr);
           });
 
           if (joinType === 'left_semi') {
-            rows = rows.filter((lr) => rightMap.has(normalizeJoinKey(lr, true)));
+            rows = rows.filter((lr) => {
+              const k = normalizeJoinKey(lr, true);
+              return k !== null && rightMap.has(k);
+            });
             break;
           }
 
           if (joinType === 'left_anti') {
-            rows = rows.filter((lr) => !rightMap.has(normalizeJoinKey(lr, true)));
+            rows = rows.filter((lr) => {
+              const k = normalizeJoinKey(lr, true);
+              return k === null || !rightMap.has(k);
+            });
             break;
           }
+
+          const leftKeyCols = rawPairs.map((kp) => kp.left_col || kp.left_key || 'customer_id');
+          const rightToLeftKeyCol = new Map<string, string>();
+          rawPairs.forEach((kp) => {
+            rightToLeftKeyCol.set(kp.right_col || kp.right_key || 'customer_id', kp.left_col || kp.left_key || 'customer_id');
+          });
 
           const mergePair = (
             lr: Record<string, any> | null,
@@ -2038,6 +2537,18 @@ function executePipelineSteps(
               leftTemplateCols.forEach((c) => {
                 merged[c] = null;
               });
+              // Right-only row (full/right join): show the key value in the
+              // left key column instead of leaving it blank (SPEC.md).
+              if (rr) {
+                leftKeyCols.forEach((lc) => {
+                  merged[lc] = null;
+                });
+                rawPairs.forEach((kp) => {
+                  const rc = kp.right_col || kp.right_key || 'customer_id';
+                  const lc = kp.left_col || kp.left_key || 'customer_id';
+                  merged[lc] = rr[rc] ?? null;
+                });
+              }
             }
             selectedRightCols.forEach((col) => {
               if (rightKeySet.has(col) && col in merged && lr) {
@@ -2055,9 +2566,9 @@ function executePipelineSteps(
 
           rows.forEach((lr) => {
             const k = normalizeJoinKey(lr, true);
-            const matches = rightMap.get(k);
+            const matches = k !== null ? rightMap.get(k) : undefined;
             if (matches && matches.length > 0) {
-              matchedRightKeys.add(k);
+              matchedRightKeys.add(k as string);
               matches.forEach((rr) => {
                 joinedRows.push(mergePair(lr, rr, leftTemplateCols));
               });
@@ -2069,7 +2580,7 @@ function executePipelineSteps(
           if (joinType === 'right' || joinType === 'full') {
             sourceRightRows.forEach((rr) => {
               const k = normalizeJoinKey(rr, false);
-              if (!matchedRightKeys.has(k)) {
+              if (k === null || !matchedRightKeys.has(k)) {
                 joinedRows.push(mergePair(null, rr, leftTemplateCols));
               }
             });
@@ -2301,23 +2812,24 @@ function executePipelineSteps(
         let fillVal: any = p.fixed_value ?? 0;
         if (strategy === 'mean' || strategy === 'median') {
           const nums = rows
-            .map((r) => Number(r[col]))
-            .filter((n) => !Number.isNaN(n) && n !== null);
+            .map((r) => r[col])
+            .filter((v) => !isBlank(v))
+            .map((v) => parseSharedNumber(v))
+            .filter((n): n is number => n !== null);
           if (nums.length > 0) {
             if (strategy === 'mean') {
-              const sum = nums.reduce((a, b) => a + b, 0);
-              fillVal = Number((sum / nums.length).toFixed(2));
+              fillVal = cleanFloat(nums.reduce((a, b) => a + b, 0) / nums.length);
             } else {
               nums.sort((a, b) => a - b);
               const mid = Math.floor(nums.length / 2);
-              fillVal = nums.length % 2 === 1 ? nums[mid] : Number(((nums[mid - 1] + nums[mid]) / 2).toFixed(2));
+              fillVal = nums.length % 2 === 1 ? nums[mid] : cleanFloat((nums[mid - 1] + nums[mid]) / 2);
             }
           }
         } else if (strategy === 'mode') {
           const freqs = new Map<any, number>();
           rows.forEach((r) => {
             const v = r[col];
-            if (v !== null && v !== undefined && v !== '') {
+            if (!isBlank(v)) {
               freqs.set(v, (freqs.get(v) || 0) + 1);
             }
           });
@@ -2333,7 +2845,7 @@ function executePipelineSteps(
         }
         rows = rows.map((r) => {
           const current = r[col];
-          const isMissing = current === null || current === undefined || current === '' || (typeof current === 'number' && Number.isNaN(current));
+          const isMissing = isBlank(current) || (typeof current === 'number' && Number.isNaN(current));
           return { ...r, [targetCol]: isMissing ? fillVal : current };
         });
         break;
@@ -2343,8 +2855,10 @@ function executePipelineSteps(
         const col = p.column;
         const targetCol = p.output_column || `${col}_is_outlier`;
         const nums = rows
-          .map((r) => Number(r[col]))
-          .filter((n) => !Number.isNaN(n) && n !== null)
+          .map((r) => r[col])
+          .filter((v) => !isBlank(v))
+          .map((v) => parseSharedNumber(v))
+          .filter((n): n is number => n !== null)
           .sort((a, b) => a - b);
         let lower = -Infinity;
         let upper = Infinity;
@@ -2356,8 +2870,10 @@ function executePipelineSteps(
           upper = q3 + 1.5 * iqr;
         }
         rows = rows.map((r) => {
-          const n = Number(r[col]);
-          const isOutlier = !Number.isNaN(n) && (n < lower || n > upper);
+          // Blank is never an outlier (SPEC.md).
+          if (isBlank(r[col])) return { ...r, [targetCol]: false };
+          const n = parseSharedNumber(r[col]);
+          const isOutlier = n !== null && (n < lower || n > upper);
           return { ...r, [targetCol]: isOutlier };
         });
         if (p.filter_outliers) {
@@ -2605,39 +3121,92 @@ export const localEngine = {
   },
 
   async uploadDataset(file: File, name?: string): Promise<Dataset> {
-    const text = await file.text();
     const ext = file.name.split('.').pop()?.toLowerCase() || 'csv';
     let rows: Record<string, any>[] = [];
-    if (
-      ext === 'sswb' ||
-      file.name.toLowerCase().endsWith('.sswb.html') ||
-      text.includes('id="stepsheet-packaged-data"')
-    ) {
-      let packageData: any = null;
-      if (text.includes('id="stepsheet-packaged-data"')) {
-        const match = text.match(
-          /<script id="stepsheet-packaged-data" type="application\/json">([\s\S]*?)<\/script>/
-        );
-        if (match && match[1]) {
+    let byteSize = file.size || 0;
+
+    if (ext === 'xlsx' || ext === 'xlsm') {
+      const ExcelJS = (await import('exceljs')).default ?? (await import('exceljs'));
+      const buf = await file.arrayBuffer();
+      byteSize = buf.byteLength;
+      const workbook = new (ExcelJS as any).Workbook();
+      await workbook.xlsx.load(buf as any);
+      const sheet = workbook.worksheets[0];
+      if (sheet) {
+        const headerRow = sheet.getRow(1);
+        const headers: string[] = [];
+        headerRow.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
+          headers[colNumber - 1] = String(cell.value ?? '').trim() || `column_${colNumber}`;
+        });
+        const lastRow = sheet.rowCount;
+        for (let r = 2; r <= lastRow; r++) {
+          const excelRow = sheet.getRow(r);
+          if (excelRow.cellCount === 0) continue;
+          const obj: Record<string, any> = {};
+          let anyValue = false;
+          headers.forEach((h, idx) => {
+            const cell = excelRow.getCell(idx + 1);
+            let v = cell.value;
+            if (v && typeof v === 'object' && 'result' in v) v = v.result; // formula cell
+            if (v && typeof v === 'object' && v instanceof Date) {
+              obj[h] = toISODate(v);
+              anyValue = true;
+            } else if (v === null || v === undefined || v === '') {
+              obj[h] = null;
+            } else if (typeof v === 'object' && 'text' in v) {
+              obj[h] = String((v as any).text ?? '');
+              anyValue = true;
+            } else {
+              obj[h] = v;
+              anyValue = true;
+            }
+          });
+          if (anyValue) rows.push(obj);
+        }
+      }
+    } else if (ext === 'xls') {
+      // Legacy binary .xls (BIFF8) is not supported by exceljs; surface a
+      // clear error instead of silently mis-reading the binary as CSV text.
+      throw new Error(
+        'Legacy .xls files are not supported. Please re-save the file as .xlsx and upload again.'
+      );
+    } else if (ext === 'parquet') {
+      throw new Error('Parquet import is not supported in the standalone (browser) engine.');
+    } else {
+      const text = await readTextWithEncodingDetection(file);
+      byteSize = byteSize || text.length;
+      if (
+        ext === 'sswb' ||
+        file.name.toLowerCase().endsWith('.sswb.html') ||
+        text.includes('id="stepsheet-packaged-data"')
+      ) {
+        let packageData: any = null;
+        if (text.includes('id="stepsheet-packaged-data"')) {
+          const match = text.match(
+            /<script id="stepsheet-packaged-data" type="application\/json">([\s\S]*?)<\/script>/
+          );
+          if (match && match[1]) {
+            try {
+              packageData = JSON.parse(match[1]);
+            } catch {}
+          }
+        } else {
           try {
-            packageData = JSON.parse(match[1]);
+            packageData = JSON.parse(text);
           } catch {}
         }
+        if (packageData && Array.isArray(packageData.rows)) {
+          rows = packageData.rows;
+        }
+      } else if (ext === 'json') {
+        const parsed = JSON.parse(text);
+        rows = Array.isArray(parsed) ? parsed : [parsed];
+      } else if (ext === 'tsv') {
+        rows = parseDelimitedText(text, '\t');
       } else {
-        try {
-          packageData = JSON.parse(text);
-        } catch {}
+        // 'txt' and 'csv' both auto-detect comma vs semicolon vs tab
+        rows = parseDelimitedText(text);
       }
-      if (packageData && Array.isArray(packageData.rows)) {
-        rows = packageData.rows;
-      }
-    } else if (ext === 'json') {
-      const parsed = JSON.parse(text);
-      rows = Array.isArray(parsed) ? parsed : [parsed];
-    } else if (ext === 'tsv' || ext === 'txt') {
-      rows = parseDelimitedText(text, '\t');
-    } else {
-      rows = parseDelimitedText(text, ',');
     }
 
     const schema = inferSchema(rows);
@@ -2649,7 +3218,7 @@ export const localEngine = {
       file_format: ext,
       row_count: rows.length,
       column_count: schema.length,
-      file_size_bytes: file.size || text.length,
+      file_size_bytes: byteSize,
       schema_metadata: schema,
       created_at: now,
       updated_at: now,
@@ -2870,8 +3439,8 @@ export const localEngine = {
     } = {}
   ): Promise<any> {
     const all = getStoredDatasets();
-    const ds = all.find((d) => d.meta.id === datasetId) || all[0];
-    if (!ds) throw new Error('Dataset not found');
+    const ds = all.find((d) => d.meta.id === datasetId);
+    if (!ds) throw new Error(`Dataset not found: ${datasetId}`);
 
     const { rows: pipelineRows, columns, compiledSql, stepSummaries } = executePipelineSteps(
       ds.rows,
@@ -2936,8 +3505,8 @@ export const localEngine = {
     datasetsOverride?: StoredLocalDataset[]
   ): Promise<{ rows: any[]; columns: any[]; compiledSql: string; stepSummaries: any[] }> {
     const all = datasetsOverride || getStoredDatasets();
-    const ds = all.find((d) => d.meta.id === datasetId) || all[0];
-    if (!ds) throw new Error('Dataset not found');
+    const ds = all.find((d) => d.meta.id === datasetId);
+    if (!ds) throw new Error(`Dataset not found: ${datasetId}`);
     const res = executePipelineSteps(ds.rows, steps, all);
     return {
       rows: res.rows.slice(0, limit),
@@ -3335,7 +3904,8 @@ export const localEngine = {
   },
 
   async exportCsv(datasetId: string, steps: any[]): Promise<Blob> {
-    const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: 50000 });
+    // No silent row cap (SPEC.md): export every row.
+    const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: Number.MAX_SAFE_INTEGER });
     const rows: Record<string, any>[] = preview.rows;
     const cols: string[] = preview.columns.map((c: any) => c.name);
     const escapeCsv = (val: any) => {
@@ -3349,19 +3919,36 @@ export const localEngine = {
       cols.join(','),
       ...rows.map((r) => cols.map((c) => escapeCsv(r[c])).join(',')),
     ];
-    return new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    // UTF-8 BOM so Excel opens non-ASCII text correctly (SPEC.md).
+    return new Blob(['﻿' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   },
 
   async exportExcel(datasetId: string, steps: any[]): Promise<Blob> {
-    return this.exportCsv(datasetId, steps);
+    const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: Number.MAX_SAFE_INTEGER });
+    const rows: Record<string, any>[] = preview.rows;
+    const cols: string[] = preview.columns.map((c: any) => c.name);
+    const ExcelJS = (await import('exceljs')).default ?? (await import('exceljs'));
+    const workbook = new (ExcelJS as any).Workbook();
+    const sheet = workbook.addWorksheet('Sheet1');
+    sheet.addRow(cols);
+    rows.forEach((r) => {
+      sheet.addRow(cols.map((c) => (r[c] === undefined ? null : r[c])));
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   },
 
-  async exportParquet(datasetId: string, steps: any[]): Promise<Blob> {
-    return this.exportCsv(datasetId, steps);
+  async exportParquet(_datasetId: string, _steps: any[]): Promise<Blob> {
+    // Real Parquet encoding requires a binary columnar writer this bundle
+    // does not carry. Fail clearly instead of silently handing back a
+    // CSV file mislabeled as Parquet (SPEC.md: "no silent truncation/mislabeling").
+    throw new Error(
+      'Parquet export is not available in the standalone (browser) engine yet. Use CSV or Excel export instead.'
+    );
   },
 
   async exportJson(datasetId: string, steps: any[]): Promise<Blob> {
-    const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: 50000 });
+    const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: Number.MAX_SAFE_INTEGER });
     return new Blob([JSON.stringify(preview.rows, null, 2)], { type: 'application/json' });
   },
 

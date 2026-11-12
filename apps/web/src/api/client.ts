@@ -20,6 +20,21 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * True only for a genuine network/connectivity failure (server unreachable,
+ * DNS failure, aborted request). `fetch` rejects with a TypeError for these.
+ * A real HTTP error response (401, 404, 500, validation error, ...) means
+ * the server WAS reached, so it must never be treated as a reason to fall
+ * back to the local engine (SPEC.md: withFallback must not hide real server
+ * errors behind a silent local run).
+ */
+function isNetworkFailure(err: unknown): boolean {
+  if (err instanceof TypeError) return true;
+  if (err && typeof err === 'object' && (err as any).name === 'AbortError') return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /network|failed to fetch|ECONNREFUSED|ENOTFOUND|ERR_CONNECTION|load failed/i.test(msg);
+}
+
 async function withFallback<T>(
   remoteCall: () => Promise<T>,
   localCall: () => Promise<T>
@@ -29,8 +44,13 @@ async function withFallback<T>(
   }
   try {
     return await remoteCall();
-  } catch {
-    return localCall();
+  } catch (err) {
+    if (isNetworkFailure(err)) {
+      return localCall();
+    }
+    // The server responded with a real error (or sent a malformed body) -
+    // surface it instead of silently masking it with local-engine output.
+    throw err;
   }
 }
 

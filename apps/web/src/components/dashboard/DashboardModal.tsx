@@ -111,6 +111,10 @@ export interface DashboardKpiConfig {
   aggFunc: VisualAggType;
   subtitle: string;
   accentColor: string;
+  // Once the user edits the title directly, further column/aggregation
+  // changes must stop overwriting it — mirrors DashboardVisualConfig's
+  // customTitle flag below.
+  customTitle?: boolean;
 }
 
 export type LegendPositionType =
@@ -1992,7 +1996,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       prev.map((k) => {
         if (k.id !== activeKpi.id) return k;
         const next = { ...k, ...patch };
-        if ((patch.column || patch.aggFunc) && !patch.title) {
+        if (patch.title !== undefined) {
+          next.customTitle = true;
+        } else if (!next.customTitle && (patch.column || patch.aggFunc)) {
           next.title = `${next.aggFunc.toUpperCase()} of ${next.column}`;
         }
         return next;

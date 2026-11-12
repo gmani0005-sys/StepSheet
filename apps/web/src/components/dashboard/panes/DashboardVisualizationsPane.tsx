@@ -87,10 +87,10 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
 }) => {
   const [formatSearch, setFormatSearch] = useState('');
 
-  const formatTabLabel = activeVisual
-    ? 'Format visual'
-    : activeKpi
+  const formatTabLabel = activeKpi
     ? 'Format KPI'
+    : activeVisual
+    ? 'Format visual'
     : 'Format page';
 
   const renderVisualFormatSettings = () => {
@@ -238,6 +238,70 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
     );
   };
 
+  // KPI cards have no editor of their own today: the pencil icon on a card
+  // only calls setSelectedKpiId, and this pane's Build/Format tabs branched
+  // solely on activeVisual, so selecting a KPI just showed the "select a
+  // visual" placeholder with onUpdateActiveKpi never invoked anywhere.
+  const KPI_ACCENT_SWATCHES = ['#10B981', '#0D9488', '#FB923C', '#0284C7', '#DC2626', '#7C3AED', '#D97706', '#0F172A'];
+
+  const renderKpiFormatSettings = () => {
+    if (!activeKpi) return null;
+    return (
+      <div className="space-y-4 pt-2 border-t border-[#D4D4D4]">
+        <div className="p-2.5 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg space-y-2">
+          <label className="text-xs font-semibold text-[#212121] flex items-center gap-1">
+            <Pencil className="w-3 h-3 text-[#217346]" /> KPI Title
+          </label>
+          <input
+            type="text"
+            aria-label="KPI Title"
+            value={activeKpi.title}
+            onChange={(e) => onUpdateActiveKpi({ title: e.target.value })}
+            className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#212121]"
+          />
+        </div>
+
+        <div className="p-2.5 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg space-y-2">
+          <label className="text-xs font-semibold text-[#212121] block">
+            Subtitle / Comparison Label
+          </label>
+          <input
+            type="text"
+            aria-label="KPI Subtitle"
+            value={activeKpi.subtitle}
+            onChange={(e) => onUpdateActiveKpi({ subtitle: e.target.value })}
+            placeholder="e.g. -60.0% SUM · MoM (2025-12 vs 2025-11)"
+            className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
+          />
+        </div>
+
+        <div className="p-2.5 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg space-y-2">
+          <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] flex items-center gap-1.5">
+            <Palette className="w-3.5 h-3.5 text-[#217346]" />
+            Accent Color
+          </label>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {KPI_ACCENT_SWATCHES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => onUpdateActiveKpi({ accentColor: c })}
+                title={c}
+                aria-label={`KPI accent color ${c}`}
+                className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                  (activeKpi.accentColor || '').toLowerCase() === c.toLowerCase()
+                    ? 'border-[#212121] scale-110'
+                    : 'border-white shadow-sm hover:scale-105'
+                }`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <DashboardPaneWrapper
       id="visualizations"
@@ -322,13 +386,17 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
 
               <div className="grid grid-cols-6 gap-1 p-1 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg">
                 {visualTypes.map((vt) => {
-                  const isActive = activeVisual?.type === vt.type;
+                  // Guard with !activeKpi: activeVisual defaults to visuals[0]
+                  // when nothing is explicitly selected, so without this a
+                  // click here while a KPI card is being edited would retype
+                  // an unrelated visual instead of adding a new one.
+                  const isActive = !activeKpi && activeVisual?.type === vt.type;
                   return (
                     <button
                       key={vt.type}
                       type="button"
                       onClick={() => {
-                        if (activeVisual) {
+                        if (!activeKpi && activeVisual) {
                           onUpdateActiveVisual({ type: vt.type });
                         } else {
                           onAddVisual(vt.type);
@@ -373,8 +441,14 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
               </div>
             </div>
 
-            {/* 2. Field Wells */}
-            {activeVisual ? (
+            {/* 2. Field Wells
+                 activeVisual defaults to visuals[0] whenever nothing is
+                 explicitly selected (see DashboardModal), so it stays truthy
+                 even right after a KPI card is clicked and selectedVisualId
+                 is cleared. activeKpi has no such fallback — it's only set
+                 by an explicit KPI selection — so it must be checked first,
+                 or the KPI editor below is never reached. */}
+            {!activeKpi && activeVisual ? (
               <div className="space-y-3 pt-2 border-t border-[#D4D4D4]">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#212121] block">
                   Field Wells
@@ -496,9 +570,54 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
                 {/* Visual Format Settings (Title, Legend, Conditional Formatting, Data Labels) */}
                 {renderVisualFormatSettings()}
               </div>
+            ) : activeKpi ? (
+              <div className="space-y-3 pt-2 border-t border-[#D4D4D4]">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#212121] block">
+                  KPI Card Fields
+                </span>
+
+                <div>
+                  <label className="text-xs font-medium text-[#605E5C] block mb-1">
+                    Metric Column
+                  </label>
+                  <select
+                    aria-label="KPI Metric Column"
+                    value={activeKpi.column}
+                    onChange={(e) => onUpdateActiveKpi({ column: e.target.value })}
+                    className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121]"
+                  >
+                    {columns.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name} ({c.data_type})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-[#605E5C] block mb-1">
+                    Aggregation
+                  </label>
+                  <select
+                    aria-label="KPI Aggregation"
+                    value={activeKpi.aggFunc}
+                    onChange={(e) => onUpdateActiveKpi({ aggFunc: e.target.value as VisualAggType })}
+                    className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs text-[#212121] font-semibold"
+                  >
+                    <option value="sum">SUM</option>
+                    <option value="count">COUNT</option>
+                    <option value="avg">AVERAGE</option>
+                    <option value="min">MIN</option>
+                    <option value="max">MAX</option>
+                    <option value="distinct">DISTINCT COUNT</option>
+                  </select>
+                </div>
+
+                {renderKpiFormatSettings()}
+              </div>
             ) : (
               <div className="p-4 border border-dashed border-[#D4D4D4] rounded-lg text-center text-xs text-[#605E5C]">
-                Select a visual on the canvas or click a gallery icon to bind data fields.
+                Select a visual or KPI card on the canvas to edit it.
               </div>
             )}
           </div>
@@ -518,8 +637,10 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
               />
             </div>
 
-            {activeVisual ? (
+            {!activeKpi && activeVisual ? (
               renderVisualFormatSettings()
+            ) : activeKpi ? (
+              renderKpiFormatSettings()
             ) : (
               <div className="p-3 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg text-xs text-[#605E5C] space-y-2">
                 <span className="font-bold text-[#212121] block">Format page</span>

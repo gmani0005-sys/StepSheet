@@ -197,6 +197,11 @@ export interface DashboardVisualConfig {
   borderColor?: string;
   backgroundColor?: string;
   borderRadius?: number;
+  // A short, data-driven finding computed from the visual's own aggregated
+  // values at generation time (e.g. "West leads with 38.2% of revenue") —
+  // rendered as a caption under the title so an AI-generated chart reads as
+  // a specific finding about this dataset rather than a generic template.
+  insight?: string;
 }
 
 export interface DashboardPageConfig {
@@ -5818,6 +5823,15 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         )}
                       </div>
                     </div>
+
+                    {/* Data-driven insight caption — a specific finding computed from
+                        this visual's own aggregated values, not boilerplate text, so
+                        the chart reads as an actual observation about the dataset. */}
+                    {vis.insight && (
+                      <div className="px-0.5 -mt-1 mb-1 text-[10.5px] text-[#605E5C] leading-snug truncate" title={vis.insight}>
+                        {vis.insight}
+                      </div>
+                    )}
 
                     {/* Tile Body */}
                     <div className="flex-1 min-h-0 flex flex-col justify-center overflow-auto">

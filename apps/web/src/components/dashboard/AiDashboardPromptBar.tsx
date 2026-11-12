@@ -123,7 +123,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
             return {
               id: v.id || `vis_ai_${Date.now()}_${idx}`,
               title: v.title,
-              type: v.type === 'clustered_bar' ? 'column' : (v.type || 'column'),
+              type: v.type || 'column',
               categoryCol: v.categoryCol,
               valueCol: v.valueCol,
               seriesCol: v.seriesCol || '',
@@ -142,6 +142,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
               w: isSpan2 ? 12 : 6,
               h: 4,
               customTitle: true,
+              insight: v.insight || undefined,
               legendPosition: 'top_right',
               dataLabels: true,
               axisLabels: true,
@@ -321,7 +322,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         return {
           id: v.id || `vis_patch_${Date.now()}_${idx}`,
           title: v.title,
-          type: v.type === 'clustered_bar' ? 'column' : (v.type || 'column'),
+          type: v.type || 'column',
           categoryCol: v.categoryCol,
           valueCol: v.valueCol,
           seriesCol: v.seriesCol || '',
@@ -338,6 +339,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           w: isSpan2 ? 12 : 6,
           h: 4,
           customTitle: true,
+          insight: v.insight || undefined,
           legendPosition: 'top_right',
           dataLabels: true,
           axisLabels: true,

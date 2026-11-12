@@ -5515,12 +5515,30 @@ export const localEngine = {
       });
     }
 
+
     // 2. Resolve Multi-Tier Dimensions for Cohesive Dashboard Experience
     const nonIdDims = profile.dimensions.filter((d) => !d.toLowerCase().endsWith('_id') && !d.toLowerCase().endsWith('id'));
     const compDim = secondaryDim && secondaryDim !== primaryDim ? secondaryDim : primaryDim;
     const granularDim = nonIdDims.find((d) => /customer|client|product|item|sku|account|user|sub_category/i.test(d)) || compDim;
     const geoDim = nonIdDims.find((d) => /region|country|state|city|channel|territory|location|market/i.test(d)) || compDim;
     const statusDim = profile.dimensions.find((d) => /status|stage|priority|fulfillment|state|tier|payment/i.test(d)) || null;
+
+    // Reusable group-by-and-sum, so each visual's caption can state a real
+    // finding ("West leads with 38.2% of revenue") computed from the exact
+    // same aggregation the chart itself shows, rather than generic text.
+    const groupByDim = (dim: string | null | undefined, measureCol: string, useCount: boolean): { key: string; value: number }[] => {
+      if (!dim || !Array.isArray(rows) || rows.length === 0) return [];
+      const map = new Map<string, number>();
+      for (const r of rows) {
+        const rawKey = getRowVal(r, dim);
+        const key = rawKey === null || rawKey === undefined || String(rawKey).trim() === '' ? '(Blank)' : String(rawKey);
+        const val = useCount ? 1 : Number(getRowVal(r, measureCol)) || 0;
+        map.set(key, (map.get(key) || 0) + val);
+      }
+      return Array.from(map.entries())
+        .map(([key, value]) => ({ key, value }))
+        .sort((a, b) => b.value - a.value);
+    };
 
     // Slicers: Cohesively include [primaryDim, geoDim, granularDim] so highlighted customers & categories are filterable
     const slicerCandidates = Array.from(new Set([primaryDim, geoDim, granularDim].filter(Boolean)));
@@ -5592,6 +5610,15 @@ export const localEngine = {
 
     // 4. Build 6 Multi-Tier Complementary Visuals (Executive Grid V22)
     const visuals: any[] = [];
+    const measureLabel = hasRealMeasure ? humanizeField(vMeasureCol) : 'records';
+    const fmtShare = (value: number, total: number) => (total > 0 ? `${((value / total) * 100).toFixed(1)}%` : '0%');
+
+    // Hero trend insight: the actual latest-vs-previous-period comparison
+    // when the dashboard has a date axis, computed once above for the KPI
+    // subtitle — reuse it so the chart and the KPI card never disagree.
+    const heroTrendInsight = profile.dates.length > 0 && /MoM/.test(primarySubtitle)
+      ? primarySubtitle.replace(/^([+-]?[\d.]+%)\s*MoM.*$/, (full, pct) => `${pct} change vs. the prior month`)
+      : null;
 
     // Visual 1: Hero Visual (Span 2, 976px wide x 340px high at x=16, y=16)
     if (profile.dates.length > 0) {
@@ -5612,6 +5639,9 @@ export const localEngine = {
         h: 4,
         sortBy: 'category_asc',
         legendPosition: 'hide',
+        insight: heroTrendInsight || (hasRealMeasure
+          ? `${fmtCompact(totalPrimarySum)} total across ${rows ? rows.length : 0} records`
+          : `${rows ? rows.length : 0} records tracked over time`),
       });
     } else {
       visuals.push({
@@ -5630,18 +5660,32 @@ export const localEngine = {
         w: 12,
         h: 4,
         sortBy: 'value_desc',
+        insight: `${topCategory} leads with ${topCategoryPct} of total ${measureLabel}`,
       });
     }
 
-    // Visual 2: Category Contribution Donut (Mid-Tier Left at x=16, y=372)
+    // Visual 2: Category Contribution — a donut only reads cleanly up to
+    // ~8 slices; past that it becomes an unreadable rainbow, so a dataset
+    // with more categories than that gets a ranked bar instead. This is a
+    // genuine data-driven choice, not a fixed chart-per-slot template.
+    const primaryDimBreakdown = groupByDim(primaryDim, vMeasureCol, !hasRealMeasure);
+    const primaryDimCardinality = primaryDimBreakdown.length;
+    const useBarForContribution = primaryDimCardinality > 8;
+    const contributionTop = primaryDimBreakdown[0];
+    const contributionInsight = contributionTop
+      ? `${contributionTop.key} leads with ${fmtShare(contributionTop.value, totalPrimarySum)} of total ${measureLabel}${primaryDimCardinality > 8 ? ` across ${primaryDimCardinality} ${humanizeField(primaryDim).toLowerCase()} values` : ''}`
+      : undefined;
     visuals.push({
       id: 'vis_share_donut',
-      title: isSales ? `Revenue Contribution by ${humanizeField(primaryDim)}` : `${humanizeField(primaryDim)} Distribution Share`,
-      type: 'donut',
+      title: useBarForContribution
+        ? `Top ${Math.min(8, primaryDimCardinality)} ${humanizeField(primaryDim)} by Contribution`
+        : (isSales ? `Revenue Contribution by ${humanizeField(primaryDim)}` : `${humanizeField(primaryDim)} Distribution Share`),
+      type: useBarForContribution ? 'bar' : 'donut',
       categoryCol: primaryDim,
       valueCol: vMeasureCol,
       aggFunc: vAggFunc,
-      bins: 6,
+      bins: useBarForContribution ? 8 : 6,
+      topN: useBarForContribution ? 8 : undefined,
       span: 1,
       customWidth: 480,
       customHeight: 320,
@@ -5650,10 +5694,13 @@ export const localEngine = {
       w: 6,
       h: 4,
       sortBy: 'value_desc',
+      insight: contributionInsight,
     });
 
     // Visual 3: Ranked Performance Leaderboard Bar (Mid-Tier Right at x=512, y=372)
     const leaderboardTopN = requestedTopN || 10;
+    const granularBreakdown = groupByDim(granularDim, vMeasureCol, !hasRealMeasure);
+    const granularTop = granularBreakdown[0];
     visuals.push({
       id: 'vis_leaderboard_bar',
       title: `Top ${leaderboardTopN} High-Performing ${humanizeField(granularDim)} Leaderboard`,
@@ -5671,9 +5718,12 @@ export const localEngine = {
       w: 6,
       h: 4,
       sortBy: 'value_desc',
+      insight: granularTop ? `${granularTop.key} tops the list at ${fmtCompact(granularTop.value)}` : undefined,
     });
 
     // Visual 4: Geographic / Channel Breakdown (Deep Dive Left at x=16, y=708)
+    const geoBreakdown = groupByDim(geoDim, vMeasureCol, !hasRealMeasure);
+    const geoTop = geoBreakdown[0];
     visuals.push({
       id: 'vis_geo_column',
       title: `${humanizeField(vMeasureCol)} Breakdown by ${humanizeField(geoDim)}`,
@@ -5690,10 +5740,14 @@ export const localEngine = {
       w: 6,
       h: 4,
       sortBy: 'value_desc',
+      insight: geoTop ? `${geoTop.key} leads ${humanizeField(geoDim)} with ${fmtShare(geoTop.value, geoBreakdown.reduce((a, b) => a + b.value, 0))} of ${measureLabel}` : undefined,
     });
 
     // Visual 5: Operational Pipeline Funnel / Secondary Comparison (Deep Dive Right at x=512, y=708)
     if (statusDim) {
+      const statusBreakdown = groupByDim(statusDim, vMeasureCol, true);
+      const statusTotal = statusBreakdown.reduce((a, b) => a + b.value, 0);
+      const statusTop = statusBreakdown[0];
       visuals.push({
         id: 'vis_pipeline_funnel',
         title: `Fulfillment Pipeline & ${humanizeField(statusDim)} Status`,
@@ -5710,8 +5764,12 @@ export const localEngine = {
         w: 6,
         h: 4,
         sortBy: 'value_desc',
+        insight: statusTop ? `${statusTop.key} represents ${fmtShare(statusTop.value, statusTotal)} of all records` : undefined,
       });
     } else if (secondaryMeasure && secondaryMeasure !== primaryMeasure) {
+      const secondaryBreakdown = groupByDim(primaryDim, secondaryMeasure, false);
+      const secondaryTop = secondaryBreakdown[0];
+      const secondaryTotal = secondaryBreakdown.reduce((a, b) => a + b.value, 0);
       visuals.push({
         id: 'vis_pipeline_funnel',
         title: `${humanizeField(secondaryMeasure)} Distribution by ${humanizeField(primaryDim)}`,
@@ -5728,6 +5786,7 @@ export const localEngine = {
         w: 6,
         h: 4,
         sortBy: 'value_desc',
+        insight: secondaryTop ? `${secondaryTop.key} leads with ${fmtShare(secondaryTop.value, secondaryTotal)} of total ${humanizeField(secondaryMeasure)}` : undefined,
       });
     } else {
       visuals.push({
@@ -5747,6 +5806,7 @@ export const localEngine = {
         w: 6,
         h: 4,
         sortBy: 'value_desc',
+        insight: contributionTop ? `${contributionTop.key} leads ${humanizeField(primaryDim)} at ${fmtCompact(contributionTop.value)}` : undefined,
       });
     }
 
@@ -5767,6 +5827,7 @@ export const localEngine = {
       w: 12,
       h: 4,
       sortBy: 'value_desc',
+      insight: `${primaryDimCardinality} ${humanizeField(primaryDim).toLowerCase()} values × ${humanizeField(compDim).toLowerCase()} breakdown, ${rows ? rows.length : 0} records`,
     });
 
     const titlePrefix = datasetName.replace(/\.[^/.]+$/, '');

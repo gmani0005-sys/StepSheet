@@ -10,7 +10,6 @@ if exist "%~dp0StepSheet.html" (
 ) else (
     echo Building StepSheet.html...
     cd /d "%~dp0apps\web"
-    call npm run build
-    "%~dp0.venv\Scripts\python.exe" "%~dp0scripts\build_singlefile.py"
+    call npm run build:singlefile
     start "" "%~dp0StepSheet.html"
 )

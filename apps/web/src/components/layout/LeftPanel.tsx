@@ -83,19 +83,25 @@ export const LeftPanel: React.FC = () => {
   };
 
   return (
-    <aside className="w-64 bg-[#F3F3F3] border-r border-[#D4D4D4] flex flex-col shrink-0 select-none z-10 h-full">
+    // Shadowed on its right edge so the panel reads as sitting above the
+    // grid on its own plane, matching the title bar/ribbon depth treatment.
+    <aside
+      className="w-64 bg-[#F3F3F3] border-r border-[#D4D4D4] flex flex-col shrink-0 select-none z-10 h-full"
+      style={{ boxShadow: 'var(--shadow-panel-right)' }}
+    >
       {/* Top Header */}
-      <div className="h-8 px-3 bg-[#E6E6E6] border-b border-[#D4D4D4] flex items-center justify-between">
+      <div className="h-8 px-3 bg-[#EBEBEB] border-b border-[#D4D4D4] flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <Database size={13} className="text-[#217346]" />
-          <h2 className="text-[12px] font-bold text-[#212121] tracking-tight">
+          <h2 className="text-[11.5px] font-bold text-[#212121] tracking-wide uppercase">
             Queries & Connections
           </h2>
         </div>
         <button
           onClick={() => fileInputRef.current?.click()}
           title="Upload new CSV or Excel file"
-          className="px-2 py-0.5 bg-[#217346] hover:bg-[#185C37] text-white rounded-[2px] text-[12px] font-medium flex items-center gap-1 transition-colors"
+          className="px-2 py-0.5 bg-[#217346] hover:bg-[#185C37] text-white rounded-[2px] text-[12px] font-semibold flex items-center gap-1 transition-colors"
+          style={{ boxShadow: 'var(--shadow-xs)' }}
         >
           <Plus size={12} />
           <span>Upload</span>

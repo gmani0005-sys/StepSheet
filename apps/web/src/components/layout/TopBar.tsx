@@ -897,8 +897,17 @@ export const TopBar: React.FC<TopBarProps> = ({
         }}
       />
 
-      {/* 1. EXCEL TITLE BAR + QUICK ACCESS TOOLBAR */}
-      <div className="h-10 bg-[#217346] text-white px-3 flex items-center justify-between gap-3 min-w-0">
+      {/* 1. EXCEL TITLE BAR + QUICK ACCESS TOOLBAR. A subtle top-to-bottom
+          gradient plus a hairline shadow gives it the layered depth real
+          Office/Fluent chrome has, instead of sitting as one flat color
+          block level with everything below it. */}
+      <div
+        className="h-10 text-white px-3 flex items-center justify-between gap-3 min-w-0 relative z-10"
+        style={{
+          background: 'linear-gradient(180deg, #1F8049 0%, #1A6E40 100%)',
+          boxShadow: 'var(--shadow-sm)',
+        }}
+      >
         {/* Left: Sidebar Toggle, Brand & Quick Access Toolbar */}
         <div className="flex items-center gap-2 min-w-0 shrink-0">
           <button
@@ -1266,8 +1275,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* 2. EXCEL RIBBON TAB STRIP */}
-      <div className="h-8 bg-[#F3F3F3] border-b border-[#D4D4D4] px-2 flex items-center justify-between gap-2 overflow-x-auto">
+      {/* 2. EXCEL RIBBON TAB STRIP. A visibly darker strip than the ribbon
+          panel below it makes the active (white) tab read as lifted and
+          current — the contrast IS the affordance, so it needs to be
+          seen, not just technically present. */}
+      <div className="h-8 bg-[#E6E6E6] border-b border-[#D4D4D4] px-2 flex items-center justify-between gap-2 overflow-x-auto">
         <div className="flex items-center gap-0.5 h-full">
           {ribbonTabs.map((tab) => {
             const isActive = activeRibbonTab === tab && !isRibbonCollapsed;
@@ -1277,11 +1289,12 @@ export const TopBar: React.FC<TopBarProps> = ({
                 type="button"
                 onClick={() => handleTabClick(tab)}
                 onDoubleClick={handleTabDoubleClick}
-                className={`h-full px-3 text-[12px] transition-colors relative flex items-center whitespace-nowrap rounded-t-[2px] ${
+                className={`h-full px-3.5 text-[12px] transition-colors relative flex items-center whitespace-nowrap rounded-t-[3px] ${
                   isActive
-                    ? 'bg-white text-[#217346] font-semibold border-t border-x border-[#D4D4D4] -mb-px z-10'
-                    : 'text-[#444444] hover:text-[#212121] hover:bg-[#E6E6E6] font-normal'
+                    ? 'bg-white text-[#185C37] font-bold border-t-2 border-x border-t-[#217346] border-x-[#D4D4D4] -mb-px z-10'
+                    : 'text-[#444444] hover:text-[#212121] hover:bg-[#EFEFEF] font-medium'
                 }`}
+                style={isActive ? { boxShadow: '0 -2px 4px rgba(15,23,32,0.08)' } : undefined}
               >
                 <span>{tab}</span>
                 {isActive && (
@@ -1305,23 +1318,27 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* 3. EXCEL RIBBON COMMAND GROUPS PANEL */}
+      {/* 3. EXCEL RIBBON COMMAND GROUPS PANEL. Shadowed below so it reads
+          as a panel sitting above the grid, not the same flat plane; each
+          command group gets a quiet top-divider above its label (how
+          Excel itself separates "this row of buttons belongs to this
+          group") instead of relying on gaps and a vertical rule alone. */}
       {!isRibbonCollapsed && (
-        <div className="relative">
+        <div className="relative" style={{ boxShadow: '0 3px 8px rgba(15,23,32,0.10)' }}>
           {/* Rightmost command groups (e.g. Data Quality) were silently
               clipped at the viewport edge on narrower/full-width windows
               with overflow-x-auto technically scrollable but no visual
               hint that more content existed. A visible thin scrollbar
               plus this edge fade now signal it's scrollable. */}
-        <div className="bg-white px-2 py-1.5 flex items-stretch gap-1 overflow-x-auto min-h-[76px] chips-scrollbar">
+        <div className="bg-white px-2.5 py-1.5 flex items-stretch gap-0.5 overflow-x-auto min-h-[74px] chips-scrollbar">
           {activeGroups.map((group, gIdx) => (
             <div
               key={group.name}
-              className={`flex flex-col justify-between px-2 shrink-0 ${
-                gIdx < activeGroups.length - 1 ? 'border-r border-[#D4D4D4]' : ''
+              className={`flex flex-col justify-between px-2.5 shrink-0 ${
+                gIdx < activeGroups.length - 1 ? 'border-r border-[#E1E1E1]' : ''
               }`}
             >
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   return (
@@ -1331,33 +1348,39 @@ export const TopBar: React.FC<TopBarProps> = ({
                       onClick={item.onClick}
                       disabled={item.disabled}
                       title={item.title || item.label}
-                      className={`group flex flex-col items-center justify-center px-3 py-1.5 min-w-[62px] rounded-[2px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      className={`group flex flex-col items-center justify-center px-2.5 py-1.5 min-w-[58px] rounded-[2px] transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                         item.primarySolid
-                          ? 'bg-[#217346] hover:bg-[#185C37] active:bg-[#124629] text-white border border-[#185C37] shadow-sm'
+                          ? 'bg-[#217346] hover:bg-[#185C37] active:bg-[#124629] text-white border border-[#185C37]'
                           : item.accent
-                          ? 'bg-[#E6F2EB] hover:bg-[#cce5d6] active:bg-[#99cbad] text-[#217346] border border-[#217346]/40'
-                          : 'bg-transparent hover:bg-[#E6E6E6] active:bg-[#D2D2D2] text-[#212121] border border-transparent'
+                          ? 'bg-[#E6F2EB] hover:bg-[#cce5d6] active:bg-[#99cbad] text-[#217346] border border-[#217346]/30'
+                          : 'bg-transparent hover:bg-[#F0F0F0] active:bg-[#E1E1E1] text-[#212121] border border-transparent hover:border-[#D4D4D4]'
                       }`}
+                      style={
+                        item.primarySolid
+                          ? { boxShadow: '0 1px 2px rgba(15,23,32,0.18), inset 0 1px 0 rgba(255,255,255,0.12)' }
+                          : undefined
+                      }
                     >
                       <div className="w-8 h-7 flex items-center justify-center shrink-0">
                         <Icon
-                          size={item.primarySolid || item.accent ? 24 : 22}
+                          size={item.primarySolid || item.accent ? 23 : 21}
+                          strokeWidth={item.primarySolid || item.accent ? 2 : 1.75}
                           className={
                             item.primarySolid
                               ? 'text-white'
                               : item.accent
                               ? 'text-[#217346]'
-                              : 'text-[#217346] group-hover:text-[#185C37]'
+                              : 'text-[#185C37] group-hover:text-[#124629]'
                           }
                         />
                       </div>
                       <span
-                        className={`text-[12px] leading-tight whitespace-nowrap mt-0.5 ${
+                        className={`text-[11.5px] leading-tight whitespace-nowrap mt-0.5 ${
                           item.primarySolid
                             ? 'font-bold text-white'
                             : item.accent
                             ? 'font-semibold text-[#217346]'
-                            : 'font-normal text-[#212121]'
+                            : 'font-medium text-[#333333]'
                         }`}
                       >
                         {item.label}
@@ -1366,7 +1389,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   );
                 })}
               </div>
-              <div className="text-[11px] text-[#605E5C] text-center tracking-tight mt-1 select-none">
+              <div className="text-[10.5px] text-[#605E5C] text-center tracking-wide mt-1.5 pt-1 border-t border-[#E1E1E1] select-none">
                 {group.name}
               </div>
             </div>

@@ -606,7 +606,7 @@ export const DataGrid: React.FC = () => {
       >
         <table className="min-w-full w-max text-left border-collapse table-auto">
           {/* Sticky Two-Tier Excel Header: Row 1 = Letters (A, B, C...), Row 2 = Column Names */}
-          <thead className="sticky top-0 z-20 select-none">
+          <thead className="sticky top-0 z-20 select-none" style={{ boxShadow: '0 2px 4px rgba(15,23,32,0.08)' }}>
             {/* Tier 1: Excel Column Letter Headers (A, B, C...) */}
             <tr className="bg-[#F3F3F3]">
               <th
@@ -642,8 +642,8 @@ export const DataGrid: React.FC = () => {
 
             {/* Tier 2: Column Name & AutoFilter Row */}
             {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id} className="bg-[#F8F8F8]">
-                <th className="sticky left-0 z-30 w-11 min-w-[44px] h-[26px] px-1 text-center text-[12px] font-semibold text-[#444444] bg-[#F3F3F3] border-r border-b border-[#D4D4D4]">
+              <tr key={headerGroup.id} className="bg-[#F8F8F8] border-b-2 border-b-[#D4D4D4]">
+                <th className="sticky left-0 z-30 w-11 min-w-[44px] h-[26px] px-1 text-center text-[12px] font-semibold text-[#444444] bg-[#F3F3F3] border-r border-b-2 border-r-[#D4D4D4] border-b-[#D4D4D4]">
                   #
                 </th>
                 {headerGroup.headers.map((header, colIdx) => {
@@ -651,7 +651,7 @@ export const DataGrid: React.FC = () => {
                   return (
                     <th
                       key={header.id}
-                      className={`h-[26px] px-2 py-0.5 border-r border-b border-[#D4D4D4] text-[12px] font-bold text-[#212121] whitespace-nowrap ${
+                      className={`h-[26px] px-2 py-0.5 border-r border-b-2 border-r-[#D4D4D4] border-b-[#D4D4D4] text-[12px] font-bold text-[#212121] whitespace-nowrap ${
                         isColSelected ? 'bg-[#E6F2EB]/60' : 'bg-[#F8F8F8]'
                       }`}
                       style={{ minWidth: 165 }}
@@ -815,9 +815,18 @@ export const DataGrid: React.FC = () => {
       </div>
 
       {/* EXCEL STATUS BAR */}
-      <div className="h-6 bg-[#217346] text-white px-3 flex items-center justify-between text-[12px] select-none shrink-0">
+      <div
+        className="h-6 text-white px-3 flex items-center justify-between text-[12px] select-none shrink-0"
+        style={{
+          background: 'linear-gradient(180deg, #1F8049 0%, #1A6E40 100%)',
+          boxShadow: '0 -1px 3px rgba(15,23,32,0.12)',
+        }}
+      >
         <div className="flex items-center gap-3 min-w-0">
-          <span className="font-semibold tracking-wide">Ready</span>
+          <span className="flex items-center gap-1.5 font-semibold tracking-wide">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#92D5AE] shrink-0" />
+            Ready
+          </span>
           <span className="text-white/50">|</span>
           <span className="truncate">
             Rows: {filteredRows.toLocaleString()} · Cols: {safeSchemaColumns.length}

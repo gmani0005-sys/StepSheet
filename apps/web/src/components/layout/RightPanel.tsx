@@ -145,10 +145,14 @@ export const RightPanel: React.FC = () => {
     activeStepIndex !== null ? steps[activeStepIndex] : steps[steps.length - 1];
 
   return (
-    <aside className="w-80 bg-[#F3F3F3] border-l border-[#D4D4D4] flex flex-col shrink-0 select-none z-10 h-full">
+    // Shadowed on its left edge to match LeftPanel's depth treatment.
+    <aside
+      className="w-80 bg-[#F3F3F3] border-l border-[#D4D4D4] flex flex-col shrink-0 select-none z-10 h-full"
+      style={{ boxShadow: 'var(--shadow-panel-left)' }}
+    >
       {/* Excel Task Pane Title Strip */}
-      <div className="h-8 px-3 bg-[#E6E6E6] border-b border-[#D4D4D4] flex items-center justify-between">
-        <span className="text-[12px] font-bold text-[#212121] tracking-tight">
+      <div className="h-8 px-3 bg-[#EBEBEB] border-b border-[#D4D4D4] flex items-center justify-between">
+        <span className="text-[11.5px] font-bold text-[#212121] tracking-wide uppercase">
           Query Settings & Applied Steps
         </span>
         <button

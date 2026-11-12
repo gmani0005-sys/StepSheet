@@ -174,6 +174,18 @@ export interface DashboardVisualConfig {
   customColors?: Record<string, string>;
   customLegendLabels?: Record<string, string>;
   conditionalFormatting?: ConditionalFormattingConfig;
+  // Power BI-style "General"/"Title" format-pane depth: per-visual
+  // background, border and title typography, independent of the
+  // dashboard-wide palette/theme.
+  showTitle?: boolean;
+  titleFontSize?: number;
+  titleColor?: string;
+  titleAlign?: 'left' | 'center' | 'right';
+  titleBold?: boolean;
+  showBorder?: boolean;
+  borderColor?: string;
+  backgroundColor?: string;
+  borderRadius?: number;
 }
 
 export interface DashboardPageConfig {
@@ -5447,15 +5459,30 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                       width: `${tileW}px`,
                       height: `${tileH}px`,
                       zIndex: isHoverDragging || isResizing ? 50 : isSelected || isMultiSelected ? 20 : vis.zIndex || idx + 1,
+                      ...(vis.backgroundColor ? { backgroundColor: vis.backgroundColor } : {}),
+                      ...(vis.showBorder === false
+                        ? { borderWidth: 0 }
+                        : vis.borderColor
+                        ? { borderColor: vis.borderColor }
+                        : {}),
+                      ...(vis.borderRadius !== undefined ? { borderRadius: `${vis.borderRadius}px` } : {}),
                     }}
-                    className={`rounded-2xl border transition-all p-5 flex flex-col justify-between select-none backdrop-blur-xl ${
+                    className={`${vis.borderRadius !== undefined ? '' : 'rounded-2xl'} border transition-all p-5 flex flex-col justify-between select-none backdrop-blur-xl ${
                       isHoverDragging
-                        ? 'border-emerald-600 ring-4 ring-emerald-500/30 shadow-2xl cursor-grabbing bg-white/95'
+                        ? `border-emerald-600 ring-4 ring-emerald-500/30 shadow-2xl cursor-grabbing${
+                            vis.backgroundColor ? '' : ' bg-white/95'
+                          }`
                         : isHoverTarget
-                        ? 'border-emerald-500 border-dashed ring-2 ring-emerald-500/40 shadow-lg bg-white/90'
+                        ? `border-emerald-500 border-dashed ring-2 ring-emerald-500/40 shadow-lg${
+                            vis.backgroundColor ? '' : ' bg-white/90'
+                          }`
                         : isSelected || isMultiSelected
-                        ? 'border-emerald-600 ring-2 ring-emerald-500/25 shadow-md cursor-grab bg-white/90'
-                        : 'border-white/60 hover:border-emerald-400 shadow-xs hover:shadow-md cursor-grab bg-white/80'
+                        ? `border-emerald-600 ring-2 ring-emerald-500/25 shadow-md cursor-grab${
+                            vis.backgroundColor ? '' : ' bg-white/90'
+                          }`
+                        : `border-white/60 hover:border-emerald-400 shadow-xs hover:shadow-md cursor-grab${
+                            vis.backgroundColor ? '' : ' bg-white/80'
+                          }`
                     }`}
                   >
                     {/* Tile Header with Multi-Select Toggle, Drag Grip & Inline Edit Title Option */}
@@ -5544,9 +5571,20 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                            <h3 className="text-xs font-bold text-[#212121] truncate">
-                              {vis.title}
-                            </h3>
+                            {vis.showTitle !== false && (
+                              <h3
+                                className="truncate"
+                                style={{
+                                  fontSize: vis.titleFontSize ? `${vis.titleFontSize}px` : '12px',
+                                  color: vis.titleColor || '#212121',
+                                  textAlign: vis.titleAlign || 'left',
+                                  fontWeight: vis.titleBold === false ? 500 : 700,
+                                  flex: vis.titleAlign && vis.titleAlign !== 'left' ? 1 : undefined,
+                                }}
+                              >
+                                {vis.title}
+                              </h3>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {

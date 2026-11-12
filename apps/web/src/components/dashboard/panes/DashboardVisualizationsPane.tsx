@@ -451,9 +451,10 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
     if (!activeKpi) return null;
     return (
       <div className="space-y-4 pt-2 border-t border-[#D4D4D4]">
+        {/* 1. Title */}
         <div className="p-2.5 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg space-y-2">
-          <label className="text-xs font-semibold text-[#212121] flex items-center gap-1">
-            <Pencil className="w-3 h-3 text-[#217346]" /> KPI Title
+          <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] flex items-center gap-1.5">
+            <Pencil className="w-3.5 h-3.5 text-[#217346]" /> 1. Title
           </label>
           <input
             type="text"
@@ -462,6 +463,74 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
             onChange={(e) => onUpdateActiveKpi({ title: e.target.value })}
             className="w-full bg-white border border-[#D4D4D4] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#212121]"
           />
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-[#212121] block mb-1">
+                Font Size
+              </label>
+              <input
+                type="number"
+                aria-label="KPI Title Font Size"
+                min={8}
+                max={32}
+                value={activeKpi.titleFontSize ?? 11}
+                onChange={(e) =>
+                  onUpdateActiveKpi({ titleFontSize: Number(e.target.value) || 11 })
+                }
+                className="w-full bg-white border border-[#D4D4D4] rounded px-2 py-1 text-xs text-[#212121]"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-[#212121] block mb-1">
+                Alignment
+              </label>
+              <select
+                aria-label="KPI Title Alignment"
+                value={activeKpi.titleAlign || 'left'}
+                onChange={(e) =>
+                  onUpdateActiveKpi({ titleAlign: e.target.value as 'left' | 'center' | 'right' })
+                }
+                className="w-full bg-white border border-[#D4D4D4] rounded px-2 py-1 text-xs text-[#212121]"
+              >
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-[#212121] block mb-1">
+                Weight
+              </label>
+              <select
+                aria-label="KPI Title Weight"
+                value={activeKpi.titleBold === false ? 'regular' : 'bold'}
+                onChange={(e) => onUpdateActiveKpi({ titleBold: e.target.value === 'bold' })}
+                className="w-full bg-white border border-[#D4D4D4] rounded px-2 py-1 text-xs text-[#212121]"
+              >
+                <option value="bold">Bold</option>
+                <option value="regular">Regular</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-semibold text-[#212121] block mb-1">
+              Title Color
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                aria-label="KPI Title Color"
+                value={activeKpi.titleColor || '#64748B'}
+                onChange={(e) => onUpdateActiveKpi({ titleColor: e.target.value })}
+                className="w-8 h-7 rounded border border-[#D4D4D4] cursor-pointer p-0.5"
+              />
+              <span className="text-[10px] font-mono text-[#605E5C]">
+                {activeKpi.titleColor || '#64748B'}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="p-2.5 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg space-y-2">
@@ -478,10 +547,95 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
           />
         </div>
 
+        {/* 2. General (Background & Border) */}
+        <div className="p-2.5 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] flex items-center gap-1.5">
+              <Paintbrush className="w-3.5 h-3.5 text-[#217346]" />
+              2. General
+            </label>
+            <label className="flex items-center gap-1.5 text-[10px] font-semibold text-[#605E5C] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={activeKpi.showBorder !== false}
+                onChange={(e) => onUpdateActiveKpi({ showBorder: e.target.checked })}
+                className="rounded border-[#D4D4D4] text-[#217346] w-3 h-3"
+              />
+              Border
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-[#212121] block mb-1">
+                Background
+              </label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  aria-label="KPI Background Color"
+                  value={activeKpi.backgroundColor || '#ffffff'}
+                  onChange={(e) => onUpdateActiveKpi({ backgroundColor: e.target.value })}
+                  className="w-8 h-7 rounded border border-[#D4D4D4] cursor-pointer p-0.5"
+                />
+                <button
+                  type="button"
+                  onClick={() => onUpdateActiveKpi({ backgroundColor: undefined })}
+                  title="Reset to default (translucent)"
+                  className="text-[10px] text-[#605E5C] hover:text-[#217346] underline shrink-0"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            {activeKpi.showBorder !== false && (
+              <div>
+                <label className="text-[10px] font-semibold text-[#212121] block mb-1">
+                  Border Color
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="color"
+                    aria-label="KPI Border Color"
+                    value={activeKpi.borderColor || '#e5e7eb'}
+                    onChange={(e) => onUpdateActiveKpi({ borderColor: e.target.value })}
+                    className="w-8 h-7 rounded border border-[#D4D4D4] cursor-pointer p-0.5"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onUpdateActiveKpi({ borderColor: undefined })}
+                    title="Reset to default"
+                    className="text-[10px] text-[#605E5C] hover:text-[#217346] underline shrink-0"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-[10px] font-semibold text-[#212121] block mb-1">
+              Corner Radius ({activeKpi.borderRadius ?? 16}px)
+            </label>
+            <input
+              type="range"
+              aria-label="KPI Corner Radius"
+              min={0}
+              max={24}
+              value={activeKpi.borderRadius ?? 16}
+              onChange={(e) => onUpdateActiveKpi({ borderRadius: Number(e.target.value) })}
+              className="w-full"
+            />
+          </div>
+        </div>
+
+        {/* 3. Accent Color */}
         <div className="p-2.5 bg-[#F8F9FA] border border-[#D4D4D4] rounded-lg space-y-2">
           <label className="text-[11px] font-bold uppercase tracking-wider text-[#212121] flex items-center gap-1.5">
             <Palette className="w-3.5 h-3.5 text-[#217346]" />
-            Accent Color
+            3. Accent Color
           </label>
           <div className="flex items-center gap-1.5 flex-wrap">
             {KPI_ACCENT_SWATCHES.map((c) => (

@@ -115,6 +115,17 @@ export interface DashboardKpiConfig {
   // changes must stop overwriting it — mirrors DashboardVisualConfig's
   // customTitle flag below.
   customTitle?: boolean;
+  // Power BI-style "General"/"Title" format-pane depth, mirroring
+  // DashboardVisualConfig's equivalent fields so KPI cards get the same
+  // typography and background/border controls as chart visuals.
+  titleFontSize?: number;
+  titleColor?: string;
+  titleAlign?: 'left' | 'center' | 'right';
+  titleBold?: boolean;
+  showBorder?: boolean;
+  borderColor?: string;
+  backgroundColor?: string;
+  borderRadius?: number;
 }
 
 export type LegendPositionType =
@@ -5179,15 +5190,39 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         setSelectedKpiId(kpi.id);
                         setSelectedVisualId(null);
                       }}
-                      className={`p-5 rounded-2xl backdrop-blur-xl transition-all cursor-pointer flex flex-col justify-between ${
+                      style={{
+                        ...(kpi.backgroundColor ? { backgroundColor: kpi.backgroundColor } : {}),
+                        ...(kpi.showBorder === false
+                          ? { borderWidth: 0 }
+                          : kpi.borderColor
+                          ? { borderColor: kpi.borderColor }
+                          : {}),
+                        ...(kpi.borderRadius !== undefined ? { borderRadius: `${kpi.borderRadius}px` } : {}),
+                      }}
+                      className={`p-5 ${
+                        kpi.borderRadius !== undefined ? '' : 'rounded-2xl'
+                      } backdrop-blur-xl transition-all cursor-pointer flex flex-col justify-between ${
                         isKpiSelected
-                          ? 'bg-white/95 border-2 border-emerald-600 ring-4 ring-emerald-500/20 shadow-lg'
-                          : 'bg-white/75 hover:bg-white/90 border border-white/60 hover:border-emerald-200 shadow-xs hover:shadow-md'
+                          ? `border-2 border-emerald-600 ring-4 ring-emerald-500/20 shadow-lg${
+                              kpi.backgroundColor ? '' : ' bg-white/95'
+                            }`
+                          : `border border-white/60 hover:border-emerald-200 shadow-xs hover:shadow-md${
+                              kpi.backgroundColor ? '' : ' bg-white/75 hover:bg-white/90'
+                            }`
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                          <span
+                            style={{
+                              fontSize: kpi.titleFontSize ? `${kpi.titleFontSize}px` : undefined,
+                              color: kpi.titleColor || undefined,
+                              textAlign: kpi.titleAlign || undefined,
+                              fontWeight: kpi.titleBold === false ? 500 : undefined,
+                              display: kpi.titleAlign && kpi.titleAlign !== 'left' ? 'block' : undefined,
+                            }}
+                            className="text-xs font-semibold uppercase tracking-wider text-slate-500"
+                          >
                             {kpi.title}
                           </span>
                           <div

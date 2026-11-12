@@ -5798,12 +5798,20 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               queries={queries}
               selectedDataset={selectedDataset}
               columns={columns}
-              activeVisual={activeVisual}
+              activeVisual={!activeKpi ? activeVisual : null}
+              activeKpi={activeKpi}
               onBindFieldToVisual={(colName, role) => {
-                if (!activeVisual) return;
-                if (role === 'category') updateActiveVisual({ categoryCol: colName });
-                else if (role === 'value') updateActiveVisual({ valueCol: colName });
-                else if (role === 'series') updateActiveVisual({ seriesCol: colName });
+                if (!activeKpi && activeVisual) {
+                  if (role === 'category') updateActiveVisual({ categoryCol: colName });
+                  else if (role === 'value') updateActiveVisual({ valueCol: colName });
+                  else if (role === 'series') updateActiveVisual({ seriesCol: colName });
+                } else if (activeKpi) {
+                  // A KPI card only has one bindable field (its metric
+                  // column), so any field-row click/drop while a KPI is
+                  // selected sets that, regardless of which quick-action
+                  // role was clicked.
+                  updateActiveKpi({ column: colName });
+                }
               }}
             />
           </div>

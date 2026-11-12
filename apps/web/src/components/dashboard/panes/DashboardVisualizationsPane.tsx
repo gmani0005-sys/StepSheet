@@ -87,6 +87,37 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
 }) => {
   const [formatSearch, setFormatSearch] = useState('');
 
+  // Power BI-style drag-and-drop onto field wells: DashboardDataPane marks
+  // each field row draggable and puts its column name in the plain-text
+  // transfer; a well here accepts the drop and calls back into the same
+  // update function its <select> already uses, so dragging is purely an
+  // additional way to set the same state — the dropdown stays as the
+  // precise/keyboard-accessible path.
+  const [dragOverWell, setDragOverWell] = useState<string | null>(null);
+
+  const wellDropHandlers = (wellId: string, onField: (fieldName: string) => void) => ({
+    onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      if (dragOverWell !== wellId) setDragOverWell(wellId);
+    },
+    onDragLeave: (e: React.DragEvent<HTMLDivElement>) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+      setDragOverWell((prev) => (prev === wellId ? null : prev));
+    },
+    onDrop: (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setDragOverWell(null);
+      const fieldName = e.dataTransfer.getData('text/plain');
+      if (fieldName) onField(fieldName);
+    },
+  });
+
+  const wellDropClass = (wellId: string) =>
+    dragOverWell === wellId
+      ? 'ring-2 ring-[#217346] ring-offset-1 bg-[#E6F2EB]/50 rounded-lg'
+      : '';
+
   const formatTabLabel = activeKpi
     ? 'Format KPI'
     : activeVisual
@@ -456,13 +487,17 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
 
                 {/* Category / Axis Well */}
                 {activeVisual.type !== 'histogram' && (
-                  <div>
+                  <div
+                    {...wellDropHandlers('category', (name) => onUpdateActiveVisual({ categoryCol: name }))}
+                    className={`transition-shadow ${wellDropClass('category')}`}
+                  >
                     <label className="text-xs font-medium text-[#605E5C] block mb-1">
                       {activeVisual.type === 'matrix'
                         ? 'Matrix Rows (Row Groups)'
                         : activeVisual.type === 'table'
                         ? 'Primary Group Column'
                         : 'Category / Axis (X-Axis)'}
+                      <span className="text-[10px] font-normal text-[#8A8886] normal-case ml-1">— drag a field here</span>
                     </label>
                     <select
                       aria-label="Visual Category Axis"
@@ -485,13 +520,17 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
                   activeVisual.type === 'stacked_column' ||
                   activeVisual.type === 'matrix' ||
                   activeVisual.type === 'table') && (
-                  <div>
+                  <div
+                    {...wellDropHandlers('series', (name) => onUpdateActiveVisual({ seriesCol: name }))}
+                    className={`transition-shadow ${wellDropClass('series')}`}
+                  >
                     <label className="text-xs font-semibold text-[#217346] block mb-1">
                       {activeVisual.type === 'matrix'
                         ? 'Matrix Columns (Pivot Header)'
                         : activeVisual.type === 'table'
                         ? 'Secondary Detail Column'
                         : 'Legend / Series (Cluster / Stack By)'}
+                      <span className="text-[10px] font-normal text-[#8A8886] ml-1">— drag a field here</span>
                     </label>
                     <select
                       aria-label="Visual Legend Series"
@@ -510,7 +549,10 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
 
                 {/* Values / Metric Well */}
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
+                  <div
+                    {...wellDropHandlers('value', (name) => onUpdateActiveVisual({ valueCol: name }))}
+                    className={`transition-shadow ${wellDropClass('value')}`}
+                  >
                     <label className="text-xs font-medium text-[#605E5C] block mb-1">
                       Values (Y-Axis)
                     </label>
@@ -576,9 +618,13 @@ export const DashboardVisualizationsPane: React.FC<DashboardVisualizationsPanePr
                   KPI Card Fields
                 </span>
 
-                <div>
+                <div
+                  {...wellDropHandlers('kpi-column', (name) => onUpdateActiveKpi({ column: name }))}
+                  className={`transition-shadow ${wellDropClass('kpi-column')}`}
+                >
                   <label className="text-xs font-medium text-[#605E5C] block mb-1">
                     Metric Column
+                    <span className="text-[10px] font-normal text-[#8A8886] ml-1">— drag a field here</span>
                   </label>
                   <select
                     aria-label="KPI Metric Column"

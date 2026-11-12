@@ -9,11 +9,12 @@ import {
   Type,
   Table2,
   Plus,
+  GripVertical,
 } from 'lucide-react';
 import { DashboardPaneWrapper, DashboardPaneConfig } from './DashboardPaneWrapper';
 import { Dataset, ColumnSchema, DataType } from '../../../types';
 import { QueryConnection } from '../../../store/workbenchStore';
-import { DashboardVisualConfig } from '../DashboardModal';
+import { DashboardVisualConfig, DashboardKpiConfig } from '../DashboardModal';
 
 interface DashboardDataPaneProps {
   config: DashboardPaneConfig;
@@ -25,6 +26,7 @@ interface DashboardDataPaneProps {
   selectedDataset: Dataset | null;
   columns: ColumnSchema[];
   activeVisual: DashboardVisualConfig | null;
+  activeKpi?: DashboardKpiConfig | null;
   onBindFieldToVisual: (columnName: string, role: 'category' | 'value' | 'series') => void;
 }
 
@@ -38,6 +40,7 @@ export const DashboardDataPane: React.FC<DashboardDataPaneProps> = ({
   selectedDataset,
   columns,
   activeVisual,
+  activeKpi,
   onBindFieldToVisual,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -146,16 +149,28 @@ export const DashboardDataPane: React.FC<DashboardDataPaneProps> = ({
                       ) : (
                         filteredCols.map((col) => {
                           const isBoundCategory = activeVisual?.categoryCol === col.name;
-                          const isBoundValue = activeVisual?.valueCol === col.name;
+                          const isBoundValue =
+                            activeVisual?.valueCol === col.name || activeKpi?.column === col.name;
                           const isChecked = isBoundCategory || isBoundValue;
 
                           return (
                             <div
                               key={col.name}
-                              className="flex items-center justify-between px-2 py-1 rounded hover:bg-[#F3F3F3] text-xs text-[#212121] group"
-                              title={`${col.name} (${col.data_type})`}
+                              draggable
+                              onDragStart={(e) => {
+                                // Power BI-style field drag: drop onto a
+                                // Category/Values/Legend well in the
+                                // Visualizations pane to bind it there,
+                                // for the active visual or KPI card.
+                                e.dataTransfer.setData('text/plain', col.name);
+                                e.dataTransfer.setData('application/x-stepsheet-field-type', col.data_type);
+                                e.dataTransfer.effectAllowed = 'copy';
+                              }}
+                              className="flex items-center justify-between px-2 py-1 rounded hover:bg-[#F3F3F3] text-xs text-[#212121] group cursor-grab active:cursor-grabbing"
+                              title={`${col.name} (${col.data_type}) — drag onto a field well, or use the checkbox`}
                             >
-                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                <GripVertical className="w-3 h-3 text-[#C8C6C4] group-hover:text-[#8A8886] shrink-0" />
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
@@ -189,6 +204,18 @@ export const DashboardDataPane: React.FC<DashboardDataPaneProps> = ({
                                     title="Add to Values / Metric"
                                   >
                                     Value
+                                  </button>
+                                </div>
+                              )}
+                              {!activeVisual && activeKpi && (
+                                <div className="opacity-0 group-hover:opacity-100 shrink-0 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => onBindFieldToVisual(col.name, 'value')}
+                                    className="px-1 py-0.5 text-[9px] font-bold bg-[#E6F2EB] text-[#185C37] rounded hover:bg-[#cce5d6]"
+                                    title="Set as this KPI's metric column"
+                                  >
+                                    Set as Metric
                                   </button>
                                 </div>
                               )}

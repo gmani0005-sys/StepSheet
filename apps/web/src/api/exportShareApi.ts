@@ -647,12 +647,19 @@ export function createDashboardPresentationBlob(data: DashboardExportData): Blob
     .join('\n\n');
 
   const readme = [
-    `StepSheet Presentation Deck: ${dsTitle}`,
+    `StepSheet Presentation Pack: ${dsTitle}`,
     `========================================`,
-    `This archive contains executive presentation deliverables:`,
-    `1. presentation.html -> Standalone presentation deck (open in Chrome, Edge, Safari)`,
-    `2. slide1_cover.txt, slide2_kpis.txt, visual_slides.txt -> Raw presentation scripts`,
-    `3. Use PowerPoint to import or open presentation.html in presentation mode (F11).`,
+    `This is an HTML slide deck, not a native PowerPoint (.pptx) file.`,
+    `It will not open in Microsoft PowerPoint.`,
+    ``,
+    `To present:`,
+    `1. Open presentation.html in any browser (Chrome, Edge, Safari).`,
+    `2. Press F11 for full-screen presentation mode.`,
+    ``,
+    `Also included:`,
+    `- slide1_cover.txt, slide2_kpi_scorecard.txt, visual_slides.txt`,
+    `  Plain-text versions of each slide's content, handy for pasting`,
+    `  into an existing PowerPoint deck if you need a real .pptx file.`,
   ].join('\n');
 
   return createZipBlob([
@@ -1996,6 +2003,50 @@ async function createLocalExportJob(payload: ExportJobCreatePayload): Promise<Ex
   return job;
 }
 
+/**
+ * Records a quick-download (downloadDashboard) into the same local job
+ * registry that the Export & Share Studio's "History" tab reads from, so a
+ * download triggered from the dashboard's download-split-button actually
+ * shows up under Export History instead of leaving that tab permanently
+ * empty. There is no backend in this standalone app, so this is the only
+ * record of the download that exists anywhere.
+ */
+function registerLocalExportHistoryEntry(
+  data: DashboardExportData,
+  format: string,
+  filename: string,
+  sizeBytes: number
+): void {
+  try {
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const fileId = `file_${Date.now()}`;
+    const job: ExportJobStatus = {
+      job_id: jobId,
+      project_id: 'local',
+      dataset_id: data.datasetName || 'dataset',
+      format,
+      status: 'completed',
+      progress_pct: 100,
+      message: 'Downloaded successfully',
+      files: [
+        {
+          file_id: fileId,
+          filename,
+          file_type: format,
+          size_bytes: sizeBytes,
+          download_url: `#local-${fileId}`,
+        },
+      ],
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      total_rows: data.filteredRowCount,
+    };
+    localJobRegistry.set(jobId, job);
+  } catch {
+    // History is a convenience, never worth failing the download over.
+  }
+}
+
 export const exportShareApi = {
   /**
    * Direct high-fidelity Dashboard export for PDF, PPTX, Packaged Workbook, HTML, and CSV.
@@ -2029,6 +2080,11 @@ export const exportShareApi = {
     } else if (format === 'html') {
       blob = createDashboardSswbHtmlBlob(data);
       filename = `${safeTitle}_dashboard.html`;
+    } else if (format === 'json') {
+      blob = new Blob([JSON.stringify(data.rows, null, 2)], {
+        type: 'application/json;charset=utf-8;',
+      });
+      filename = `${safeTitle}_data.json`;
     } else if (format === 'csv') {
       const csvLines = [
         data.columns.join(','),
@@ -2085,11 +2141,19 @@ export const exportShareApi = {
       filename = `${safeTitle}_powerbi_starter.zip`;
     } else {
       // xlsx_values / packaged_workbook
+      // NOTE: this is the "Excel 2003 XML Spreadsheet" (SpreadsheetML) format.
+      // Excel opens it natively by double-click only when it carries the
+      // conventional .xls extension — a .xlsx or .xml extension on this
+      // exact same content either shows a "file corrupt" warning (.xlsx,
+      // since that expects a real OOXML zip) or doesn't auto-open in Excel
+      // at all (.xml, no default file association). .xls is the correct,
+      // honest extension for this content.
       blob = createDashboardExcelXml(data);
-      filename = `${safeTitle}_packaged_workbook.xml`;
+      filename = `${safeTitle}_packaged_workbook.xls`;
     }
 
     triggerBrowserDownload(blob, filename);
+    registerLocalExportHistoryEntry(data, format, filename, blob.size);
   },
 
 

@@ -124,7 +124,7 @@ describe('DashboardModal Power BI-Style Panes (Filters | Visualizations | Data)'
     expect(screen.getByText('Universal Packaged Workbook (.sswb.html)')).toBeDefined();
     expect(screen.getByText('StepSheet Package (.sswb)')).toBeDefined();
     expect(screen.getByText('Export & Share Studio...')).toBeDefined();
-    expect(screen.getByText('Packaged Workbook (.xlsx)')).toBeDefined();
+    expect(screen.getByText('Packaged Workbook (.xls)')).toBeDefined();
     expect(screen.getByText('PDF Executive Dashboard (.pdf)')).toBeDefined();
 
     // 3. Click Share dropdown chevron to open share options

@@ -4515,7 +4515,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
             {/* DOWNLOAD SPLIT BUTTON */}
             {SHARE_EXPORT_ENABLED && (
-              <div className="relative inline-flex items-center shadow-sm rounded-md" ref={downloadMenuRef}>
+              <div className="no-print relative inline-flex items-center shadow-sm rounded-md" ref={downloadMenuRef}>
                 <button
                   type="button"
                   data-testid="dashboard-download-btn"
@@ -4582,8 +4582,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     >
                       <FileSpreadsheet className="w-4 h-4 text-green-700 shrink-0" />
                       <div>
-                        <div className="font-semibold text-gray-900">Packaged Workbook (.xlsx)</div>
-                        <div className="text-[10px] text-gray-500">Dashboard summary with native Excel charts, KPIs &amp; raw data</div>
+                        <div className="font-semibold text-gray-900">Packaged Workbook (.xls)</div>
+                        <div className="text-[10px] text-gray-500">Dashboard summary tables, KPIs &amp; raw data — opens directly in Excel</div>
                       </div>
                     </button>
                     <button
@@ -4615,19 +4615,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     >
                       <Presentation className="w-4 h-4 text-orange-600 shrink-0" />
                       <div>
-                        <div className="font-semibold text-gray-900">Interactive PowerPoint (.pptx)</div>
-                        <div className="text-[10px] text-gray-500">Presentation deck with native PowerPoint charts on every slide</div>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickDownload('html')}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2.5 text-gray-700"
-                    >
-                      <Activity className="w-4 h-4 text-teal-600 shrink-0" />
-                      <div>
-                        <div className="font-semibold text-gray-900">Standalone HTML Dashboard (.html)</div>
-                        <div className="text-[10px] text-gray-500">Single-file interactive offline dashboard with charts</div>
+                        <div className="font-semibold text-gray-900">Presentation Pack (.zip)</div>
+                        <div className="text-[10px] text-gray-500">HTML slide deck + speaker notes — opens in any browser, not a native .pptx</div>
                       </div>
                     </button>
                     <button
@@ -6156,7 +6145,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       {chartTooltip && (
         <div
           data-testid="chart-hover-tooltip"
-          className="fixed z-[9999] pointer-events-none bg-white border border-[#D4D4D4] rounded-lg shadow-xl px-3 py-2 text-xs min-w-[120px]"
+          className="no-print fixed z-[9999] pointer-events-none bg-white border border-[#D4D4D4] rounded-lg shadow-xl px-3 py-2 text-xs min-w-[120px]"
           style={{
             left: `${chartTooltip.x + 14}px`,
             top: `${chartTooltip.y + 14}px`,

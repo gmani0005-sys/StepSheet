@@ -14,6 +14,8 @@ import {
   TrendingUp,
   PieChart,
   LayoutGrid,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import {
@@ -68,6 +70,11 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
   onOpenLocalAiSetup,
 }) => {
   const [activeMode, setActiveMode] = useState<AiDashboardMode>('create');
+  // Collapsed by default once a dashboard already has content — the full
+  // composer (tabs + input + templates) only needs to dominate the screen
+  // on first run. Returning to an existing dashboard shouldn't push the
+  // actual visuals below the fold.
+  const [isComposerOpen, setIsComposerOpen] = useState(currentDashboard.visuals.length === 0);
   const [prompt, setPrompt] = useState('');
   const [targetVisId, setTargetVisId] = useState<string>(selectedVisualId || (currentDashboard.visuals[0]?.id || ''));
   const [loading, setLoading] = useState(false);
@@ -176,6 +183,9 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         });
         setPrompt('');
         setPatchSummary(`Generated complete Glassmorphic Dashboard with ${mappedKpis.length} KPIs, ${mappedVisuals.length} visuals & slicers.`);
+        // The dashboard now has content, so collapse the composer to give the
+        // canvas the room it deserves instead of staying pinned open.
+        setIsComposerOpen(false);
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to generate dashboard with AI.');
@@ -444,7 +454,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
   // glassmorphism/pill treatment, which looked like a different app
   // bolted on top of the ribbon above it.
   return (
-    <div className="px-6 py-3 bg-[#F3F3F3] border-b border-[#D4D4D4] flex flex-col gap-2.5">
+    <div className={`px-6 bg-[#F3F3F3] border-b border-[#D4D4D4] flex flex-col gap-2.5 ${isComposerOpen ? 'py-3' : 'py-1.5'}`}>
       {/* Top Header & Operational Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Branding & Capability Badge */}
@@ -455,58 +465,67 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-[#212121]">Create Dashboard with AI</span>
-              <span className="text-[10px] bg-[#E6F2EB] text-[#185C37] px-2 py-0.5 rounded-[2px] font-semibold border border-[#217346]/30">
-                Native Julius-Style (DuckDB)
-              </span>
+              {isComposerOpen && (
+                <span className="text-[10px] bg-[#E6F2EB] text-[#185C37] px-2 py-0.5 rounded-[2px] font-semibold border border-[#217346]/30">
+                  Native Julius-Style (DuckDB)
+                </span>
+              )}
+              {!isComposerOpen && currentDashboard.visuals.length > 0 && (
+                <span className="text-[11px] text-[#605E5C]">
+                  {currentDashboard.visuals.length} visual{currentDashboard.visuals.length === 1 ? '' : 's'} on this page — open to add, edit or regenerate
+                </span>
+              )}
             </div>
           </div>
         </div>
 
         {/* Center: 3 Dedicated Action Tabs */}
-        <div className="flex items-center gap-1 bg-white p-0.5 rounded-[2px] border border-[#D4D4D4] text-xs">
-          <button
-            type="button"
-            onClick={() => setActiveMode('create')}
-            className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
-              activeMode === 'create'
-                ? 'bg-[#217346] text-white'
-                : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
-            }`}
-          >
-            <Wand2 className="w-3.5 h-3.5" />
-            <span>Create New Dashboard</span>
-          </button>
+        {isComposerOpen && (
+          <div className="flex items-center gap-1 bg-white p-0.5 rounded-[2px] border border-[#D4D4D4] text-xs">
+            <button
+              type="button"
+              onClick={() => setActiveMode('create')}
+              className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
+                activeMode === 'create'
+                  ? 'bg-[#217346] text-white'
+                  : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
+              }`}
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+              <span>Create New Dashboard</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveMode('add')}
-            className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
-              activeMode === 'add'
-                ? 'bg-[#217346] text-white'
-                : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
-            }`}
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span>Add Visual</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveMode('add')}
+              className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
+                activeMode === 'add'
+                  ? 'bg-[#217346] text-white'
+                  : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
+              }`}
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Add Visual</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveMode('edit')}
-            className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
-              activeMode === 'edit'
-                ? 'bg-[#217346] text-white'
-                : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
-            }`}
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>Edit Visual</span>
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => setActiveMode('edit')}
+              className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
+                activeMode === 'edit'
+                  ? 'bg-[#217346] text-white'
+                  : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Edit Visual</span>
+            </button>
+          </div>
+        )}
 
-        {/* Right: Local AI Diagnostics link */}
+        {/* Right: Local AI Diagnostics link + collapse toggle */}
         <div className="flex items-center gap-2 text-xs">
-          {onOpenLocalAiSetup && (
+          {onOpenLocalAiSetup && isComposerOpen && (
             <button
               onClick={onOpenLocalAiSetup}
               className="text-[11px] text-[#605E5C] hover:text-[#217346] flex items-center gap-1 transition-colors font-medium"
@@ -516,9 +535,21 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
               <span>Local AI Engine Active</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setIsComposerOpen((v) => !v)}
+            aria-expanded={isComposerOpen}
+            className="flex items-center gap-1 px-2 py-1 rounded-[2px] border border-[#D4D4D4] bg-white hover:border-[#217346] text-[11px] font-semibold text-[#605E5C] hover:text-[#217346] transition-colors shrink-0"
+            title={isComposerOpen ? 'Collapse AI dashboard composer' : 'Open AI dashboard composer'}
+          >
+            {isComposerOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            <span>{isComposerOpen ? 'Collapse' : 'AI Tools'}</span>
+          </button>
         </div>
       </div>
 
+      {!isComposerOpen ? null : (
+      <>
       {/* Mode-Specific Contextual Toolbars */}
       {activeMode === 'edit' && currentDashboard.visuals.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 py-1 px-2.5 bg-white rounded-[2px] border border-[#D4D4D4] text-xs text-[#212121]">
@@ -717,8 +748,10 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           </button>
         </div>
       )}
+      </>
+      )}
 
-      {/* Messages */}
+      {/* Messages — shown regardless of composer collapse state so feedback from the last action is never hidden */}
       {errorMsg && (
         <div className="text-[11px] text-[#C50F1F] bg-[#FDE7E9] border border-[#C50F1F]/30 px-3 py-1.5 rounded-[2px] flex items-center gap-1.5">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />

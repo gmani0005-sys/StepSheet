@@ -4257,7 +4257,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     >
       <div className="bg-white overflow-hidden flex flex-col text-[#212121] w-screen h-screen border-0 rounded-none">
         {/* Top Header */}
-        <div className="flex items-center justify-between px-6 py-3.5 border-b border-[#D4D4D4] bg-[#F3F3F3]">
+        <div className="flex items-center justify-between px-6 py-2.5 border-b border-[#D4D4D4] bg-[#F3F3F3]">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-[#E6F2EB] border border-[#217346]/30 rounded-lg text-[#217346]">
               <BarChart3 className="w-5 h-5" />
@@ -4741,7 +4741,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         />
 
         {/* Multi-Slicer & Cross-Filter Bar */}
-        <div className="px-6 py-2.5 bg-[#F8F9FA] border-b border-[#D4D4D4] flex flex-col gap-2">
+        <div className="px-6 py-1.5 bg-[#F8F9FA] border-b border-[#D4D4D4] flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-[#217346] flex items-center gap-1">

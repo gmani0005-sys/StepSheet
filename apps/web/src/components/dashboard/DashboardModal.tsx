@@ -577,6 +577,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   const downloadMenuRef = useRef<HTMLDivElement>(null);
   const shareMenuRef = useRef<HTMLDivElement>(null);
   const modalContainerRef = useRef<HTMLDivElement>(null);
+  // Which slicer's value-picker dropdown is open (column name), compact
+  // button-and-popover pattern instead of spreading every value out as an
+  // inline chip row — keeps the filter bar to one line per few slicers so
+  // more filter columns fit without the bar eating vertical space.
+  const [openSlicerDropdown, setOpenSlicerDropdown] = useState<string | null>(null);
+  const [slicerSearchText, setSlicerSearchText] = useState('');
+  const slicerDropdownRef = useRef<HTMLDivElement>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isLocalAiSetupOpen, setIsLocalAiSetupOpen] = useState(false);
 
@@ -626,6 +633,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       }
       if (shareMenuRef.current && !shareMenuRef.current.contains(e.target as Node)) {
         setIsShareMenuOpen(false);
+      }
+      if (slicerDropdownRef.current && !slicerDropdownRef.current.contains(e.target as Node)) {
+        setOpenSlicerDropdown(null);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
@@ -4789,20 +4799,32 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           </div>
 
           {slicerColumns.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
               {slicerColumns.map((col) => {
                 const vals = getDistinctValuesForColumn(col);
                 const selectedVals = multiSlicerSelections[col] || [];
+                const isOpen = openSlicerDropdown === col;
+                const summary =
+                  selectedVals.length === 0
+                    ? 'All'
+                    : selectedVals.length === 1
+                    ? selectedVals[0]
+                    : `${selectedVals.length} selected`;
+                const visibleVals = slicerSearchText.trim()
+                  ? vals.filter((v) => v.toLowerCase().includes(slicerSearchText.trim().toLowerCase()))
+                  : vals;
+
                 return (
                   <div
                     key={col}
-                    className="flex flex-wrap items-center gap-1.5 px-2.5 py-1.5 bg-white border border-[#D4D4D4] rounded-lg shadow-sm"
+                    className="relative flex items-center gap-1 bg-white border border-[#D4D4D4] rounded-[2px] shadow-sm"
+                    ref={isOpen ? slicerDropdownRef : undefined}
                   >
                     <select
                       aria-label={`Slicer Column ${col}`}
                       value={col}
                       onChange={(e) => handleChangeTopSlicerColumn(col, e.target.value)}
-                      className="bg-[#F3F3F3] border border-[#D4D4D4] rounded px-2 py-0.5 text-xs font-bold text-[#212121]"
+                      className="bg-[#F3F3F3] border-r border-[#D4D4D4] rounded-l-[2px] pl-2 pr-1 py-1 text-[11px] font-bold text-[#212121] max-w-[110px]"
                     >
                       {columns.map((c) => (
                         <option key={c.name} value={c.name}>
@@ -4813,43 +4835,83 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => clearColumnSlicer(col)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors ${
-                        selectedVals.length === 0
-                          ? 'bg-[#217346] text-white'
-                          : 'bg-[#F3F3F3] text-[#605E5C] hover:bg-[#E6E6E6]'
+                      onClick={() => {
+                        setSlicerSearchText('');
+                        setOpenSlicerDropdown(isOpen ? null : col);
+                      }}
+                      className={`flex items-center gap-1.5 pl-1.5 pr-2 py-1 text-[11px] font-semibold max-w-[150px] ${
+                        selectedVals.length > 0 ? 'text-[#185C37]' : 'text-[#444444]'
                       }`}
+                      title={selectedVals.length > 0 ? selectedVals.join(', ') : 'All values'}
                     >
-                      All
+                      <span className="truncate">{summary}</span>
+                      <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                     </button>
-
-                    {vals.slice(0, 8).map((v) => {
-                      const isPicked = selectedVals.includes(v);
-                      return (
-                        <button
-                          key={v}
-                          type="button"
-                          onClick={() => toggleSlicerValue(col, v)}
-                          className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                            isPicked
-                              ? 'bg-[#E6F2EB] text-[#185C37] border border-[#217346] font-bold'
-                              : 'bg-[#F8F9FA] text-[#212121] border border-[#E1E1E1] hover:bg-[#EFEFEF]'
-                          }`}
-                        >
-                          <span>{v}</span>
-                        </button>
-                      );
-                    })}
 
                     {slicerColumns.length > 1 && (
                       <button
                         type="button"
                         onClick={() => handleRemoveTopSlicer(col)}
                         title="Remove this Slicer"
-                        className="p-0.5 text-[#605E5C] hover:text-[#C50F1F] ml-0.5"
+                        className="p-1 text-[#605E5C] hover:text-[#C50F1F] border-l border-[#D4D4D4]"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <X className="w-3 h-3" />
                       </button>
+                    )}
+
+                    {isOpen && (
+                      <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-[#8A8886] rounded-[2px] shadow-lg z-50 flex flex-col overflow-hidden">
+                        <div className="p-1.5 border-b border-[#E1E1E1]">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={slicerSearchText}
+                            onChange={(e) => setSlicerSearchText(e.target.value)}
+                            placeholder={`Search ${col}...`}
+                            className="w-full text-[11px] border border-[#D4D4D4] rounded-[2px] px-2 py-1 focus:outline-none focus:border-[#217346]"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between px-2 py-1 border-b border-[#E1E1E1] text-[10px]">
+                          <span className="text-[#605E5C]">
+                            {selectedVals.length === 0 ? 'Showing all values' : `${selectedVals.length} of ${vals.length} selected`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => clearColumnSlicer(col)}
+                            disabled={selectedVals.length === 0}
+                            className="font-semibold text-[#217346] hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-default"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div className="max-h-56 overflow-y-auto chips-scrollbar py-1">
+                          {visibleVals.length === 0 && (
+                            <div className="px-3 py-2 text-[11px] text-[#605E5C]">No matching values.</div>
+                          )}
+                          {visibleVals.map((v) => {
+                            const isPicked = selectedVals.includes(v);
+                            return (
+                              <button
+                                key={v}
+                                type="button"
+                                onClick={() => toggleSlicerValue(col, v)}
+                                className="w-full flex items-center gap-2 px-2.5 py-1 text-[11px] text-left hover:bg-[#F3F3F3]"
+                              >
+                                <span
+                                  className={`w-3.5 h-3.5 rounded-[2px] border shrink-0 flex items-center justify-center ${
+                                    isPicked
+                                      ? 'bg-[#217346] border-[#217346] text-white'
+                                      : 'border-[#8A8886] bg-white'
+                                  }`}
+                                >
+                                  {isPicked && <Check className="w-2.5 h-2.5" />}
+                                </span>
+                                <span className="truncate text-[#212121]">{v}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     )}
                   </div>
                 );

@@ -5263,27 +5263,115 @@ export const localEngine = {
     const profile = profileDatasetFields(cols, rows);
     const pLower = (prompt || '').toLowerCase();
 
-    // Prioritize mentioned metrics / dimensions from prompt
+    // Honor an explicit "top N" the user typed (e.g. "top 5 customers")
+    // instead of silently defaulting to 10 — a stated count is a literal,
+    // unambiguous ask and ignoring it is one of the clearest ways this
+    // feature can feel like it "didn't understand" the request.
+    const topNMatch = pLower.match(/top\s*(\d{1,3})\b/);
+    const requestedTopN = topNMatch ? Math.max(1, Math.min(50, parseInt(topNMatch[1], 10))) : null;
+
+    // Prioritize mentioned metrics / dimensions from prompt. A plain
+    // substring scan (the previous approach) let an incidental word like
+    // "status" in "...order status breakdown" hijack the primary grouping
+    // dimension away from the dashboard's real focus (e.g. a prompt about
+    // "customers"). Score every candidate column instead: split each column
+    // name into its significant words, stem them, and count how many appear
+    // as whole words anywhere in the prompt; a column named right after
+    // "by " gets a bonus since that phrasing is the strongest grouping
+    // signal English has ("by region", "by product").
     let primaryMeasure = profile.primaryMeasure;
     let secondaryMeasure = profile.secondaryMeasure;
     let primaryDim = profile.primaryDim;
     let secondaryDim = profile.secondaryDim;
 
-    for (const m of profile.measures) {
-      const cleanM = m.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cleanM && pLower.includes(cleanM)) {
-        primaryMeasure = m;
-        break;
+    const stemWord = (w: string): string => {
+      if (w.endsWith('ies') && w.length > 4) return `${w.slice(0, -3)}y`;
+      if (w.endsWith('es') && w.length > 4) return w.slice(0, -2);
+      if (w.endsWith('s') && w.length > 3) return w.slice(0, -1);
+      return w;
+    };
+    const promptWordSet = new Set(
+      pLower
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(stemWord)
+    );
+    const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'per', 'top', 'id']);
+    const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const byPhraseHit = (col: string): boolean => {
+      const cleanCol = col.toLowerCase().replace(/[_-]+/g, ' ').trim();
+      if (!cleanCol) return false;
+      return new RegExp(`\\bby\\s+${escapeRe(cleanCol)}\\b`).test(pLower);
+    };
+    // "customer-focused dashboard" / "a report about regions" / "centered
+    // on products" name the dashboard's real subject even when no column
+    // word is immediately preceded by "by " — recognize that phrasing as a
+    // strong signal too, since it's how people naturally state a focus.
+    const focusPhraseHit = (col: string): boolean => {
+      const cleanCol = col.toLowerCase().replace(/[_-]+/g, ' ').trim();
+      if (!cleanCol) return false;
+      const firstWord = cleanCol.split(/\s+/)[0];
+      if (!firstWord || firstWord.length < 3) return false;
+      const stem = escapeRe(stemWord(firstWord));
+      return new RegExp(`${stem}\\w*[\\s-]*(focused|focus|centered|centred)\\b`).test(pLower) ||
+        new RegExp(`\\b(about|regarding|on)\\s+${stem}\\w*`).test(pLower);
+    };
+    const scoreColumnAgainstPrompt = (col: string): number => {
+      const cleanCol = col.toLowerCase().replace(/[_-]+/g, ' ').trim();
+      const words = cleanCol.split(/\s+/).filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
+      if (words.length === 0) return 0;
+      let overlap = 0;
+      for (const w of words) {
+        if (promptWordSet.has(stemWord(w))) overlap++;
       }
+      if (overlap === 0) return 0;
+      return overlap + (byPhraseHit(col) ? 2 : 0) + (focusPhraseHit(col) ? 4 : 0);
+    };
+
+    if (pLower.trim()) {
+      let bestMeasure: { col: string; score: number } | null = null;
+      for (const m of profile.measures) {
+        const score = scoreColumnAgainstPrompt(m);
+        if (score > 0 && (!bestMeasure || score > bestMeasure.score)) bestMeasure = { col: m, score };
+      }
+      if (bestMeasure) primaryMeasure = bestMeasure.col;
+
+      // Raw ID columns ("order_id", "customer_id") tend to tie with their
+      // human-readable counterpart ("customer_name") on word overlap alone,
+      // and a dashboard grouped by a bare ID column reads as broken rather
+      // than intentional. Prefer non-ID dimensions first; only fall back to
+      // an ID column if nothing else in the dataset matched the prompt.
+      const isIdCol = (c: string) => c.toLowerCase().endsWith('_id') || c.toLowerCase().endsWith('id');
+      let bestDim: { col: string; score: number } | null = null;
+      let bestIdDim: { col: string; score: number } | null = null;
+      for (const d of profile.dimensions) {
+        const score = scoreColumnAgainstPrompt(d);
+        if (score <= 0) continue;
+        if (isIdCol(d)) {
+          if (!bestIdDim || score > bestIdDim.score) bestIdDim = { col: d, score };
+        } else if (!bestDim || score > bestDim.score) {
+          bestDim = { col: d, score };
+        }
+      }
+      if (bestDim) primaryDim = bestDim.col;
+      else if (bestIdDim) primaryDim = bestIdDim.col;
     }
 
-    for (const d of profile.dimensions) {
-      const cleanD = d.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cleanD && pLower.includes(cleanD)) {
-        primaryDim = d;
-        break;
-      }
+    // A dataset with no genuine numeric column (profile.measures is empty)
+    // still falls back to colNames[0] for primaryMeasure/secondaryMeasure —
+    // usually an ID or text field. Summing an ID column produces a
+    // meaningless chart, so detect that case once up front and pivot every
+    // measure-based KPI/visual to a row-count basis instead.
+    const hasRealMeasure = profile.measures.length > 0;
+    const fallbackCountCol =
+      profile.colNames.find((c) => c.toLowerCase().endsWith('id')) || primaryDim || profile.colNames[0] || 'id';
+    if (!hasRealMeasure) {
+      primaryMeasure = '';
+      secondaryMeasure = '';
     }
+    const vMeasureCol = hasRealMeasure ? primaryMeasure : fallbackCountCol;
+    const vAggFunc: 'sum' | 'count' = hasRealMeasure ? 'sum' : 'count';
 
     // 1. Build 4 Glassmorphism V22 KPI Stat Cards with genuine data-backed context
     // Never fabricate fake percentage comparisons: a percentage requires a real target column or multiple calendar periods (MoM/YoY).
@@ -5451,12 +5539,16 @@ export const localEngine = {
     let topGeo = 'Primary Region';
     let topGeoCount = 0;
 
-    if (Array.isArray(rows) && rows.length > 0 && primaryMeasure) {
+    if (Array.isArray(rows) && rows.length > 0) {
       const catMap = new Map<string, number>();
       const geoMap = new Map<string, number>();
 
       for (const r of rows) {
-        const val = Number(getRowVal(r, primaryMeasure)) || 0;
+        // With no real numeric measure, fall back to a plain row count per
+        // category so the narrative and "top category" insight still reads
+        // correctly for purely categorical/text datasets instead of
+        // silently staying stuck on the "Primary Segment" placeholder.
+        const val = hasRealMeasure ? Number(getRowVal(r, primaryMeasure)) || 0 : 1;
         totalPrimarySum += val;
 
         const catKey = String(getRowVal(r, primaryDim) || 'Other');
@@ -5492,9 +5584,11 @@ export const localEngine = {
     const avgValNum = Array.isArray(rows) && rows.length > 0 ? (totalPrimarySum / rows.length).toFixed(2) : '0';
     const topPctNum = totalPrimarySum > 0 ? (topCategorySum / totalPrimarySum) * 100 : 0;
     const driverSentence = topPctNum >= 15
-      ? `${topCategory} is the leading revenue driver generating ${topCategoryPct} of total volume.`
-      : `Volume is distributed across ${primaryDim}, led by ${topCategory} (${topCategoryPct}).`;
-    const narrativeInsight = `${driverSentence} Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions. Across all ${rows ? rows.length : 0} records, the per-record benchmark stands at ${avgValNum}.`;
+      ? `${topCategory} is the leading ${hasRealMeasure ? 'driver' : 'segment'} generating ${topCategoryPct} of total volume.`
+      : `Volume is distributed across ${humanizeField(primaryDim)}, led by ${topCategory} (${topCategoryPct}).`;
+    const narrativeInsight = hasRealMeasure
+      ? `${driverSentence} Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions. Across all ${rows ? rows.length : 0} records, the per-record benchmark stands at ${avgValNum}.`
+      : `${driverSentence} Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions, across ${rows ? rows.length : 0} total records.`;
 
     // 4. Build 6 Multi-Tier Complementary Visuals (Executive Grid V22)
     const visuals: any[] = [];
@@ -5503,11 +5597,11 @@ export const localEngine = {
     if (profile.dates.length > 0) {
       visuals.push({
         id: 'vis_hero_trend',
-        title: `${primaryMeasure} Trajectory & Monthly Run-Rate`,
+        title: `${humanizeField(vMeasureCol)} Trajectory & Monthly Run-Rate`,
         type: 'line_area',
         categoryCol: profile.dates[0],
-        valueCol: primaryMeasure,
-        aggFunc: 'sum',
+        valueCol: vMeasureCol,
+        aggFunc: vAggFunc,
         bins: 8,
         span: 2,
         customWidth: 976,
@@ -5522,11 +5616,11 @@ export const localEngine = {
     } else {
       visuals.push({
         id: 'vis_hero_trend',
-        title: `${primaryMeasure} Strategic Performance by ${primaryDim}`,
+        title: `${humanizeField(vMeasureCol)} Strategic Performance by ${humanizeField(primaryDim)}`,
         type: 'column',
         categoryCol: primaryDim,
-        valueCol: primaryMeasure,
-        aggFunc: 'sum',
+        valueCol: vMeasureCol,
+        aggFunc: vAggFunc,
         bins: 8,
         span: 2,
         customWidth: 976,
@@ -5542,11 +5636,11 @@ export const localEngine = {
     // Visual 2: Category Contribution Donut (Mid-Tier Left at x=16, y=372)
     visuals.push({
       id: 'vis_share_donut',
-      title: isSales ? `Revenue Contribution by ${primaryDim}` : `${primaryDim} Distribution Share`,
+      title: isSales ? `Revenue Contribution by ${humanizeField(primaryDim)}` : `${humanizeField(primaryDim)} Distribution Share`,
       type: 'donut',
       categoryCol: primaryDim,
-      valueCol: primaryMeasure,
-      aggFunc: 'sum',
+      valueCol: vMeasureCol,
+      aggFunc: vAggFunc,
       bins: 6,
       span: 1,
       customWidth: 480,
@@ -5559,15 +5653,16 @@ export const localEngine = {
     });
 
     // Visual 3: Ranked Performance Leaderboard Bar (Mid-Tier Right at x=512, y=372)
+    const leaderboardTopN = requestedTopN || 10;
     visuals.push({
       id: 'vis_leaderboard_bar',
-      title: `Top 10 High-Performing ${granularDim} Leaderboard`,
+      title: `Top ${leaderboardTopN} High-Performing ${humanizeField(granularDim)} Leaderboard`,
       type: 'bar',
       categoryCol: granularDim,
-      valueCol: primaryMeasure,
-      aggFunc: 'sum',
-      bins: 10,
-      topN: 10,
+      valueCol: vMeasureCol,
+      aggFunc: vAggFunc,
+      bins: leaderboardTopN,
+      topN: leaderboardTopN,
       span: 1,
       customWidth: 480,
       customHeight: 320,
@@ -5581,11 +5676,11 @@ export const localEngine = {
     // Visual 4: Geographic / Channel Breakdown (Deep Dive Left at x=16, y=708)
     visuals.push({
       id: 'vis_geo_column',
-      title: `${primaryMeasure} Breakdown by ${geoDim}`,
+      title: `${humanizeField(vMeasureCol)} Breakdown by ${humanizeField(geoDim)}`,
       type: 'column',
       categoryCol: geoDim,
-      valueCol: primaryMeasure,
-      aggFunc: 'sum',
+      valueCol: vMeasureCol,
+      aggFunc: vAggFunc,
       bins: 8,
       span: 1,
       customWidth: 480,
@@ -5601,10 +5696,10 @@ export const localEngine = {
     if (statusDim) {
       visuals.push({
         id: 'vis_pipeline_funnel',
-        title: `Fulfillment Pipeline & ${statusDim} Status`,
+        title: `Fulfillment Pipeline & ${humanizeField(statusDim)} Status`,
         type: 'funnel',
         categoryCol: statusDim,
-        valueCol: primaryMeasure,
+        valueCol: vMeasureCol,
         aggFunc: 'count',
         bins: 6,
         span: 1,
@@ -5619,7 +5714,7 @@ export const localEngine = {
     } else if (secondaryMeasure && secondaryMeasure !== primaryMeasure) {
       visuals.push({
         id: 'vis_pipeline_funnel',
-        title: `${secondaryMeasure} Distribution by ${primaryDim}`,
+        title: `${humanizeField(secondaryMeasure)} Distribution by ${humanizeField(primaryDim)}`,
         type: 'column',
         categoryCol: primaryDim,
         valueCol: secondaryMeasure,
@@ -5637,12 +5732,12 @@ export const localEngine = {
     } else {
       visuals.push({
         id: 'vis_pipeline_funnel',
-        title: `${primaryMeasure} by ${primaryDim} split by ${compDim}`,
+        title: `${humanizeField(vMeasureCol)} by ${humanizeField(primaryDim)} split by ${humanizeField(compDim)}`,
         type: 'clustered_bar',
         categoryCol: primaryDim,
         seriesCol: compDim !== primaryDim ? compDim : '',
-        valueCol: primaryMeasure,
-        aggFunc: 'sum',
+        valueCol: vMeasureCol,
+        aggFunc: vAggFunc,
         bins: 6,
         span: 1,
         customWidth: 480,
@@ -5658,12 +5753,12 @@ export const localEngine = {
     // Visual 6: Executive Operational Ledger Table (Span 2 / 976px at x=16, y=1044)
     visuals.push({
       id: 'vis_ledger_table',
-      title: `Executive Operational Ledger: ${primaryDim} & ${compDim} Matrix`,
+      title: `Executive Operational Ledger: ${humanizeField(primaryDim)} & ${humanizeField(compDim)} Matrix`,
       type: 'table',
       categoryCol: primaryDim,
       seriesCol: compDim !== primaryDim ? compDim : '',
-      valueCol: primaryMeasure,
-      aggFunc: 'sum',
+      valueCol: vMeasureCol,
+      aggFunc: vAggFunc,
       span: 2,
       customWidth: 976,
       customHeight: 340,

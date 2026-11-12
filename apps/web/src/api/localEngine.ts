@@ -5346,11 +5346,26 @@ export const localEngine = {
       }
     }
 
+    // Raw column names (snake_case / camelCase) read fine in a <select> but
+    // look like code on a KPI card ("customer_id"); humanize them for
+    // display while the `column` field keeps the real, queryable name.
+    const humanizeField = (name: string): string => {
+      if (!name) return '';
+      const spaced = name
+        .replace(/[_-]+/g, ' ')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .trim();
+      return spaced
+        .split(/\s+/)
+        .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+        .join(' ');
+    };
+
     const kpis: any[] = [];
     if (primaryMeasure) {
       kpis.push({
         id: `kpi_total_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Total ${primaryMeasure}`,
+        title: `Total ${humanizeField(primaryMeasure)}`,
         column: primaryMeasure,
         aggFunc: 'sum',
         subtitle: primarySubtitle,
@@ -5358,7 +5373,7 @@ export const localEngine = {
       });
       kpis.push({
         id: `kpi_avg_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Average ${primaryMeasure}`,
+        title: `Average ${humanizeField(primaryMeasure)}`,
         column: primaryMeasure,
         aggFunc: 'avg',
         subtitle: avgSubtitle,
@@ -5369,10 +5384,10 @@ export const localEngine = {
     if (secondaryMeasure && secondaryMeasure !== primaryMeasure) {
       kpis.push({
         id: `kpi_total_${secondaryMeasure.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Total ${secondaryMeasure}`,
+        title: `Total ${humanizeField(secondaryMeasure)}`,
         column: secondaryMeasure,
         aggFunc: 'sum',
-        subtitle: 'Secondary aggregate',
+        subtitle: `Sum of ${humanizeField(secondaryMeasure)} across filtered rows`,
         accentColor: '#FB923C',
       });
     } else {
@@ -5381,7 +5396,7 @@ export const localEngine = {
         title: 'Total Records',
         column: primaryDim || cols[0]?.name || 'id',
         aggFunc: 'count',
-        subtitle: 'Active records',
+        subtitle: 'Row count across active filters',
         accentColor: '#FB923C',
       });
     }
@@ -5391,10 +5406,10 @@ export const localEngine = {
     if (distinctTargetCol) {
       kpis.push({
         id: `kpi_distinct_${distinctTargetCol.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Unique ${distinctTargetCol}`,
+        title: `Distinct ${humanizeField(distinctTargetCol)}`,
         column: distinctTargetCol,
         aggFunc: 'distinct_count',
-        subtitle: 'Monitored entities',
+        subtitle: `Unique ${humanizeField(distinctTargetCol)} values across filtered rows`,
         accentColor: '#0284C7',
       });
     }

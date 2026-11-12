@@ -1791,6 +1791,44 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     return { bg: '#F8FAFC', text: '#334155' };
   };
 
+  // Turns a raw column/field name (snake_case, camelCase, or already
+  // human text) into a readable label for auto-generated titles, e.g.
+  // "customer_id" -> "Customer Id", "orderDate" -> "Order Date".
+  const humanizeFieldName = (name: string): string => {
+    if (!name) return '';
+    const spaced = name
+      .replace(/[_-]+/g, ' ')
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .trim();
+    return spaced
+      .split(/\s+/)
+      .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+      .join(' ');
+  };
+
+  // Plain-English label for an aggregation function, used by auto-generated
+  // KPI/visual titles instead of the raw enum value (e.g. "distinct_count"
+  // rendering as "DISTINCT_COUNT" was confusing — this gives "Distinct").
+  const aggFuncLabel = (fn: VisualAggType | string): string => {
+    switch (String(fn || 'sum').toLowerCase()) {
+      case 'sum':
+        return 'Total';
+      case 'avg':
+        return 'Average';
+      case 'max':
+        return 'Peak';
+      case 'min':
+        return 'Lowest';
+      case 'count':
+        return 'Count of';
+      case 'distinct':
+      case 'distinct_count':
+        return 'Distinct';
+      default:
+        return humanizeFieldName(String(fn));
+    }
+  };
+
   const formatNum = (n: number): string => {
     if (!Number.isFinite(n)) return '0';
     if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
@@ -2022,7 +2060,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         if (patch.title !== undefined) {
           next.customTitle = true;
         } else if (!next.customTitle && (patch.column || patch.aggFunc)) {
-          next.title = `${next.aggFunc.toUpperCase()} of ${next.column}`;
+          next.title = `${aggFuncLabel(next.aggFunc)} ${humanizeFieldName(next.column)}`.trim();
         }
         return next;
       })
@@ -5297,7 +5335,10 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                               >
                                 <Icon className="w-3 h-3" /> {delta}
                               </span>
-                              <span className="text-[10px] text-slate-400 font-mono uppercase font-bold truncate ml-2 text-right">
+                              <span
+                                title={rest ? `${aggFuncLabel(kpi.aggFunc)} • ${rest}` : aggFuncLabel(kpi.aggFunc)}
+                                className="text-[10px] text-slate-400 font-mono uppercase font-bold truncate ml-2 text-right"
+                              >
                                 {rest ? `${kpi.aggFunc} • ${rest}` : kpi.aggFunc}
                               </span>
                             </div>
@@ -5333,7 +5374,10 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                             >
                               <Activity className="w-3 h-3" /> {label}
                             </span>
-                            <span className="text-[10px] text-slate-400 font-mono uppercase font-bold truncate ml-2 text-right">
+                            <span
+                              title={sub ? sub : kpi.column || aggUpper}
+                              className="text-[10px] text-slate-400 font-mono uppercase font-bold truncate ml-2 text-right"
+                            >
                               {sub ? sub : kpi.column || aggUpper}
                             </span>
                           </div>

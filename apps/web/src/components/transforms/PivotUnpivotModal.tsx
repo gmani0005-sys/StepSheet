@@ -631,7 +631,11 @@ export const PivotUnpivotModal: React.FC<PivotUnpivotModalProps> = ({
                     </span>
                   </div>
 
-                  <div className="overflow-auto max-h-[300px] flex-1">
+                  {/* Visible thin scrollbar for horizontal-overflow
+                      discoverability, consistent with the ribbon fix —
+                      this table's columns were being cut off at the
+                      modal's right edge with no visual scroll hint. */}
+                  <div className="overflow-auto max-h-[300px] flex-1 chips-scrollbar">
                     <table className="w-full text-xs border-collapse">
                       <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300 border-b border-slate-800">
                         <tr>

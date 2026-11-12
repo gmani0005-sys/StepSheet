@@ -34,6 +34,7 @@ import {
   Archive,
   Clock,
   Mail,
+  ArrowLeft,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { DashboardPaneConfig } from './panes/DashboardPaneWrapper';
@@ -4243,20 +4244,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     return wrapWithLegend(vis, treemapChart, categoryLegendEntries);
   };
 
+  // The Dashboard opens as its own full-bleed sheet/tab over the workbench,
+  // not a centered dialog: no dimmed backdrop, no rounded floating card, no
+  // margins - it fills the viewport edge-to-edge like switching sheets,
+  // and "Close" (below) returns to the data grid rather than "dismissing
+  // a popup". The real F11/Fullscreen-API toggle still applies on top of
+  // this for hiding the OS/browser chrome.
   return (
     <div
       ref={modalContainerRef}
-      className={`fixed inset-0 z-50 flex items-center justify-center transition-all ${
-        isFullScreen ? 'p-0 bg-black/90' : 'bg-black/75 backdrop-blur-sm p-3 sm:p-5'
-      }`}
+      className="fixed inset-0 z-50 bg-white"
     >
-      <div
-        className={`bg-white shadow-2xl overflow-hidden flex flex-col text-[#212121] transition-all ${
-          isFullScreen
-            ? 'w-screen h-screen max-w-none h-full rounded-none border-0'
-            : 'border border-[#D4D4D4] rounded-xl w-full max-w-7xl h-[92vh]'
-        }`}
-      >
+      <div className="bg-white overflow-hidden flex flex-col text-[#212121] w-screen h-screen border-0 rounded-none">
         {/* Top Header */}
         <div className="flex items-center justify-between px-6 py-3.5 border-b border-[#D4D4D4] bg-[#F3F3F3]">
           <div className="flex items-center gap-3">
@@ -4621,12 +4620,17 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               )}
             </button>
 
+            {/* Reads as leaving this sheet and returning to the data grid,
+                not dismissing a dialog - matches the full-bleed takeover
+                above (no X-only affordance on a borderless full page). */}
             <button
               type="button"
               onClick={onClose}
-              className="text-[#605E5C] hover:text-[#212121] p-1.5 rounded-lg hover:bg-[#E6E6E6]"
+              title="Back to Sheet"
+              className="flex items-center gap-1.5 pl-2 pr-2.5 py-1.5 text-xs font-bold text-[#605E5C] hover:text-[#212121] rounded-lg hover:bg-[#E6E6E6] border border-[#D4D4D4] ml-1"
             >
-              <X className="w-5 h-5" />
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Sheet</span>
             </button>
           </div>
         </div>

@@ -108,6 +108,17 @@
    Excel Function Arguments & Wizard Dialog Reskin (Presentational Layer)
    Applies Excel flat light-theme styling to all modal overlays & drawers
    without altering any component props, state, or DOM structure.
+
+   This block repaints ~22 legacy dark-slate-themed modals into the app's
+   light Excel theme purely by matching their Tailwind color classes
+   (never DOM position). An earlier version of this block instead targeted
+   the first/last child DIV of every dialog by position, which blindly
+   stripped intentionally-dark, already-correct headers (e.g. a modal's own
+   green header) and left some dark-slate modals' white title text with no
+   light-theme equivalent, making it invisible. The rules below only ever
+   touch elements carrying the specific dark-slate/translucent-white
+   classes being neutralized, so a modal that was never dark-themed (or
+   that uses its own intentional accent color) is left untouched.
    ============================================================================ */
 .fixed.inset-0 {
   background-color: rgba(0, 0, 0, 0.35) !important;
@@ -122,13 +133,6 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2) !important;
 }
 
-/* Dialog headers and footers */
-.fixed.inset-0 > div > div:first-child,
-.fixed.inset-0 > div > div:last-child {
-  background-color: var(--chrome) !important;
-  border-color: var(--chrome-border) !important;
-}
-
 /* Neutralize dark backgrounds inside dialogs into crisp Excel frames */
 .fixed.inset-0 [class*="bg-slate-950"],
 .fixed.inset-0 [class*="bg-slate-900"] {
@@ -137,10 +141,29 @@
   color: var(--text) !important;
 }
 
-.fixed.inset-0 [class*="bg-slate-800"] {
+.fixed.inset-0 [class*="bg-slate-800"],
+.fixed.inset-0 [class*="bg-slate-700"] {
   background-color: #F3F3F3 !important;
   border-color: var(--chrome-border) !important;
   color: var(--text) !important;
+}
+
+/* Translucent white overlays (status chips, hover rows) on dark panels */
+.fixed.inset-0 [class*="bg-white/1"],
+.fixed.inset-0 [class*="bg-white/2"],
+.fixed.inset-0 [class*="bg-white/6"],
+.fixed.inset-0 [class*="bg-white/7"],
+.fixed.inset-0 [class*="bg-white/8"],
+.fixed.inset-0 [class*="bg-white/9"] {
+  background-color: rgba(33, 33, 33, 0.06) !important;
+}
+
+.fixed.inset-0 [class*="from-slate-"],
+.fixed.inset-0 [class*="via-slate-"],
+.fixed.inset-0 [class*="to-slate-"] {
+  --tw-gradient-from: #FAFAFA !important;
+  --tw-gradient-to: #F3F3F3 !important;
+  --tw-gradient-via: #F3F3F3 !important;
 }
 
 /* Typography inside dialogs */
@@ -151,8 +174,24 @@
 }
 
 .fixed.inset-0 [class*="text-slate-400"],
-.fixed.inset-0 [class*="text-slate-500"] {
+.fixed.inset-0 [class*="text-slate-500"],
+.fixed.inset-0 [class*="placeholder-slate-"] {
   color: var(--text-muted) !important;
+}
+
+/* White title/label text only where it sits on a background we just
+   force-lightened above — never a blanket text-white rule, which would
+   also wrongly repaint a modal's own intentionally-dark header (e.g. a
+   green header with white text that was never part of this reskin). */
+.fixed.inset-0 [class*="bg-slate-900"] [class*="text-white"],
+.fixed.inset-0 [class*="bg-slate-950"] [class*="text-white"],
+.fixed.inset-0 [class*="bg-slate-800"] [class*="text-white"],
+.fixed.inset-0 [class*="bg-slate-700"] [class*="text-white"],
+.fixed.inset-0 [class*="bg-slate-900"][class*="text-white"],
+.fixed.inset-0 [class*="bg-slate-950"][class*="text-white"],
+.fixed.inset-0 [class*="bg-slate-800"][class*="text-white"],
+.fixed.inset-0 [class*="bg-slate-700"][class*="text-white"] {
+  color: var(--text) !important;
 }
 
 .fixed.inset-0 [class*="text-emerald-"],
@@ -172,7 +211,10 @@
 }
 
 /* Borders and corners inside dialogs */
-.fixed.inset-0 [class*="border-slate-"] {
+.fixed.inset-0 [class*="border-slate-"],
+.fixed.inset-0 [class*="divide-slate-"],
+.fixed.inset-0 [class*="ring-slate-"],
+.fixed.inset-0 [class*="border-white"] {
   border-color: var(--chrome-border) !important;
 }
 

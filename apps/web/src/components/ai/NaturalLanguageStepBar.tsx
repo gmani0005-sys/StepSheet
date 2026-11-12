@@ -125,8 +125,8 @@ export const NaturalLanguageStepBar: React.FC = () => {
             }}
             className="flex items-center gap-1 w-full lg:w-[430px] xl:w-[500px] shrink-0"
           >
-            <div className="relative flex-1 flex items-center">
-              <div className="absolute left-2.5 text-[#217346] pointer-events-none">
+            <div className="relative flex-1 min-w-0">
+              <div className="absolute left-2.5 top-0 bottom-0 flex items-center text-[#217346] pointer-events-none">
                 <Sparkles size={13} />
               </div>
               <input
@@ -134,27 +134,33 @@ export const NaturalLanguageStepBar: React.FC = () => {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Describe transformation in plain English (e.g. 'discounted = amount - discount', 'filter amount > 100', 'running total of sales')..."
-                className="w-full h-7 bg-white border border-[#8A8886] focus:border-[#217346] rounded-[2px] pl-7 pr-24 text-[12px] text-[#212121] placeholder-[#605E5C] focus:outline-none"
+                className="w-full h-7 bg-white border border-[#8A8886] focus:border-[#217346] rounded-[2px] pl-7 pr-2 text-[12px] text-[#212121] placeholder-[#605E5C] focus:outline-none truncate"
                 disabled={isLoading}
               />
-              <button
-                type="submit"
-                disabled={isLoading || !prompt.trim()}
-                className="absolute right-0.5 top-0.5 bottom-0.5 px-2.5 bg-[#217346] hover:bg-[#185C37] disabled:opacity-40 text-white font-semibold text-[12px] rounded-[1px] flex items-center gap-1 transition-colors"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 size={12} className="animate-spin text-white" />
-                    <span>Thinking...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Create Step</span>
-                    <ArrowRight size={12} />
-                  </>
-                )}
-              </button>
             </div>
+            {/* Laid out as a flex sibling, never overlapping the input: the
+                button's own width varies with its label ("Create Step" vs
+                "Thinking..."), and an absolutely-positioned button sized by
+                a fixed input padding (the previous approach) can end up
+                wider than that reserved padding, overlapping and clipping
+                the input's own text. */}
+            <button
+              type="submit"
+              disabled={isLoading || !prompt.trim()}
+              className="h-7 shrink-0 px-2.5 bg-[#217346] hover:bg-[#185C37] disabled:opacity-40 text-white font-semibold text-[12px] rounded-[1px] flex items-center gap-1 transition-colors whitespace-nowrap"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 size={12} className="animate-spin text-white" />
+                  <span>Thinking...</span>
+                </>
+              ) : (
+                <>
+                  <span>Create Step</span>
+                  <ArrowRight size={12} />
+                </>
+              )}
+            </button>
           </form>
         </div>
 

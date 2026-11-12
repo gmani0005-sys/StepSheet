@@ -439,19 +439,23 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
   // Find targeted visual metadata
   const currentTargetVisual = currentDashboard.visuals.find((v) => v.id === targetVisId) || currentDashboard.visuals[0];
 
+  // Restyled to match the app's flat Excel theme (solid white, #D4D4D4
+  // borders, #217346 green accents, 2px corners) instead of the previous
+  // glassmorphism/pill treatment, which looked like a different app
+  // bolted on top of the ribbon above it.
   return (
-    <div className="px-6 py-3 bg-white/70 backdrop-blur-xl border-b border-white/50 shadow-xs flex flex-col gap-2.5 transition-all">
+    <div className="px-6 py-3 bg-[#F3F3F3] border-b border-[#D4D4D4] flex flex-col gap-2.5">
       {/* Top Header & Operational Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Left: Branding & Capability Badge */}
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-sm shadow-emerald-500/20">
+          <div className="w-7 h-7 rounded-[2px] bg-[#217346] flex items-center justify-center text-white shrink-0">
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-800">Create Dashboard with AI</span>
-              <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-semibold border border-emerald-200/60 shadow-2xs">
+              <span className="text-xs font-bold text-[#212121]">Create Dashboard with AI</span>
+              <span className="text-[10px] bg-[#E6F2EB] text-[#185C37] px-2 py-0.5 rounded-[2px] font-semibold border border-[#217346]/30">
                 Native Julius-Style (DuckDB)
               </span>
             </div>
@@ -459,14 +463,14 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         </div>
 
         {/* Center: 3 Dedicated Action Tabs */}
-        <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60 text-xs shadow-2xs">
+        <div className="flex items-center gap-1 bg-white p-0.5 rounded-[2px] border border-[#D4D4D4] text-xs">
           <button
             type="button"
             onClick={() => setActiveMode('create')}
-            className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
               activeMode === 'create'
-                ? 'bg-white text-emerald-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-[#217346] text-white'
+                : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
             }`}
           >
             <Wand2 className="w-3.5 h-3.5" />
@@ -476,10 +480,10 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           <button
             type="button"
             onClick={() => setActiveMode('add')}
-            className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
               activeMode === 'add'
-                ? 'bg-white text-emerald-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-[#217346] text-white'
+                : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
             }`}
           >
             <PlusCircle className="w-3.5 h-3.5" />
@@ -489,10 +493,10 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           <button
             type="button"
             onClick={() => setActiveMode('edit')}
-            className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1 rounded-[2px] font-semibold flex items-center gap-1.5 transition-colors ${
               activeMode === 'edit'
-                ? 'bg-white text-emerald-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-[#217346] text-white'
+                : 'text-[#605E5C] hover:text-[#212121] hover:bg-[#F3F3F3]'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
@@ -505,10 +509,10 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           {onOpenLocalAiSetup && (
             <button
               onClick={onOpenLocalAiSetup}
-              className="text-[11px] text-slate-500 hover:text-emerald-700 flex items-center gap-1 transition font-medium"
+              className="text-[11px] text-[#605E5C] hover:text-[#217346] flex items-center gap-1 transition-colors font-medium"
               title="Configure local Ollama engine & models"
             >
-              <Zap className="w-3.5 h-3.5 text-emerald-500" />
+              <Zap className="w-3.5 h-3.5 text-[#217346]" />
               <span>Local AI Engine Active</span>
             </button>
           )}
@@ -517,8 +521,8 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
 
       {/* Mode-Specific Contextual Toolbars */}
       {activeMode === 'edit' && currentDashboard.visuals.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 py-1 px-2.5 bg-slate-50/80 rounded-xl border border-slate-200/50 text-xs text-slate-700">
-          <span className="font-semibold text-slate-500 flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-2 py-1 px-2.5 bg-white rounded-[2px] border border-[#D4D4D4] text-xs text-[#212121]">
+          <span className="font-semibold text-[#605E5C] flex items-center gap-1">
             <Layers className="w-3.5 h-3.5" /> Target Visual:
           </span>
           <select
@@ -527,7 +531,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
               setTargetVisId(e.target.value);
               onSelectVisual?.(e.target.value);
             }}
-            className="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="text-xs bg-white border border-[#D4D4D4] rounded-[2px] px-2.5 py-1 font-semibold text-[#212121] focus:outline-none focus:ring-2 focus:ring-[#217346]/30"
           >
             {currentDashboard.visuals.map((v, i) => (
               <option key={v.id} value={v.id}>
@@ -541,28 +545,28 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
             <button
               type="button"
               onClick={() => handleEditVisual(`Convert ${currentTargetVisual?.title || 'chart'} to column chart`)}
-              className="px-2 py-0.5 rounded-md bg-white border border-slate-200 hover:border-emerald-500 text-[11px] font-medium text-slate-600 hover:text-emerald-700 transition"
+              className="px-2 py-0.5 rounded-[2px] bg-white border border-[#D4D4D4] hover:border-[#217346] text-[11px] font-medium text-[#605E5C] hover:text-[#217346] transition-colors"
             >
               Column Capsule
             </button>
             <button
               type="button"
               onClick={() => handleEditVisual(`Convert ${currentTargetVisual?.title || 'chart'} to donut chart`)}
-              className="px-2 py-0.5 rounded-md bg-white border border-slate-200 hover:border-emerald-500 text-[11px] font-medium text-slate-600 hover:text-emerald-700 transition"
+              className="px-2 py-0.5 rounded-[2px] bg-white border border-[#D4D4D4] hover:border-[#217346] text-[11px] font-medium text-[#605E5C] hover:text-[#217346] transition-colors"
             >
               Donut
             </button>
             <button
               type="button"
               onClick={() => handleEditVisual(`Convert ${currentTargetVisual?.title || 'chart'} to line area trend`)}
-              className="px-2 py-0.5 rounded-md bg-white border border-slate-200 hover:border-emerald-500 text-[11px] font-medium text-slate-600 hover:text-emerald-700 transition"
+              className="px-2 py-0.5 rounded-[2px] bg-white border border-[#D4D4D4] hover:border-[#217346] text-[11px] font-medium text-[#605E5C] hover:text-[#217346] transition-colors"
             >
               Line Area
             </button>
             <button
               type="button"
               onClick={() => handleEditVisual(`Change metric of ${currentTargetVisual?.title || 'chart'} to average`)}
-              className="px-2 py-0.5 rounded-md bg-white border border-slate-200 hover:border-emerald-500 text-[11px] font-medium text-slate-600 hover:text-emerald-700 transition"
+              className="px-2 py-0.5 rounded-[2px] bg-white border border-[#D4D4D4] hover:border-[#217346] text-[11px] font-medium text-[#605E5C] hover:text-[#217346] transition-colors"
             >
               Average Metric
             </button>
@@ -584,13 +588,13 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
                 ? "Describe the visual to add (e.g. 'Add a donut chart of sales by region', 'Add a bar chart of top 5 products', 'Add KPI for total amount')..."
                 : `Command to edit '${currentTargetVisual?.title || 'selected visual'}' (e.g. 'Change to donut chart', 'Group by region', 'Change metric to average')...`
             }
-            className="w-full text-xs border border-slate-300 hover:border-emerald-500 focus:border-emerald-600 rounded-xl pl-3 pr-24 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 bg-white/90 shadow-2xs text-slate-800 transition-all font-medium"
+            className="w-full text-xs border border-[#8A8886] hover:border-[#217346] focus:border-[#217346] rounded-[2px] pl-3 pr-24 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#217346]/20 bg-white text-[#212121] transition-colors font-medium"
           />
           {!prompt && activeMode === 'create' && (
             <button
               type="button"
               onClick={() => handleGenerate(defaultPrompt)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-emerald-600 hover:text-emerald-700 hover:underline font-semibold"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#217346] hover:text-[#185C37] hover:underline font-semibold"
             >
               Standard Executive
             </button>
@@ -608,7 +612,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
               ? 'Add Visual'
               : 'Apply Visual Edit'
           }
-          className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl text-xs shadow-xs flex items-center gap-1.5 disabled:opacity-50 transition shrink-0 cursor-pointer"
+          className="px-4 py-2.5 bg-[#217346] hover:bg-[#185C37] text-white font-bold rounded-[2px] text-xs flex items-center gap-1.5 disabled:opacity-50 transition-colors shrink-0 cursor-pointer"
         >
           {loading ? (
             <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -632,7 +636,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
             type="button"
             onClick={() => handleGenerate(defaultPrompt)}
             disabled={loading}
-            className="px-3 py-2.5 border border-slate-300 hover:bg-slate-100 text-slate-600 hover:text-slate-900 font-semibold rounded-xl text-xs flex items-center gap-1.5 transition shrink-0"
+            className="px-3 py-2.5 border border-[#D4D4D4] hover:bg-[#F3F3F3] text-[#605E5C] hover:text-[#212121] font-semibold rounded-[2px] text-xs flex items-center gap-1.5 transition-colors shrink-0"
             title="Rebuild complete dashboard from scratch"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -644,86 +648,86 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
       {/* Suggested Quick Starter Chips */}
       {activeMode === 'create' && (
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-0.5">
-          <span className="text-slate-500 font-medium mr-1 flex items-center gap-1">
-            <LayoutGrid className="w-3 h-3 text-emerald-600" /> Templates:
+          <span className="text-[#605E5C] font-medium mr-1 flex items-center gap-1">
+            <LayoutGrid className="w-3 h-3 text-[#217346]" /> Templates:
           </span>
           <button
             type="button"
             onClick={() => handleGenerate('Build Executive Glassmorphism V22 Dashboard with sales, trends and KPI cards')}
-            className="px-2.5 py-1 rounded-full bg-emerald-50/80 hover:bg-emerald-100/90 text-emerald-800 border border-emerald-200/60 font-semibold transition"
+            className="px-2.5 py-1 rounded-[2px] bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#185C37] border border-[#217346]/30 font-semibold transition-colors"
           >
-            💎 Executive V22 (Glassmorphism)
+            Executive V22
           </button>
           <button
             type="button"
             onClick={() => handleGenerate('Build Sales & Revenue Breakdown Dashboard with monthly trends and top products')}
-            className="px-2.5 py-1 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium transition"
+            className="px-2.5 py-1 rounded-[2px] bg-white hover:bg-[#F3F3F3] text-[#444444] border border-[#D4D4D4] font-medium transition-colors"
           >
-            📈 Sales & Revenue Breakdown
+            Sales & Revenue Breakdown
           </button>
           <button
             type="button"
             onClick={() => handleGenerate('Build Operational Performance and Volume Dashboard')}
-            className="px-2.5 py-1 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium transition"
+            className="px-2.5 py-1 rounded-[2px] bg-white hover:bg-[#F3F3F3] text-[#444444] border border-[#D4D4D4] font-medium transition-colors"
           >
-            🏢 Operations & Volume
+            Operations & Volume
           </button>
           <button
             type="button"
             onClick={() => handleGenerate('Build Regional & Category Distribution Dashboard')}
-            className="px-2.5 py-1 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium transition"
+            className="px-2.5 py-1 rounded-[2px] bg-white hover:bg-[#F3F3F3] text-[#444444] border border-[#D4D4D4] font-medium transition-colors"
           >
-            👥 Regional & Category
+            Regional & Category
           </button>
         </div>
       )}
 
       {activeMode === 'add' && (
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-0.5">
-          <span className="text-slate-500 font-medium mr-1 flex items-center gap-1">
-            <PlusCircle className="w-3 h-3 text-emerald-600" /> Quick Add:
+          <span className="text-[#605E5C] font-medium mr-1 flex items-center gap-1">
+            <PlusCircle className="w-3 h-3 text-[#217346]" /> Quick Add:
           </span>
           <button
             type="button"
             onClick={() => handleAddVisual('Add a bar chart of sales by product category')}
-            className="px-2.5 py-1 rounded-full bg-emerald-50/80 hover:bg-emerald-100/90 text-emerald-800 border border-emerald-200/60 font-semibold transition flex items-center gap-1"
+            className="px-2.5 py-1 rounded-[2px] bg-[#E6F2EB] hover:bg-[#cce5d6] text-[#185C37] border border-[#217346]/30 font-semibold transition-colors flex items-center gap-1"
           >
-            <BarChart3 className="w-3 h-3" /> + Sales by Category (Bar)
+            <BarChart3 className="w-3 h-3" /> Sales by Category (Bar)
           </button>
           <button
             type="button"
             onClick={() => handleAddVisual('Add a monthly revenue trend line')}
-            className="px-2.5 py-1 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium transition flex items-center gap-1"
+            className="px-2.5 py-1 rounded-[2px] bg-white hover:bg-[#F3F3F3] text-[#444444] border border-[#D4D4D4] font-medium transition-colors flex items-center gap-1"
           >
-            <TrendingUp className="w-3 h-3" /> + Monthly Trend (Line Area)
+            <TrendingUp className="w-3 h-3" /> Monthly Trend (Line Area)
           </button>
           <button
             type="button"
             onClick={() => handleAddVisual('Add a donut chart for regional contribution')}
-            className="px-2.5 py-1 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium transition flex items-center gap-1"
+            className="px-2.5 py-1 rounded-[2px] bg-white hover:bg-[#F3F3F3] text-[#444444] border border-[#D4D4D4] font-medium transition-colors flex items-center gap-1"
           >
-            <PieChart className="w-3 h-3" /> + Regional Share (Donut)
+            <PieChart className="w-3 h-3" /> Regional Share (Donut)
           </button>
           <button
             type="button"
             onClick={() => handleAddVisual('Add a KPI card for total sales volume')}
-            className="px-2.5 py-1 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium transition"
+            className="px-2.5 py-1 rounded-[2px] bg-white hover:bg-[#F3F3F3] text-[#444444] border border-[#D4D4D4] font-medium transition-colors"
           >
-            + Total Volume (KPI Card)
+            Total Volume (KPI Card)
           </button>
         </div>
       )}
 
       {/* Messages */}
       {errorMsg && (
-        <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5 animate-fadeIn">
+        <div className="text-[11px] text-[#C50F1F] bg-[#FDE7E9] border border-[#C50F1F]/30 px-3 py-1.5 rounded-[2px] flex items-center gap-1.5">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
       {patchSummary && !errorMsg && (
-        <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-3 py-1.5 rounded-xl flex items-center gap-1.5 animate-fadeIn">
-          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+        <div className="text-[11px] text-[#185C37] bg-[#E6F2EB] border border-[#217346]/30 px-3 py-1.5 rounded-[2px] flex items-center gap-1.5">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#217346]" />
           <span className="font-medium">{patchSummary}</span>
         </div>
       )}

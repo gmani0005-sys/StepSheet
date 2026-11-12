@@ -1060,12 +1060,17 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* Right: Dashboard, Share, User Menu, Task Pane Toggle */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Feature A: Chat with Data */}
+          {/* Feature A: Chat with Data. Recolored from Microsoft-Fluent
+              blue (#0078D4) to match its sibling buttons below (Visuals,
+              Share) — blue was an isolated one-off accent used nowhere
+              else as an entry-point color, creating a second, visually
+              inconsistent "Chat with Data" look alongside the green one
+              already in the Home ribbon tab for the same feature. */}
           <button
             type="button"
             onClick={onOpenChatWithData}
             title="Chat with Data: Natural language queries executed locally via DuckDB"
-            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-[#0078D4] hover:bg-[#106EBE] text-white border border-white/30 rounded-[2px] whitespace-nowrap shrink-0 transition-colors shadow-2xs"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-[#185C37] hover:bg-[#124629] text-white border border-white/30 rounded-[2px] whitespace-nowrap shrink-0 transition-colors shadow-2xs"
           >
             <MessageSquare size={13} className="shrink-0" />
             <span>Chat with Data</span>
@@ -1302,7 +1307,13 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* 3. EXCEL RIBBON COMMAND GROUPS PANEL */}
       {!isRibbonCollapsed && (
-        <div className="bg-white px-2 py-1.5 flex items-stretch gap-1 overflow-x-auto min-h-[76px]">
+        <div className="relative">
+          {/* Rightmost command groups (e.g. Data Quality) were silently
+              clipped at the viewport edge on narrower/full-width windows
+              with overflow-x-auto technically scrollable but no visual
+              hint that more content existed. A visible thin scrollbar
+              plus this edge fade now signal it's scrollable. */}
+        <div className="bg-white px-2 py-1.5 flex items-stretch gap-1 overflow-x-auto min-h-[76px] chips-scrollbar">
           {activeGroups.map((group, gIdx) => (
             <div
               key={group.name}
@@ -1360,6 +1371,8 @@ export const TopBar: React.FC<TopBarProps> = ({
               </div>
             </div>
           ))}
+        </div>
+          <div className="pointer-events-none absolute top-0 right-0 bottom-0 w-6 bg-gradient-to-l from-white to-transparent" />
         </div>
       )}
     </header>

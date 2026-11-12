@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.api.deps import get_current_user_optional
+from app.api.deps import get_current_user_optional, get_current_user_enforced, check_dataset_access
 from app.models.user import User
 from app.models.dataset import Dataset
 from app.schemas.dataset import (
@@ -68,6 +68,25 @@ async def upload_dataset(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save file: {str(e)}",
+        )
+
+    # Enforce MAX_UPLOAD_SIZE_BYTES (previously never checked). Checked after
+    # save (so we can measure the actual bytes written regardless of
+    # transport) rather than trusting a possibly-absent Content-Length header.
+    local_raw_path_for_size_check = storage.get_local_path(raw_storage_path)
+    actual_size = (
+        os.path.getsize(local_raw_path_for_size_check)
+        if os.path.exists(local_raw_path_for_size_check)
+        else 0
+    )
+    if actual_size > settings.MAX_UPLOAD_SIZE_BYTES:
+        storage.delete_file(raw_storage_path)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"File is {actual_size} bytes, which exceeds the "
+                f"{settings.MAX_UPLOAD_SIZE_BYTES} byte limit."
+            ),
         )
 
     # Ingest and convert to Parquet
@@ -164,11 +183,13 @@ def list_datasets(
 def get_dataset(
     dataset_id: str,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_enforced),
 ):
     """Retrieve metadata for a dataset."""
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    check_dataset_access(dataset, current_user)
     cols = [ColumnSchema(**c) for c in (dataset.schema_metadata or [])]
     return DatasetResponse(
         id=dataset.id,

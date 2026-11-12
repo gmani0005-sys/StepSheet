@@ -17,6 +17,8 @@ from app.schemas.export import (
 )
 from app.services.export_service import export_service
 from app.services.storage import get_storage_service
+from app.services.dataset_refs import collect_referenced_dataset_ids
+from app.api.deps import get_current_user_enforced, check_dataset_access
 from app.services.exporters.dashboard_exporter import (
     export_dashboard_xlsx,
     export_dashboard_pptx,
@@ -29,10 +31,11 @@ router = APIRouter()
 
 
 
-def _get_dataset_context(dataset_id: str, db: Session, steps: list):
+def _get_dataset_context(dataset_id: str, db: Session, steps: list, current_user=None):
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    check_dataset_access(dataset, current_user)
 
     storage = get_storage_service()
     local_path = storage.get_local_path(dataset.parquet_path)
@@ -42,21 +45,19 @@ def _get_dataset_context(dataset_id: str, db: Session, steps: list):
     initial_cols = [c["name"] for c in (dataset.schema_metadata or [])]
     dataset_paths = {dataset.id: local_path}
 
-    for s in steps:
-        params = s.params or {}
-        for key_name in ["lookup_dataset_id", "right_dataset_id", "append_dataset_id"]:
-            ref_id = params.get(key_name)
-            if ref_id and ref_id not in dataset_paths:
-                ref_ds = db.query(Dataset).filter(Dataset.id == ref_id).first()
-                if ref_ds:
-                    dataset_paths[ref_id] = storage.get_local_path(ref_ds.parquet_path)
+    for ref_id in collect_referenced_dataset_ids(steps):
+        if ref_id not in dataset_paths:
+            ref_ds = db.query(Dataset).filter(Dataset.id == ref_id).first()
+            if ref_ds:
+                check_dataset_access(ref_ds, current_user)
+                dataset_paths[ref_id] = storage.get_local_path(ref_ds.parquet_path)
 
     return local_path, initial_cols, dataset_paths
 
 
 @router.post("/excel")
-def export_excel(req: ExportRequest, db: Session = Depends(get_db)):
-    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps)
+def export_excel(req: ExportRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user_enforced)):
+    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps, current_user)
     try:
         content = export_service.export_excel_bytes(
             local_parquet_path=local_path,
@@ -77,8 +78,8 @@ def export_excel(req: ExportRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/csv")
-def export_csv(req: ExportRequest, db: Session = Depends(get_db)):
-    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps)
+def export_csv(req: ExportRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user_enforced)):
+    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps, current_user)
     try:
         content = export_service.export_csv_bytes(
             local_parquet_path=local_path,
@@ -97,8 +98,8 @@ def export_csv(req: ExportRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/parquet")
-def export_parquet(req: ExportRequest, db: Session = Depends(get_db)):
-    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps)
+def export_parquet(req: ExportRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user_enforced)):
+    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps, current_user)
     try:
         content = export_service.export_parquet_bytes(
             local_parquet_path=local_path,
@@ -117,8 +118,8 @@ def export_parquet(req: ExportRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/json")
-def export_json(req: ExportRequest, db: Session = Depends(get_db)):
-    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps)
+def export_json(req: ExportRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user_enforced)):
+    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps, current_user)
     try:
         content = export_service.export_json_bytes(
             local_parquet_path=local_path,
@@ -137,8 +138,8 @@ def export_json(req: ExportRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/code", response_model=CodeExportResponse)
-def export_code(req: ExportRequest, db: Session = Depends(get_db)):
-    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps)
+def export_code(req: ExportRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user_enforced)):
+    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps, current_user)
     try:
         return export_service.generate_code_bundle(
             dataset_id=req.dataset_id,
@@ -152,8 +153,8 @@ def export_code(req: ExportRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/run-full", response_model=RunFullPipelineResponse)
-def run_full_pipeline(req: RunFullPipelineRequest, db: Session = Depends(get_db)):
-    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps)
+def run_full_pipeline(req: RunFullPipelineRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user_enforced)):
+    local_path, initial_cols, dataset_paths = _get_dataset_context(req.dataset_id, db, req.steps, current_user)
     try:
         return export_service.run_full_pipeline(
             dataset_id=req.dataset_id,

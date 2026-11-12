@@ -16,6 +16,9 @@ from app.schemas.dataset import ColumnSchema
 from app.services.storage import get_storage_service
 from app.services.duckdb_engine import duckdb_engine
 from app.services.step_compiler import step_compiler
+from app.services.dataset_refs import collect_referenced_dataset_ids
+from app.api.deps import get_current_user_enforced, check_dataset_access
+from app.models.user import User
 
 router = APIRouter()
 
@@ -24,6 +27,7 @@ router = APIRouter()
 def preview_pipeline(
     req: PipelinePreviewRequest,
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_enforced),
 ):
     """
     Execute a reactive preview of an applied step pipeline on the dataset using DuckDB.
@@ -32,6 +36,7 @@ def preview_pipeline(
     dataset = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    check_dataset_access(dataset, current_user)
 
     storage = get_storage_service()
     local_parquet_path = storage.get_local_path(dataset.parquet_path)
@@ -43,17 +48,16 @@ def preview_pipeline(
     initial_schema = dataset.schema_metadata or []
     initial_cols = [c["name"] for c in initial_schema]
 
-    # Collect all referenced datasets (for lookups, joins, appends)
+    # Collect all referenced datasets (for lookups, joins, and multi-file
+    # appends -- including the `dataset_ids` LIST, not just the single-id keys).
     dataset_paths = {dataset.id: local_parquet_path}
-    for s in req.steps:
-        params = s.params or {}
-        for key_name in ["lookup_dataset_id", "right_dataset_id", "append_dataset_id"]:
-            ref_id = params.get(key_name)
-            if ref_id and ref_id not in dataset_paths:
-                ref_ds = db.query(Dataset).filter(Dataset.id == ref_id).first()
-                if ref_ds:
-                    ref_path = storage.get_local_path(ref_ds.parquet_path)
-                    dataset_paths[ref_id] = ref_path
+    for ref_id in collect_referenced_dataset_ids(req.steps):
+        if ref_id not in dataset_paths:
+            ref_ds = db.query(Dataset).filter(Dataset.id == ref_id).first()
+            if ref_ds:
+                check_dataset_access(ref_ds, current_user)
+                ref_path = storage.get_local_path(ref_ds.parquet_path)
+                dataset_paths[ref_id] = ref_path
 
     try:
         compiled_sql, step_summaries, final_cols = step_compiler.compile_pipeline(

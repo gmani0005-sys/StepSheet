@@ -7,6 +7,7 @@ import xlsxwriter
 import duckdb
 from app.services.duckdb_engine import duckdb_engine
 from app.services.step_compiler import step_compiler
+from app.services.sql_safe import parse_excel_number
 from app.schemas.steps import StepSchema
 from app.schemas.export import CodeExportResponse, RunFullPipelineResponse
 
@@ -130,8 +131,12 @@ class ExportService:
                     formula = self._build_row_formula(step_def, col_letter_map, excel_row_num)
 
                 if formula:
-                    num_val = float(val) if isinstance(val, (int, float)) else 0
-                    ws_data.write_formula(row_idx + 1, col_idx, formula, formula_cell_fmt, num_val)
+                    # Pass the already-computed value through as xlsxwriter's
+                    # cached value (any type -- numeric, text, or blank), so a
+                    # viewer that doesn't recalculate still shows the right
+                    # result and type, instead of a hard-coded 0.
+                    cached_val = "" if val is None else val
+                    ws_data.write_formula(row_idx + 1, col_idx, formula, formula_cell_fmt, cached_val)
                 else:
                     if val is None:
                         ws_data.write_blank(row_idx + 1, col_idx, "", data_cell_fmt)
@@ -185,12 +190,23 @@ class ExportService:
     ) -> Optional[str]:
         stype = step.type
         params = step.params
+        out_col = params.get("output_column") or params.get("new_column")
+
+        def _in_place(*source_cols: str) -> bool:
+            """True when this step's output column is the SAME column as one
+            of its source columns. A live Excel formula written into that
+            cell would then reference itself (e.g. B2 = TRIM(B2)), producing
+            a circular reference (Excel Err:522). We write the already-
+            computed VALUE for those cells instead of a live formula."""
+            return bool(out_col) and any(out_col == sc for sc in source_cols if sc)
 
         if stype == "math_transform":
             c1 = params.get("column1", "")
             c2 = params.get("column2", "")
             op = params.get("operation", "arithmetic").lower()
             math_op = params.get("math_operator", "+")
+            if _in_place(c1, c2):
+                return None
 
             if op == "arithmetic":
                 c1_let = col_letter_map.get(c1)
@@ -209,31 +225,67 @@ class ExportService:
                 decs = params.get("decimals", 2)
                 return f"=ROUND({c1_let}{excel_row_num}, {decs})" if c1_let else None
 
+            elif op == "roundup":
+                decs = params.get("decimals", 2)
+                c1_let = col_letter_map.get(c1)
+                return f"=ROUNDUP({c1_let}{excel_row_num}, {decs})" if c1_let else None
+
+            elif op == "rounddown":
+                decs = params.get("decimals", 2)
+                c1_let = col_letter_map.get(c1)
+                return f"=ROUNDDOWN({c1_let}{excel_row_num}, {decs})" if c1_let else None
+
             elif op == "abs":
                 c1_let = col_letter_map.get(c1)
                 return f"=ABS({c1_let}{excel_row_num})" if c1_let else None
 
+            elif op == "percent_change":
+                c1_let, c2_let = col_letter_map.get(c1), col_letter_map.get(c2)
+                decs = params.get("decimals", 2)
+                if c1_let and c2_let:
+                    return (
+                        f"=IF({c1_let}{excel_row_num}=0, \"\", "
+                        f"ROUND(({c2_let}{excel_row_num}-{c1_let}{excel_row_num})*100/{c1_let}{excel_row_num}, {decs}))"
+                    )
+
         elif stype == "conditional":
             rules = params.get("rules", [])
             else_val = params.get("else_value", "Other")
-            if rules:
-                r = rules[0]
+            if not rules:
+                return None
+            # Honour ALL rules (not just the first) as a nested IF/IFS chain.
+            op_sym_map = {"eq": "=", "neq": "<>", "gte": ">=", "lte": "<=", "gt": ">", "lt": "<"}
+
+            def _val_repr(v):
+                # A step-param value is often a numeric-looking STRING (e.g.
+                # "100" from a form field). Comparing a number cell to a
+                # quoted text literal in Excel is ALWAYS true/false
+                # regardless of magnitude (Excel orders number < text), which
+                # silently broke every numeric IF/IFS rule on recalculation.
+                # Emit it as a bare numeric literal when it parses as one.
+                if isinstance(v, str):
+                    n = parse_excel_number(v)
+                    if n is not None:
+                        return repr(int(n)) if n == int(n) else repr(n)
+                    return f'"{v}"'
+                return str(v)
+
+            else_repr = _val_repr(else_val)
+            formula = else_repr
+            for r in reversed(rules):
                 c_let = col_letter_map.get(r.get("column", ""))
                 if not c_let:
-                    return None
-                op_raw = r.get("operator", "eq")
-                op_sym = "=" if op_raw == "eq" else "!=" if op_raw == "neq" else ">=" if op_raw == "gte" else "<=" if op_raw == "lte" else ">" if op_raw == "gt" else "<" if op_raw == "lt" else "="
-                v = r.get("value")
-                val_repr = f'"{v}"' if isinstance(v, str) else str(v)
-                res = r.get("result")
-                res_repr = f'"{res}"' if isinstance(res, str) else str(res)
-                else_repr = f'"{else_val}"' if isinstance(else_val, str) else str(else_val)
-                return f"=IF({c_let}{excel_row_num}{op_sym}{val_repr}, {res_repr}, {else_repr})"
+                    continue
+                op_sym = op_sym_map.get(r.get("operator", "eq"), "=")
+                val_repr = _val_repr(r.get("value"))
+                res_repr = _val_repr(r.get("result"))
+                formula = f"IF({c_let}{excel_row_num}{op_sym}{val_repr}, {res_repr}, {formula})"
+            return f"={formula}" if formula != else_repr else None
 
         elif stype == "text_transform":
             c = params.get("column", "")
             c_let = col_letter_map.get(c)
-            if not c_let:
+            if not c_let or _in_place(c):
                 return None
             op = params.get("operation", "trim").lower()
             if op == "upper":
@@ -262,7 +314,7 @@ class ExportService:
         elif stype == "date_transform":
             c = params.get("column", "")
             c_let = col_letter_map.get(c)
-            if not c_let:
+            if not c_let or _in_place(c):
                 return None
             op = params.get("operation", "extract_part").lower()
             if op == "extract_part":

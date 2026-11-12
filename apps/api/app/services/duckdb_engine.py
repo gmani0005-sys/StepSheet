@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import duckdb
 from app.core.config import settings
 from app.schemas.dataset import ColumnSchema, FilterCondition, SortCondition
+from app.services.sql_safe import quote_ident as Q
 
 
 class DuckDBEngine:
@@ -46,18 +47,87 @@ class DuckDBEngine:
 
         try:
             if file_format.lower() == "csv":
-                # Use DuckDB's high-speed multi-threaded CSV reader
-                query = f"""
-                    COPY (
-                        SELECT * FROM read_csv_auto('{source_path_sql}', header=true, sample_size=20000, ignore_errors=true)
-                    ) TO '{target_parquet_path_sql}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                """
-                conn.execute(query)
+                # Detect encoding ourselves: DuckDB's read_csv_auto in this
+                # version has no `encoding` parameter, and silently mis-reads
+                # (or produces 0 usable rows for) a Windows-1252 file fed to it
+                # as UTF-8. Re-encode to UTF-8 up front when needed.
+                csv_source_sql = source_path_sql
+                with open(source_path, "rb") as fh:
+                    raw = fh.read()
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw.decode("cp1252", errors="replace")
+                    reencoded_path = target_parquet_path + ".utf8.csv"
+                    with open(reencoded_path, "w", encoding="utf-8", newline="") as out_fh:
+                        out_fh.write(text)
+                    csv_source_sql = reencoded_path.replace("\\", "/")
+
+                # Use a full-file scan (sample_size=-1) for type detection so a
+                # value that breaks the inferred type (e.g. "N/A" appearing
+                # after row 20,000) is seen BEFORE parsing commits to a type,
+                # instead of being silently dropped by ignore_errors=true.
+                try:
+                    conn.execute(f"""
+                        COPY (
+                            SELECT * FROM read_csv_auto('{csv_source_sql}', header=true, sample_size=-1)
+                        ) TO '{target_parquet_path_sql}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                    """)
+                except Exception:
+                    # A genuine unparseable value still slipped through (rare).
+                    # Surface how many rows were affected rather than silently
+                    # discarding them.
+                    rejects_table = "_stepsheet_rejects"
+                    conn.execute(f"""
+                        COPY (
+                            SELECT * FROM read_csv_auto(
+                                '{csv_source_sql}', header=true, sample_size=-1,
+                                ignore_errors=true, store_rejects=true, rejects_table='{rejects_table}'
+                            )
+                        ) TO '{target_parquet_path_sql}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                    """)
+                    try:
+                        n_rejected = conn.execute(f"SELECT count(*) FROM {rejects_table}").fetchone()[0]
+                    except Exception:
+                        n_rejected = "an unknown number of"
+                    if n_rejected:
+                        raise ValueError(
+                            f"{n_rejected} row(s) could not be parsed with the detected column "
+                            f"types and were excluded from the import. Re-upload with a "
+                            f"compatible type, or change the affected column to text first."
+                        )
 
             elif file_format.lower() in ["xlsx", "xls"]:
-                # For Excel, use Polars or openpyxl to read sheet 1, write to parquet
+                # For Excel, use Polars to read the first sheet, write to parquet.
+                # Auto-detect the real header row: a title row (or blank row)
+                # placed above the header used to corrupt the inferred schema
+                # (the title text became a bogus single column). Scan the first
+                # few raw rows for the first one that looks like a real header
+                # (more than one non-blank cell), and use THAT as the header,
+                # skipping everything above it.
                 import polars as pl
-                df = pl.read_excel(source_path)
+                raw_df = pl.read_excel(source_path, sheet_id=1, has_header=False)
+                header_row_idx = 0
+                scan_limit = min(10, raw_df.height)
+                for i in range(scan_limit):
+                    row_vals = raw_df.row(i)
+                    non_blank = sum(1 for v in row_vals if v is not None and str(v).strip() != "")
+                    if non_blank >= 2:
+                        header_row_idx = i
+                        break
+                header_vals = []
+                seen_names: Dict[str, int] = {}
+                for j, v in enumerate(raw_df.row(header_row_idx)):
+                    name = str(v).strip() if v is not None and str(v).strip() != "" else f"column_{j + 1}"
+                    base = name
+                    n = seen_names.get(base, 0)
+                    while name in header_vals:
+                        n += 1
+                        name = f"{base}_{n}"
+                    seen_names[base] = n
+                    header_vals.append(name)
+                df = raw_df.slice(header_row_idx + 1)
+                df.columns = header_vals
                 df.write_parquet(target_parquet_path, compression="zstd")
 
             elif file_format.lower() == "parquet":
@@ -136,7 +206,7 @@ class DuckDBEngine:
                 # Text search across all columns
                 search_parts = []
                 for col in col_names:
-                    safe_col = f'"{col}"'
+                    safe_col = Q(col)
                     search_parts.append(f"CAST({safe_col} AS VARCHAR) ILIKE ?")
                     params.append(f"%{search_query}%")
                 if search_parts:
@@ -145,7 +215,7 @@ class DuckDBEngine:
             if filter_conditions:
                 for cond in filter_conditions:
                     if cond.column in col_names:
-                        safe_col = f'"{cond.column}"'
+                        safe_col = Q(cond.column)
                         op = cond.operator.lower()
                         if op == "eq":
                             where_clauses.append(f"{safe_col} = ?")
@@ -188,12 +258,15 @@ class DuckDBEngine:
                 for s in sort_conditions:
                     if s.column in col_names:
                         dir_str = "DESC" if s.direction.lower() == "desc" else "ASC"
-                        order_clauses.append(f'"{s.column}" {dir_str} NULLS LAST')
+                        order_clauses.append(f'{Q(s.column)} {dir_str} NULLS LAST')
 
             order_str = f" ORDER BY {', '.join(order_clauses)}" if order_clauses else ""
 
-            # Build query with limit and offset
-            data_sql = f"SELECT * FROM read_parquet('{parquet_sql}'){where_str}{order_str} LIMIT {limit} OFFSET {offset};"
+            # Build query with limit and offset (validated as plain ints before
+            # being spliced into SQL text).
+            safe_limit = int(limit)
+            safe_offset = int(offset)
+            data_sql = f"SELECT * FROM read_parquet('{parquet_sql}'){where_str}{order_str} LIMIT {safe_limit} OFFSET {safe_offset};"
 
             # Fetch rows directly using native cursor
             cursor = conn.execute(data_sql, params) if params else conn.execute(data_sql)

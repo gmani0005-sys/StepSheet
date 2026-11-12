@@ -58,7 +58,7 @@ class SplitColumnParams(BaseModel):
     column: str
     delimiter: str = ","
     new_column_names: List[str] = Field(default_factory=list)
-    keep_original: bool = False
+    keep_original: bool = True
 
 
 # Phase 4 Parameter Models
@@ -152,6 +152,7 @@ class StepSchema(BaseModel):
         "top_bottom_n",
         "split_column",
         "xlookup",
+        "vlookup",
         "append",
         "join",
         "conditional",

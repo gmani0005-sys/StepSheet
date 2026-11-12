@@ -11,6 +11,7 @@ from app.schemas.joins import (
 )
 from app.services.storage import get_storage_service
 from app.services.join_service import join_service
+from app.api.deps import get_current_user_enforced, check_dataset_access
 
 router = APIRouter()
 
@@ -19,6 +20,7 @@ router = APIRouter()
 def pre_join_health_check(
     req: PreJoinHealthCheckRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_enforced),
 ):
     """
     Run pre-join health check analyzing cardinality (1:1, 1:N, N:1, N:N),
@@ -29,6 +31,8 @@ def pre_join_health_check(
 
     if not left_ds or not right_ds:
         raise HTTPException(status_code=404, detail="Left or right dataset not found")
+    check_dataset_access(left_ds, current_user)
+    check_dataset_access(right_ds, current_user)
 
     storage = get_storage_service()
     left_path = storage.get_local_path(left_ds.parquet_path)
@@ -54,6 +58,7 @@ def suggest_join_keys(
     left_id: str,
     right_id: str,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_enforced),
 ):
     """
     Suggest matching join key pairs between two datasets based on column names and types.
@@ -62,6 +67,8 @@ def suggest_join_keys(
     right_ds = db.query(Dataset).filter(Dataset.id == right_id).first()
     if not left_ds or not right_ds:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    check_dataset_access(left_ds, current_user)
+    check_dataset_access(right_ds, current_user)
 
     left_cols = {c["name"].lower(): c["name"] for c in (left_ds.schema_metadata or [])}
     right_cols = {c["name"].lower(): c["name"] for c in (right_ds.schema_metadata or [])}

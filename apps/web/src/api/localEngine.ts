@@ -5292,6 +5292,16 @@ export const localEngine = {
       ['target', 'budget', 'goal', 'quota'].some((k) => c.toLowerCase().includes(k))
     );
 
+    // Compact number formatter for embedding the actual compared figures
+    // into a KPI's MoM subtitle, so the calculation basis (not just the
+    // resulting %) is visible without digging into the data yourself.
+    const fmtCompact = (n: number): string => {
+      if (!Number.isFinite(n)) return '0';
+      if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+      if (Math.abs(n) >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
+      return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    };
+
     let primarySubtitle = Array.isArray(rows) && rows.length > 0 ? `Across ${rows.length} records` : 'Cumulative total';
     let avgSubtitle = Array.isArray(rows) && rows.length > 0 ? `Mean across ${rows.length} records` : 'Per-record mean';
 
@@ -5330,7 +5340,10 @@ export const localEngine = {
           if (prevStats.sum > 0) {
             const pct = ((latestStats.sum - prevStats.sum) / prevStats.sum) * 100;
             const sign = pct >= 0 ? '+' : '';
-            primarySubtitle = `${sign}${pct.toFixed(1)}% MoM (${latestMonth} vs ${prevMonth})`;
+            // Embed the actual totals and row counts behind the %, not just
+            // the two month labels, so a big swing (e.g. from a sparsely
+            // populated latest month) is self-explanatory on hover.
+            primarySubtitle = `${sign}${pct.toFixed(1)}% MoM: ${fmtCompact(latestStats.sum)} in ${latestMonth} (${latestStats.count} rows) vs ${fmtCompact(prevStats.sum)} in ${prevMonth} (${prevStats.count} rows)`;
           }
 
           const latestAvg = latestStats.sum / (latestStats.count || 1);
@@ -5338,7 +5351,7 @@ export const localEngine = {
           if (prevAvg > 0) {
             const pctAvg = ((latestAvg - prevAvg) / prevAvg) * 100;
             const signAvg = pctAvg >= 0 ? '+' : '';
-            avgSubtitle = `${signAvg}${pctAvg.toFixed(1)}% MoM avg (${latestMonth} vs ${prevMonth})`;
+            avgSubtitle = `${signAvg}${pctAvg.toFixed(1)}% MoM avg: ${fmtCompact(latestAvg)} in ${latestMonth} vs ${fmtCompact(prevAvg)} in ${prevMonth}`;
           }
         }
       } catch {

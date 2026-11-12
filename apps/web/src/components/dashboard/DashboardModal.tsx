@@ -827,6 +827,30 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   const [multiSlicerSelections, setMultiSlicerSelections] = useState<Record<string, string[]>>({});
   const [crossFilter, setCrossFilter] = useState<{ column: string; value: string } | null>(null);
 
+  // Power BI-style floating hover tooltip: a small card that follows the
+  // cursor over a chart data point, showing its exact category/value (and
+  // optional share-of-total), instead of only a color highlight. One piece
+  // of shared state feeds a single floating element rendered near the
+  // canvas root, rather than each chart type building its own tooltip.
+  const [chartTooltip, setChartTooltip] = useState<{
+    x: number;
+    y: number;
+    title: string;
+    rows: { label: string; value: string; color?: string }[];
+  } | null>(null);
+
+  const showChartTooltip = (
+    e: React.MouseEvent,
+    title: string,
+    rows: { label: string; value: string; color?: string }[]
+  ) => {
+    setChartTooltip({ x: e.clientX, y: e.clientY, title, rows });
+  };
+  const moveChartTooltip = (e: React.MouseEvent) => {
+    setChartTooltip((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+  };
+  const hideChartTooltip = () => setChartTooltip(null);
+
   const sourceRows = useMemo(() => {
     return Array.isArray(allRows) && allRows.length > 0
       ? allRows
@@ -3596,6 +3620,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               <div
                 key={item.category}
                 onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                onMouseEnter={(e) =>
+                  showChartTooltip(e, getItemLegendLabel(vis, item.category), [
+                    { label: vis.aggFunc.toUpperCase(), value: formatNum(item.value), color: barColor },
+                  ])
+                }
+                onMouseMove={moveChartTooltip}
+                onMouseLeave={hideChartTooltip}
                 className={`p-1.5 rounded cursor-pointer transition-colors ${
                   isSelected ? 'bg-[#E6F2EB] border border-[#217346]' : 'hover:bg-[#F3F3F3]'
                 }`}
@@ -3658,8 +3689,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                 <div
                   key={item.category}
                   onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                  onMouseEnter={(e) =>
+                    showChartTooltip(e, getItemLegendLabel(vis, item.category), [
+                      { label: vis.aggFunc.toUpperCase(), value: formatNum(item.value), color: colColor },
+                    ])
+                  }
+                  onMouseMove={moveChartTooltip}
+                  onMouseLeave={hideChartTooltip}
                   className="flex-1 h-full flex flex-col items-center justify-end cursor-pointer group"
-                  title={`${getItemLegendLabel(vis, item.category)}: ${formatNum(item.value)}`}
                 >
                   {vis.showDataLabels && labelPos === 'outside_end' && (
                     <span
@@ -3772,13 +3809,19 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         strokeDashoffset={offset}
                         transform={`rotate(-90 ${cx} ${cy})`}
                         onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                        onMouseEnter={(e) =>
+                          showChartTooltip(e, getItemLegendLabel(vis, item.category), [
+                            {
+                              label: `${(share * 100).toFixed(1)}% of total`,
+                              value: formatNum(item.value),
+                              color: sliceColor,
+                            },
+                          ])
+                        }
+                        onMouseMove={moveChartTooltip}
+                        onMouseLeave={hideChartTooltip}
                         className="cursor-pointer transition-opacity hover:opacity-85"
-                      >
-                        <title>
-                          {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (
-                          {(share * 100).toFixed(1)}%)
-                        </title>
-                      </circle>
+                      />
                       {vis.showDataLabels && share >= 0.06 && (
                         <>
                           {pieOrDonutLabelPos === 'outside_end' && (
@@ -3840,6 +3883,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                       <g
                         key={item.category}
                         onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                        onMouseEnter={(e) =>
+                          showChartTooltip(e, getItemLegendLabel(vis, item.category), [
+                            { label: '100.0% of total', value: formatNum(item.value), color: sliceColor },
+                          ])
+                        }
+                        onMouseMove={moveChartTooltip}
+                        onMouseLeave={hideChartTooltip}
                         className="cursor-pointer transition-opacity hover:opacity-90"
                       >
                         <path
@@ -3847,11 +3897,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                           fill={sliceColor}
                           stroke="#FFFFFF"
                           strokeWidth="1.5"
-                        >
-                          <title>
-                            {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (100.0%)
-                          </title>
-                        </path>
+                        />
                         {vis.showDataLabels && (
                           <text
                             x={cx}
@@ -3905,6 +3951,17 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     <g
                       key={item.category}
                       onClick={() => toggleCrossFilter(vis.categoryCol, item.category)}
+                      onMouseEnter={(e) =>
+                        showChartTooltip(e, getItemLegendLabel(vis, item.category), [
+                          {
+                            label: `${(share * 100).toFixed(1)}% of total`,
+                            value: formatNum(item.value),
+                            color: sliceColor,
+                          },
+                        ])
+                      }
+                      onMouseMove={moveChartTooltip}
+                      onMouseLeave={hideChartTooltip}
                       className="cursor-pointer transition-opacity hover:opacity-90"
                     >
                       <path
@@ -3913,12 +3970,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         stroke="#FFFFFF"
                         strokeWidth="1.5"
                         strokeLinejoin="round"
-                      >
-                        <title>
-                          {getItemLegendLabel(vis, item.category)}: {formatNum(item.value)} (
-                          {(share * 100).toFixed(1)}%)
-                        </title>
-                      </path>
+                      />
                       {vis.showDataLabels && share >= 0.06 && (
                         <>
                           {pieOrDonutLabelPos === 'outside_end' && (
@@ -4023,8 +4075,21 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                 <g
                   key={p.category}
                   onClick={() => toggleCrossFilter(vis.categoryCol, p.category)}
+                  onMouseEnter={(e) =>
+                    showChartTooltip(e, getItemLegendLabel(vis, p.category), [
+                      {
+                        label: vis.aggFunc.toUpperCase(),
+                        value: formatNum(p.value),
+                        color: getItemColor(vis, p.category, idx),
+                      },
+                    ])
+                  }
+                  onMouseMove={moveChartTooltip}
+                  onMouseLeave={hideChartTooltip}
                   className="cursor-pointer"
                 >
+                  {/* Larger transparent hit-area so hover/tooltip isn't limited to the tiny 4.5px dot */}
+                  <circle cx={p.x} cy={p.y} r="10" fill="transparent" />
                   <circle
                     cx={p.x}
                     cy={p.y}
@@ -6067,6 +6132,38 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           initialFormat={exportShareFormat}
           dashboardData={getDashboardExportData()}
         />
+      )}
+
+      {/* Power BI-style floating chart tooltip: follows the cursor over a
+          chart data point, showing its exact value rather than just a
+          color highlight. Fixed positioning + very high z-index keeps it
+          above every chart/pane in the modal; pointer-events-none so it
+          never itself becomes the hover/click target. */}
+      {chartTooltip && (
+        <div
+          data-testid="chart-hover-tooltip"
+          className="fixed z-[9999] pointer-events-none bg-white border border-[#D4D4D4] rounded-lg shadow-xl px-3 py-2 text-xs min-w-[120px]"
+          style={{
+            left: `${chartTooltip.x + 14}px`,
+            top: `${chartTooltip.y + 14}px`,
+          }}
+        >
+          <div className="font-bold text-[#212121] mb-1 truncate max-w-[220px]">
+            {chartTooltip.title}
+          </div>
+          {chartTooltip.rows.map((row, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[#605E5C]">
+              {row.color && (
+                <span
+                  className="w-2 h-2 rounded-sm shrink-0"
+                  style={{ backgroundColor: row.color }}
+                />
+              )}
+              <span className="font-medium">{row.label}:</span>
+              <span className="font-mono font-bold text-[#212121]">{row.value}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

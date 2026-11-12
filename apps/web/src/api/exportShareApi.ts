@@ -200,9 +200,11 @@ function createZipBlob(files: Array<{ name: string; content: string | Uint8Array
   });
 }
 
-export function createMultiPagePdfBlob(
-  pages: Array<Array<{ text: string; font?: string; leading?: number; x?: number }>>
-): Blob {
+type PdfTextItem = { kind?: 'text'; text: string; font?: string; leading?: number; x?: number };
+type PdfRawItem = { kind: 'raw'; ops: string; consumesHeight?: number };
+type PdfPageItem = PdfTextItem | PdfRawItem;
+
+export function createMultiPagePdfBlob(pages: Array<PdfPageItem[]>): Blob {
   let body = '%PDF-1.4\n';
   const offsets: number[] = [];
 
@@ -230,25 +232,46 @@ export function createMultiPagePdfBlob(
   for (let i = 0; i < pageCount; i++) {
     const pageId = pageObjIds[i];
     const contentId = contentObjIds[i];
-    const lines = pages[i] || [];
+    const items = pages[i] || [];
 
     addObj(
       `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentId} 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F3 << /Type /Font /Subtype /Type1 /BaseFont /Courier >> >> >> >>\nendobj`
     );
 
-    const contentLines: string[] = ['BT'];
+    // A page mixes two kinds of content: ordinary text lines (rendered with
+    // the running Td-offset trick below) and raw graphics/text operators
+    // for real charts (bars, donuts, line plots -- see buildChartOps). Text
+    // needs an open BT...ET block; raw chart ops are emitted outside one,
+    // since they draw their own filled shapes and their own small BT...ET
+    // label blocks internally.
+    const contentLines: string[] = [];
     let y = 745;
-    for (const item of lines) {
-      const font = item.font || '/F2 9';
-      const text = (item.text || '').replace(/[()\\\\\r\n]/g, ' ').slice(0, 95);
+    let textOpen = false;
+    for (const item of items) {
+      if ('kind' in item && item.kind === 'raw') {
+        if (textOpen) {
+          contentLines.push('ET');
+          textOpen = false;
+        }
+        contentLines.push(item.ops);
+        if (item.consumesHeight) y -= item.consumesHeight;
+        continue;
+      }
+      if (y < 40) continue; // keep y in sync for later raw items, just stop adding more text
+      const textItem = item as PdfTextItem;
+      if (!textOpen) {
+        contentLines.push('BT');
+        textOpen = true;
+      }
+      const font = textItem.font || '/F2 9';
+      const text = pdfTextEscape(textItem.text || '').slice(0, 95);
       contentLines.push(`${font} Tf`);
-      contentLines.push(`${item.x || 45} ${y} Td`);
+      contentLines.push(`${textItem.x || 45} ${y} Td`);
       contentLines.push(`(${text}) Tj`);
-      contentLines.push(`-${item.x || 45} -${y} Td`);
-      y -= item.leading || 14;
-      if (y < 40) break;
+      contentLines.push(`-${textItem.x || 45} -${y} Td`);
+      y -= textItem.leading || 14;
     }
-    contentLines.push('ET');
+    if (textOpen) contentLines.push('ET');
 
     const streamContent = contentLines.join('\n');
     const streamLen = new TextEncoder().encode(streamContent).length;
@@ -267,11 +290,218 @@ export function createMultiPagePdfBlob(
   return new Blob([body], { type: 'application/pdf' });
 }
 
+// Tableau10-style qualitative palette as 0..1 RGB triples for PDF "rg"/"RG"
+// color operators.
+const CHART_PALETTE: Array<[number, number, number]> = [
+  [0.122, 0.467, 0.706],
+  [1.0, 0.498, 0.055],
+  [0.173, 0.627, 0.173],
+  [0.839, 0.153, 0.157],
+  [0.58, 0.404, 0.741],
+  [0.549, 0.337, 0.294],
+  [0.89, 0.467, 0.761],
+  [0.498, 0.498, 0.498],
+  [0.737, 0.741, 0.133],
+  [0.09, 0.745, 0.812],
+];
+
+function pdfTextEscape(s: string): string {
+  // Base-14 fonts (Helvetica etc.) in a hand-rolled, non-embedded PDF use
+  // single-byte WinAnsi/StandardEncoding, so any character outside that
+  // range (including "nice" Unicode punctuation like an ellipsis) renders
+  // as a garbled glyph instead of being shown or dropped. Replace anything
+  // outside printable Latin-1 with a plain '?' to stay safe.
+  return (s || '')
+    .replace(/[()\\\r\n]/g, ' ')
+    .replace(/[^\x20-\x7e]/g, '?');
+}
+
+function pdfTruncate(s: string, n: number): string {
+  const str = s || '';
+  return str.length > n ? str.slice(0, n - 1) + '...' : str;
+}
+
+function pdfLabelOp(
+  x: number,
+  y: number,
+  size: number,
+  text: string,
+  bold = false,
+  color: [number, number, number] = [0, 0, 0]
+): string {
+  const font = bold ? '/F1' : '/F2';
+  const [r, g, b] = color;
+  return `${r} ${g} ${b} rg\nBT ${font} ${size} Tf 1 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)} Tm (${pdfTextEscape(text)}) Tj ET\n`;
+}
+
+function pdfRectOp(x: number, y: number, w: number, h: number, rgb: [number, number, number]): string {
+  const [r, g, b] = rgb;
+  return `${r} ${g} ${b} rg\n${x.toFixed(1)} ${y.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re f\n`;
+}
+
+/**
+ * Builds raw PDF content-stream operators that draw a REAL chart -- filled
+ * bars, columns, a donut/pie with legend, or a line/area plot -- inside the
+ * box [x, x+w] x [yTop-h, yTop]. This is what turns the PDF export into an
+ * actual visual dashboard instead of a page of numbers with ASCII "|" bars.
+ */
+function buildChartOps(vis: DashboardExportVisual, x: number, yTop: number, w: number, h: number): string {
+  const items = (vis.items || []).filter((it) => Number.isFinite(it.value)).slice(0, 8);
+  if (items.length === 0) return '';
+  const type = (vis.type || '').toLowerCase();
+  let ops = `0.85 0.85 0.85 RG 0.75 w\n${x.toFixed(1)} ${(yTop - h).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re S\n`;
+
+  if (type === 'donut' || type === 'pie') {
+    const total = items.reduce((acc, it) => acc + Math.abs(it.value), 0) || 1;
+    const cx = x + w * 0.3;
+    const cy = yTop - h / 2;
+    const rOuter = Math.min(w * 0.3, h / 2) - 8;
+    let angle = -Math.PI / 2;
+    const segs = 48;
+    items.forEach((it, i) => {
+      const frac = Math.abs(it.value) / total;
+      const sweep = frac * Math.PI * 2;
+      const [r, g, b] = CHART_PALETTE[i % CHART_PALETTE.length];
+      const steps = Math.max(2, Math.round(segs * frac));
+      let path = `${r} ${g} ${b} rg\n${cx.toFixed(1)} ${cy.toFixed(1)} m\n`;
+      for (let s = 0; s <= steps; s++) {
+        const a = angle + (sweep * s) / steps;
+        path += `${(cx + rOuter * Math.cos(a)).toFixed(1)} ${(cy + rOuter * Math.sin(a)).toFixed(1)} l\n`;
+      }
+      path += 'h f\n';
+      ops += path;
+      angle += sweep;
+    });
+    if (type === 'donut') {
+      const rInner = rOuter * 0.55;
+      let hole = `1 1 1 rg\n${(cx + rInner).toFixed(1)} ${cy.toFixed(1)} m\n`;
+      for (let s = 0; s <= segs; s++) {
+        const a = (Math.PI * 2 * s) / segs;
+        hole += `${(cx + rInner * Math.cos(a)).toFixed(1)} ${(cy + rInner * Math.sin(a)).toFixed(1)} l\n`;
+      }
+      hole += 'h f\n';
+      ops += hole;
+    }
+    const legendX = x + w * 0.58;
+    let legendY = yTop - 14;
+    items.forEach((it, i) => {
+      const [r, g, b] = CHART_PALETTE[i % CHART_PALETTE.length];
+      if (legendY < yTop - h + 10) return;
+      ops += pdfRectOp(legendX, legendY - 7, 8, 8, [r, g, b]);
+      ops += pdfLabelOp(
+        legendX + 12,
+        legendY - 6,
+        8,
+        `${pdfTruncate(it.category || '(Blank)', 20)}  (${it.percentage})`,
+        false,
+        [r, g, b]
+      );
+      legendY -= 16;
+    });
+  } else if (type === 'line_area' || type === 'line' || type === 'area') {
+    const vals = items.map((it) => it.value);
+    const maxVal = Math.max(...vals, 0);
+    const minVal = Math.min(...vals, 0);
+    const range = maxVal - minVal || 1;
+    const plotX = x + 8;
+    const plotW = w - 16;
+    const baseY = yTop - h + 14;
+    const plotH = h - 28;
+    const stepX = items.length > 1 ? plotW / (items.length - 1) : 0;
+    const pts = items.map((it, i) => ({
+      x: plotX + stepX * i,
+      y: baseY + ((it.value - minVal) / range) * plotH,
+    }));
+    const [r, g, b] = CHART_PALETTE[0];
+    let area = `${(r * 0.35 + 0.65).toFixed(2)} ${(g * 0.35 + 0.65).toFixed(2)} ${(b * 0.35 + 0.65).toFixed(2)} rg\n`;
+    area += `${pts[0].x.toFixed(1)} ${baseY.toFixed(1)} m\n`;
+    pts.forEach((p) => (area += `${p.x.toFixed(1)} ${p.y.toFixed(1)} l\n`));
+    area += `${pts[pts.length - 1].x.toFixed(1)} ${baseY.toFixed(1)} l\nh f\n`;
+    ops += area;
+    let line = `${r} ${g} ${b} RG 2 w\n${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)} m\n`;
+    pts.slice(1).forEach((p) => (line += `${p.x.toFixed(1)} ${p.y.toFixed(1)} l\n`));
+    line += 'S\n';
+    ops += line;
+    pts.forEach((p) => {
+      ops += pdfRectOp(p.x - 2, p.y - 2, 4, 4, [r, g, b]);
+    });
+    const maxIdx = vals.indexOf(maxVal);
+    Array.from(new Set([0, maxIdx, pts.length - 1])).forEach((idx) => {
+      if (idx < 0 || idx >= pts.length) return;
+      ops += pdfLabelOp(pts[idx].x - 10, pts[idx].y + 8, 7, Number(items[idx].value).toLocaleString(), false, [r, g, b]);
+    });
+    ops += pdfLabelOp(pts[0].x - 10, baseY - 11, 6.5, pdfTruncate(items[0].category, 10), false, [r, g, b]);
+    ops += pdfLabelOp(
+      pts[pts.length - 1].x - 10,
+      baseY - 11,
+      6.5,
+      pdfTruncate(items[items.length - 1].category, 10),
+      false,
+      [r, g, b]
+    );
+  } else if (type === 'funnel') {
+    const maxVal = Math.max(...items.map((it) => Math.abs(it.value)), 1);
+    const rowH = h / items.length;
+    const midX = x + w / 2;
+    items.forEach((it, i) => {
+      const frac = Math.abs(it.value) / maxVal;
+      const barW = Math.max(w * 0.12, w * 0.9 * frac);
+      const barX = midX - barW / 2;
+      const barY = yTop - (i + 1) * rowH + rowH * 0.15;
+      const barH = rowH * 0.7;
+      const [r, g, b] = CHART_PALETTE[i % CHART_PALETTE.length];
+      ops += pdfRectOp(barX, barY, barW, barH, [r, g, b]);
+      // White text on top of the solid-colored bar for contrast.
+      ops += pdfLabelOp(
+        midX - 60,
+        barY + barH / 2 - 3,
+        8,
+        `${pdfTruncate(it.category, 16)}: ${Number(it.value).toLocaleString()}`,
+        true,
+        [1, 1, 1]
+      );
+    });
+  } else if (type === 'column') {
+    const maxVal = Math.max(...items.map((it) => Math.abs(it.value)), 1);
+    const n = items.length;
+    const colW = (w / n) * 0.55;
+    const gap = w / n - colW;
+    const baseY = yTop - h + 18;
+    items.forEach((it, i) => {
+      const barX = x + gap / 2 + i * (w / n);
+      const barH = (Math.abs(it.value) / maxVal) * (h - 36);
+      const [r, g, b] = CHART_PALETTE[i % CHART_PALETTE.length];
+      ops += pdfRectOp(barX, baseY, colW, barH, [r, g, b]);
+      ops += pdfLabelOp(barX, baseY + barH + 4, 7, Number(it.value).toLocaleString(), true, [r, g, b]);
+      ops += pdfLabelOp(barX - 2, yTop - h + 5, 6.5, pdfTruncate(it.category || '(Blank)', 10), false, [r, g, b]);
+    });
+  } else {
+    // BAR, CLUSTERED_BAR, and any other category/value visual -> horizontal bars.
+    const maxVal = Math.max(...items.map((it) => Math.abs(it.value)), 1);
+    const n = items.length;
+    const rowH = h / n;
+    const labelW = 150;
+    const barAreaX = x + labelW;
+    const barAreaW = w - labelW - 70;
+    items.forEach((it, i) => {
+      const barY = yTop - (i + 1) * rowH + rowH * 0.18;
+      const barH = rowH * 0.64;
+      const barW = Math.max(2, (Math.abs(it.value) / maxVal) * barAreaW);
+      const [r, g, b] = CHART_PALETTE[i % CHART_PALETTE.length];
+      ops += pdfLabelOp(x, barY + barH / 2 - 3, 8, pdfTruncate(it.category || '(Blank)', 22), false, [r, g, b]);
+      ops += pdfRectOp(barAreaX, barY, barW, barH, [r, g, b]);
+      ops += pdfLabelOp(barAreaX + barW + 6, barY + barH / 2 - 3, 7.5, Number(it.value).toLocaleString(), false, [r, g, b]);
+    });
+  }
+
+  return ops;
+}
+
 export function createDashboardPdfBlob(data: DashboardExportData): Blob {
-  const pages: Array<Array<{ text: string; font?: string; leading?: number; x?: number }>> = [];
+  const pages: Array<PdfPageItem[]> = [];
 
   // Page 1: Executive Dashboard & Scorecard
-  const p1: Array<{ text: string; font?: string; leading?: number; x?: number }> = [
+  const p1: PdfPageItem[] = [
     { text: 'StepSheet Executive BI Dashboard', font: '/F1 18', leading: 24 },
     { text: data.title || 'Executive Dashboard', font: '/F1 13', leading: 18 },
     {
@@ -305,41 +535,52 @@ export function createDashboardPdfBlob(data: DashboardExportData): Blob {
   p1.push({ text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 18 });
   p1.push({ text: 'DASHBOARD CHARTS & VISUALS OVERVIEW', font: '/F1 12', leading: 16 });
   p1.push({
-    text: `Total Charts Rendered: ${data.visuals?.length || 0}. Detailed breakdowns on subsequent pages.`,
+    text: `Total Charts Rendered: ${data.visuals?.length || 0}. Each is drawn as a real chart on its own page below.`,
     font: '/F2 9',
     leading: 16,
   });
 
   pages.push(p1);
 
-  // Pages 2+: Visuals Detailed Breakdown
+  // Pages 2+: one real chart per visual, followed by its detailed data table.
   if (data.visuals && data.visuals.length > 0) {
     for (let i = 0; i < data.visuals.length; i++) {
       const vis = data.visuals[i];
-      const pVis: Array<{ text: string; font?: string; leading?: number; x?: number }> = [
+      let cursorY = 745;
+      const pVis: PdfPageItem[] = [
         { text: `Chart ${i + 1}: ${vis.title}`, font: '/F1 14', leading: 20 },
         {
           text: `Type: ${vis.type.toUpperCase()} | Grouped by: "${vis.categoryCol}" | Metric: ${vis.aggFunc.toUpperCase()}("${vis.valueCol}")`,
           font: '/F2 9',
           leading: 18,
         },
-        { text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 14 },
-        { text: 'Category                  Value         Share %     Visual Distribution', font: '/F3 8', leading: 14 },
-        { text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 14 },
       ];
+      cursorY -= 20 + 18;
 
-      const maxVal = Math.max(1, ...vis.items.map((x) => Math.abs(x.value)));
+      const isTabular = vis.type === 'table' || vis.type === 'matrix';
+      if (!isTabular && vis.items && vis.items.length > 0) {
+        const chartTop = cursorY - 6;
+        const chartH = 190;
+        const ops = buildChartOps(vis, 70, chartTop, 472, chartH);
+        if (ops) {
+          const consumesHeight = chartH + 20;
+          pVis.push({ kind: 'raw', ops, consumesHeight });
+          cursorY -= consumesHeight;
+        }
+      }
+
+      pVis.push({ text: 'DETAILED BREAKDOWN', font: '/F1 10', leading: 14 });
+      pVis.push({ text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 14 });
+      pVis.push({ text: 'Category                        Value         Share %', font: '/F3 8', leading: 14 });
+      pVis.push({ text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 14 });
+      cursorY -= 14 + 14 + 14 + 14;
+
       vis.items.slice(0, 15).forEach((item) => {
-        const catPad = (item.category || '(Blank)').slice(0, 22).padEnd(24);
-        const valPad = Number(item.value).toLocaleString().padStart(12);
+        const catPad = (item.category || '(Blank)').slice(0, 26).padEnd(28);
+        const valPad = Number(item.value).toLocaleString().padStart(14);
         const pctPad = (item.percentage || '0.0%').padStart(8);
-        const barLen = Math.max(1, Math.min(20, Math.round((Math.abs(item.value) / maxVal) * 20)));
-        const barStr = '|'.repeat(barLen);
-        pVis.push({
-          text: `${catPad} ${valPad} ${pctPad}      ${barStr}`,
-          font: '/F3 8',
-          leading: 13,
-        });
+        pVis.push({ text: `${catPad} ${valPad} ${pctPad}`, font: '/F3 8', leading: 13 });
+        cursorY -= 13;
       });
 
       const totalVal = vis.items.reduce((acc, x) => acc + x.value, 0);
@@ -356,7 +597,7 @@ export function createDashboardPdfBlob(data: DashboardExportData): Blob {
 
   // Final Page: Lineage & Quality Steps (if any)
   if (data.steps && data.steps.length > 0) {
-    const pSteps: Array<{ text: string; font?: string; leading?: number; x?: number }> = [
+    const pSteps: PdfPageItem[] = [
       { text: 'Data Pipeline Transformations & Lineage', font: '/F1 14', leading: 20 },
       { text: `Applied steps to generate dataset: ${data.datasetName}`, font: '/F2 9', leading: 18 },
       { text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 16 },

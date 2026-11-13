@@ -287,5 +287,73 @@ describe('DashboardModal Power BI-Style Panes (Filters | Visualizations | Data)'
     const uniqueBadges = new Set(allBadgesText);
     expect(uniqueBadges.size).toBeGreaterThan(1);
   });
+
+  it('shows the trend badge\'s comparison period inline, not only on hover (regression)', async () => {
+    const testDataset = {
+      id: 'orders-mom-badge-test',
+      name: 'Orders',
+      original_filename: 'orders.csv',
+      file_format: 'csv' as const,
+      row_count: 4,
+      column_count: 3,
+      file_size_bytes: 1024,
+      schema_metadata: [
+        { name: 'amount', data_type: 'float', physical_type: 'FLOAT', nullable: false },
+        { name: 'category', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
+        { name: 'order_date', data_type: 'text', physical_type: 'VARCHAR', nullable: false },
+      ],
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+    };
+    // Seed a saved dashboard config (what a real AI-generated MoM KPI subtitle
+    // looks like) so the modal loads a KPI card whose subtitle embeds a
+    // percentage and a comparison period, matching the format
+    // generateAiDashboard actually produces.
+    window.localStorage.setItem(
+      'stepsheet_dashboards_v3',
+      JSON.stringify({
+        [testDataset.id]: {
+          dashboardTitle: 'Orders Dashboard',
+          paletteId: 'v22',
+          slicerColumns: [],
+          visuals: [
+            { id: 'vis_1', title: 'Amount by Category', type: 'column', categoryCol: 'category', valueCol: 'amount', aggFunc: 'sum' },
+          ],
+          kpiCards: [
+            {
+              id: 'kpi_1',
+              title: 'Total Amount',
+              column: 'amount',
+              aggFunc: 'sum',
+              subtitle: '+9.1% MoM: 1.2K in 2025-10 (2 rows) vs 1.5K in 2025-09 (2 rows)',
+              accentColor: '#10B981',
+            },
+          ],
+        },
+      })
+    );
+
+    useWorkbenchStore.setState({
+      datasets: [testDataset as any],
+      selectedDataset: testDataset as any,
+      columns: testDataset.schema_metadata as any,
+      rows: [
+        { amount: 1000, category: 'Hardware', order_date: '2025-10-01' },
+        { amount: 1200, category: 'Hardware', order_date: '2025-10-15' },
+        { amount: 800, category: 'Software', order_date: '2025-09-05' },
+        { amount: 700, category: 'Software', order_date: '2025-09-20' },
+      ],
+    });
+
+    render(<DashboardModal isOpen={true} onClose={() => {}} />);
+
+    const badge1 = await waitFor(() => screen.getByTestId('kpi-delta-badge-kpi_1'));
+    // The visible badge text (not just its title/tooltip) must include a
+    // short "vs <period>" fragment so the baseline is visible at a glance,
+    // instead of being truncated away with only the full detail on hover.
+    expect(badge1.textContent).toMatch(/vs\s+2025-09/);
+
+    window.localStorage.removeItem('stepsheet_dashboards_v3');
+  });
 });
 

@@ -5388,19 +5388,45 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                           const badgeClass = isNegative
                             ? 'bg-rose-50 text-rose-700 border-rose-200/60'
                             : 'bg-emerald-50 text-emerald-700 border-emerald-200/60';
+                          // The full comparison detail (e.g. "MoM: 16.6K in 2025-10
+                          // (12 rows) vs 14.2K in 2025-09 (9 rows)") is long, and the
+                          // card previously showed it truncated by CSS with only the
+                          // full text available on hover - so the baseline/comparison
+                          // period a trend badge is measured against was effectively
+                          // invisible without hovering. Pull out a short "vs <period>"
+                          // fragment to show inline, next to the delta itself, while
+                          // the full detail stays available in the tooltip.
+                          // Prefer the most recent date-like token (e.g. "2025-09"
+                          // from "...vs 14.2K in 2025-09 (9 rows)") since that's the
+                          // actual prior comparison period; fall back to whatever
+                          // follows "vs" (e.g. a target/budget column name) when the
+                          // comparison isn't date-based.
+                          const dateTokens = rest.match(
+                            /\d{4}-\d{2}(?:-\d{2})?|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b/gi
+                          );
+                          const vsWordMatch = rest.match(/vs\s+([A-Za-z0-9_\-\/]+)/i);
+                          const shortCompare = dateTokens && dateTokens.length > 0
+                            ? `vs ${dateTokens[dateTokens.length - 1]}`
+                            : vsWordMatch
+                            ? `vs ${vsWordMatch[1]}`
+                            : '';
                           return (
                             <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-slate-100/80">
                               <span
                                 data-testid={`kpi-delta-badge-${kpi.id}`}
+                                title={rest ? `${aggFuncLabel(kpi.aggFunc)} • ${rest}` : aggFuncLabel(kpi.aggFunc)}
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeClass}`}
                               >
                                 <Icon className="w-3 h-3" /> {delta}
+                                {shortCompare && (
+                                  <span className="font-semibold opacity-80 normal-case">{shortCompare}</span>
+                                )}
                               </span>
                               <span
                                 title={rest ? `${aggFuncLabel(kpi.aggFunc)} • ${rest}` : aggFuncLabel(kpi.aggFunc)}
-                                className="text-[10px] text-slate-400 font-mono uppercase font-bold truncate ml-2 text-right"
+                                className="text-[10px] text-slate-400 font-mono uppercase font-bold ml-2 text-right"
                               >
-                                {rest ? `${kpi.aggFunc} • ${rest}` : kpi.aggFunc}
+                                {kpi.aggFunc}
                               </span>
                             </div>
                           );

@@ -1956,6 +1956,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           categoryCol: vis.categoryCol || vis.valueCol,
           valueCol: vis.valueCol,
           aggFunc: 'count',
+          insight: vis.insight,
           items: buckets.map((b) => ({
             category: b.category,
             value: b.value,
@@ -1995,6 +1996,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         categoryCol: vis.categoryCol,
         valueCol: vis.valueCol,
         aggFunc: vis.aggFunc,
+        insight: vis.insight,
         items: items.map((it) => ({
           category: it.category,
           value: it.value,

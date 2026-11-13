@@ -40,6 +40,7 @@ export interface DashboardExportVisual {
   categoryCol: string;
   valueCol: string;
   aggFunc: string;
+  insight?: string;
   items: DashboardExportVisualItem[];
 }
 
@@ -235,15 +236,15 @@ export function createMultiPagePdfBlob(pages: Array<PdfPageItem[]>): Blob {
     const items = pages[i] || [];
 
     addObj(
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentId} 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F3 << /Type /Font /Subtype /Type1 /BaseFont /Courier >> >> >> >>\nendobj`
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentId} 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F3 << /Type /Font /Subtype /Type1 /BaseFont /Courier >> /F4 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >> >> >> >>\nendobj`
     );
 
     // A page mixes two kinds of content: ordinary text lines (rendered with
     // the running Td-offset trick below) and raw graphics/text operators
-    // for real charts (bars, donuts, line plots -- see buildChartOps). Text
-    // needs an open BT...ET block; raw chart ops are emitted outside one,
-    // since they draw their own filled shapes and their own small BT...ET
-    // label blocks internally.
+    // for real charts and report chrome (see buildChartOps, header/footer
+    // builders below). Text needs an open BT...ET block; raw ops are
+    // emitted outside one, since they draw their own shapes and their own
+    // small BT...ET label blocks internally.
     const contentLines: string[] = [];
     let y = 745;
     let textOpen = false;
@@ -290,19 +291,40 @@ export function createMultiPagePdfBlob(pages: Array<PdfPageItem[]>): Blob {
   return new Blob([body], { type: 'application/pdf' });
 }
 
-// Tableau10-style qualitative palette as 0..1 RGB triples for PDF "rg"/"RG"
-// color operators.
+// ---------------------------------------------------------------------
+// "Consulting deck" visual language for the PDF export: a restrained
+// navy / slate / gold palette, generous whitespace, thin rules instead of
+// fills, small-caps section eyebrows, and a header/footer on every page --
+// the conventions of a report built to be handed to a leadership team,
+// rather than a default BI-tool export.
+// ---------------------------------------------------------------------
+const PAGE_W = 612;
+const PAGE_H = 792;
+const MARGIN_X = 54;
+const CONTENT_W = PAGE_W - MARGIN_X * 2; // 504
+
+const NAVY: [number, number, number] = [0.071, 0.145, 0.267];
+const NAVY_LIGHT: [number, number, number] = [0.29, 0.388, 0.51];
+const SLATE: [number, number, number] = [0.25, 0.25, 0.27];
+const GRAY_MED: [number, number, number] = [0.45, 0.45, 0.47];
+const GRAY_LIGHT: [number, number, number] = [0.82, 0.82, 0.83];
+const GRAY_FAINT: [number, number, number] = [0.955, 0.957, 0.962];
+const GOLD: [number, number, number] = [0.698, 0.553, 0.102];
+const WHITE: [number, number, number] = [1, 1, 1];
+
+// A muted, print-friendly qualitative palette (navy/slate/gold family)
+// rather than a bright default BI-tool palette.
 const CHART_PALETTE: Array<[number, number, number]> = [
-  [0.122, 0.467, 0.706],
-  [1.0, 0.498, 0.055],
-  [0.173, 0.627, 0.173],
-  [0.839, 0.153, 0.157],
-  [0.58, 0.404, 0.741],
-  [0.549, 0.337, 0.294],
-  [0.89, 0.467, 0.761],
-  [0.498, 0.498, 0.498],
-  [0.737, 0.741, 0.133],
-  [0.09, 0.745, 0.812],
+  NAVY,
+  [0.231, 0.408, 0.616],
+  [0.106, 0.459, 0.451],
+  GOLD,
+  [0.459, 0.502, 0.541],
+  [0.502, 0.161, 0.176],
+  [0.58, 0.706, 0.827],
+  [0.224, 0.388, 0.247],
+  [0.337, 0.337, 0.345],
+  [0.635, 0.439, 0.439],
 ];
 
 function pdfTextEscape(s: string): string {
@@ -321,22 +343,100 @@ function pdfTruncate(s: string, n: number): string {
   return str.length > n ? str.slice(0, n - 1) + '...' : str;
 }
 
+// Exact Helvetica AFM glyph widths (per 1000 em) for digits and the
+// punctuation that appears in formatted numbers/percentages -- lets value
+// columns right-align precisely instead of guessing. Letters fall back to
+// a reasonable average width, which is fine since those are always
+// left-aligned category text, never the thing being aligned.
+const HELV_WIDTHS: Record<string, number> = {
+  '0': 556, '1': 556, '2': 556, '3': 556, '4': 556, '5': 556, '6': 556, '7': 556, '8': 556, '9': 556,
+  '.': 278, ',': 278, '%': 789, '-': 333, ' ': 278, '+': 584, ':': 278, '(': 333, ')': 333,
+};
+function pdfApproxWidth(text: string, size: number, bold = false): number {
+  let w = 0;
+  for (const ch of text) {
+    const known = HELV_WIDTHS[ch];
+    w += (known !== undefined ? known : bold ? 610 : 556) / 1000;
+  }
+  return w * size;
+}
+
 function pdfLabelOp(
   x: number,
   y: number,
   size: number,
   text: string,
   bold = false,
-  color: [number, number, number] = [0, 0, 0]
+  color: [number, number, number] = SLATE,
+  italic = false
 ): string {
-  const font = bold ? '/F1' : '/F2';
+  const font = italic ? '/F4' : bold ? '/F1' : '/F2';
   const [r, g, b] = color;
   return `${r} ${g} ${b} rg\nBT ${font} ${size} Tf 1 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)} Tm (${pdfTextEscape(text)}) Tj ET\n`;
+}
+
+/** Right-aligns a label so its right edge lands at `rightEdge`. */
+function pdfLabelOpRight(
+  rightEdge: number,
+  y: number,
+  size: number,
+  text: string,
+  bold = false,
+  color: [number, number, number] = SLATE
+): string {
+  const w = pdfApproxWidth(text, size, bold);
+  return pdfLabelOp(rightEdge - w, y, size, text, bold, color);
 }
 
 function pdfRectOp(x: number, y: number, w: number, h: number, rgb: [number, number, number]): string {
   const [r, g, b] = rgb;
   return `${r} ${g} ${b} rg\n${x.toFixed(1)} ${y.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re f\n`;
+}
+
+function pdfRuleOp(x1: number, y: number, x2: number, color: [number, number, number], widthPt = 0.75): string {
+  const [r, g, b] = color;
+  return `${r} ${g} ${b} RG ${widthPt} w\n${x1.toFixed(1)} ${y.toFixed(1)} m ${x2.toFixed(1)} ${y.toFixed(1)} l S\n`;
+}
+
+/**
+ * Standard report header for every content page: a thin navy rule, a small
+ * caps "eyebrow" label (e.g. "CHART 2 OF 6"), a bold title, an optional
+ * gray meta subtitle, and a closing hairline -- the consulting-deck
+ * convention of a consistent masthead instead of an ad hoc heading per page.
+ */
+function buildContentHeaderOps(eyebrow: string, title: string, subtitle?: string): { ops: string; bottomY: number } {
+  let ops = '';
+  let y = 760;
+  ops += pdfRuleOp(MARGIN_X, y, PAGE_W - MARGIN_X, NAVY, 2);
+  y -= 16;
+  ops += pdfLabelOp(MARGIN_X, y, 8, eyebrow.toUpperCase(), true, NAVY_LIGHT);
+  y -= 19;
+  ops += pdfLabelOp(MARGIN_X, y, 15.5, pdfTruncate(title, 70), true, NAVY);
+  y -= 10;
+  if (subtitle) {
+    y -= 10;
+    ops += pdfLabelOp(MARGIN_X, y, 9, pdfTruncate(subtitle, 100), false, GRAY_MED, true);
+  }
+  y -= 10;
+  ops += pdfRuleOp(MARGIN_X, y, PAGE_W - MARGIN_X, GRAY_LIGHT, 0.75);
+  y -= 16;
+  return { ops, bottomY: y };
+}
+
+/** A consistent footer on every page: confidentiality line + page number. */
+function buildFooterOps(pageNum: number, totalPages: number, datasetName: string): string {
+  const y = 34;
+  let ops = pdfRuleOp(MARGIN_X, y + 14, PAGE_W - MARGIN_X, GRAY_LIGHT, 0.6);
+  ops += pdfLabelOp(
+    MARGIN_X,
+    y,
+    7.5,
+    `PREPARED FOR LEADERSHIP REVIEW  |  ${pdfTruncate(datasetName || 'Dataset', 42).toUpperCase()}`,
+    false,
+    GRAY_MED
+  );
+  ops += pdfLabelOpRight(PAGE_W - MARGIN_X, y, 7.5, `Page ${pageNum} of ${totalPages}`, false, GRAY_MED);
+  return ops;
 }
 
 /**
@@ -349,7 +449,7 @@ function buildChartOps(vis: DashboardExportVisual, x: number, yTop: number, w: n
   const items = (vis.items || []).filter((it) => Number.isFinite(it.value)).slice(0, 8);
   if (items.length === 0) return '';
   const type = (vis.type || '').toLowerCase();
-  let ops = `0.85 0.85 0.85 RG 0.75 w\n${x.toFixed(1)} ${(yTop - h).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re S\n`;
+  let ops = `${GRAY_LIGHT[0]} ${GRAY_LIGHT[1]} ${GRAY_LIGHT[2]} RG 0.75 w\n${x.toFixed(1)} ${(yTop - h).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re S\n`;
 
   if (type === 'donut' || type === 'pie') {
     const total = items.reduce((acc, it) => acc + Math.abs(it.value), 0) || 1;
@@ -413,7 +513,7 @@ function buildChartOps(vis: DashboardExportVisual, x: number, yTop: number, w: n
       y: baseY + ((it.value - minVal) / range) * plotH,
     }));
     const [r, g, b] = CHART_PALETTE[0];
-    let area = `${(r * 0.35 + 0.65).toFixed(2)} ${(g * 0.35 + 0.65).toFixed(2)} ${(b * 0.35 + 0.65).toFixed(2)} rg\n`;
+    let area = `${(r * 0.25 + 0.75).toFixed(2)} ${(g * 0.25 + 0.75).toFixed(2)} ${(b * 0.25 + 0.75).toFixed(2)} rg\n`;
     area += `${pts[0].x.toFixed(1)} ${baseY.toFixed(1)} m\n`;
     pts.forEach((p) => (area += `${p.x.toFixed(1)} ${p.y.toFixed(1)} l\n`));
     area += `${pts[pts.length - 1].x.toFixed(1)} ${baseY.toFixed(1)} l\nh f\n`;
@@ -458,7 +558,7 @@ function buildChartOps(vis: DashboardExportVisual, x: number, yTop: number, w: n
         8,
         `${pdfTruncate(it.category, 16)}: ${Number(it.value).toLocaleString()}`,
         true,
-        [1, 1, 1]
+        WHITE
       );
     });
   } else if (type === 'column') {
@@ -497,120 +597,265 @@ function buildChartOps(vis: DashboardExportVisual, x: number, yTop: number, w: n
   return ops;
 }
 
-export function createDashboardPdfBlob(data: DashboardExportData): Blob {
-  const pages: Array<PdfPageItem[]> = [];
+/** A light "key insight" callout -- the consulting-deck habit of stating
+ * the takeaway in words, not just showing the chart and letting the reader
+ * work it out. Only drawn when the dashboard actually computed one. */
+function buildInsightCalloutOps(x: number, yTop: number, w: number, insight: string): { ops: string; height: number } {
+  const h = 30;
+  let ops = pdfRectOp(x, yTop - h, w, h, GRAY_FAINT);
+  ops += pdfRectOp(x, yTop - h, 3, h, GOLD);
+  ops += pdfLabelOp(x + 14, yTop - 13, 7.5, 'KEY INSIGHT', true, NAVY);
+  ops += pdfLabelOp(x + 14, yTop - 24, 9, pdfTruncate(insight, 110), false, SLATE, true);
+  return { ops, height: h };
+}
 
-  // Page 1: Executive Dashboard & Scorecard
-  const p1: PdfPageItem[] = [
-    { text: 'StepSheet Executive BI Dashboard', font: '/F1 18', leading: 24 },
-    { text: data.title || 'Executive Dashboard', font: '/F1 13', leading: 18 },
-    {
-      text: `Dataset: ${data.datasetName} | Filtered Records: ${data.filteredRowCount} of ${data.totalRowCount} | Generated: ${new Date().toLocaleString()}`,
-      font: '/F2 9',
-      leading: 20,
-    },
-    { text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 18 },
-    { text: 'KEY PERFORMANCE INDICATORS (KPIs)', font: '/F1 12', leading: 18 },
-  ];
+/** A 2-column grid of bordered KPI "stat cards" -- label, big number, one
+ * line of context -- instead of a numbered text list. */
+function buildKpiCardsOps(kpis: DashboardExportKpi[], x: number, yTop: number, w: number): { ops: string; height: number } {
+  const cols = 2;
+  const gap = 14;
+  const cardW = (w - gap * (cols - 1)) / cols;
+  const cardH = 78;
+  const rows = Math.ceil(kpis.length / cols);
+  let ops = '';
+  kpis.forEach((k, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cardX = x + col * (cardW + gap);
+    const cardY = yTop - (row + 1) * cardH - row * gap;
+    ops += pdfRectOp(cardX, cardY, cardW, cardH, GRAY_FAINT);
+    ops += pdfRectOp(cardX, cardY, 3, cardH, NAVY);
+    ops += `${GRAY_LIGHT[0]} ${GRAY_LIGHT[1]} ${GRAY_LIGHT[2]} RG 0.6 w\n${cardX.toFixed(1)} ${cardY.toFixed(1)} ${cardW.toFixed(1)} ${cardH.toFixed(1)} re S\n`;
+    ops += pdfLabelOp(cardX + 14, cardY + cardH - 18, 7.5, pdfTruncate(k.title.toUpperCase(), 34), true, GRAY_MED);
+    ops += pdfLabelOp(cardX + 14, cardY + cardH - 42, 19, pdfTruncate(k.formattedValue, 18), true, NAVY);
+    ops += pdfLabelOp(cardX + 14, cardY + 16, 6.5, `${k.aggFunc.toUpperCase()} OF ${k.column}`, false, GRAY_MED);
+    if (k.subtitle) {
+      ops += pdfLabelOp(cardX + 14, cardY + 6, 7, pdfTruncate(k.subtitle, 50), false, GRAY_MED, true);
+    }
+  });
+  return { ops, height: rows * cardH + (rows - 1) * gap };
+}
 
-  if (data.kpis && data.kpis.length > 0) {
-    data.kpis.forEach((k, idx) => {
-      p1.push({
-        text: `${idx + 1}. ${k.title.toUpperCase()}: ${k.formattedValue}    [${k.aggFunc.toUpperCase()} of ${k.column}]`,
-        font: '/F1 10',
-        leading: 14,
-      });
-      if (k.subtitle) {
-        p1.push({
-          text: `   Context: ${k.subtitle}`,
-          font: '/F2 8',
-          leading: 16,
-        });
+type PdfTableColumn = { label: string; width: number; align: 'left' | 'right' };
+
+/** A real ruled table with proportional columns (header rule + bottom
+ * rule, no fills, right-aligned numeric columns) -- a plain monospace-
+ * padded text block reads as a terminal dump, not a leadership report. */
+function buildTableOps(
+  columns: PdfTableColumn[],
+  rows: string[][],
+  x: number,
+  yTop: number
+): { ops: string; height: number } {
+  const headerSize = 8;
+  const rowSize = 8;
+  const rowH = 14.5;
+  let ops = '';
+  let y = yTop;
+  const colStarts: number[] = [];
+  let cx = x;
+  columns.forEach((c) => {
+    colStarts.push(cx);
+    cx += c.width;
+  });
+  const tableRight = cx;
+
+  columns.forEach((c, i) => {
+    if (c.align === 'right') {
+      ops += pdfLabelOpRight(colStarts[i] + c.width, y, headerSize, c.label.toUpperCase(), true, NAVY);
+    } else {
+      ops += pdfLabelOp(colStarts[i], y, headerSize, c.label.toUpperCase(), true, NAVY);
+    }
+  });
+  y -= 6;
+  ops += pdfRuleOp(x, y, tableRight, NAVY, 1.1);
+  y -= 12;
+
+  rows.forEach((row) => {
+    columns.forEach((c, i) => {
+      const text = row[i] || '';
+      if (c.align === 'right') {
+        ops += pdfLabelOpRight(colStarts[i] + c.width, y, rowSize, text, false, SLATE);
+      } else {
+        ops += pdfLabelOp(colStarts[i], y, rowSize, text, false, SLATE);
       }
     });
-  } else {
-    p1.push({ text: '(No KPI cards configured)', font: '/F2 9', leading: 16 });
-  }
-
-  p1.push({ text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 18 });
-  p1.push({ text: 'DASHBOARD CHARTS & VISUALS OVERVIEW', font: '/F1 12', leading: 16 });
-  p1.push({
-    text: `Total Charts Rendered: ${data.visuals?.length || 0}. Each is drawn as a real chart on its own page below.`,
-    font: '/F2 9',
-    leading: 16,
+    y -= rowH;
   });
 
-  pages.push(p1);
+  y += rowH - 9;
+  ops += pdfRuleOp(x, y, tableRight, GRAY_LIGHT, 0.6);
+  const height = yTop - y + 4;
+  return { ops, height };
+}
 
-  // Pages 2+: one real chart per visual, followed by its detailed data table.
+export function createDashboardPdfBlob(data: DashboardExportData): Blob {
+  // Build every page's body content first (without header/footer chrome,
+  // since the footer needs the final page count, which we only know once
+  // every page is assembled).
+  const bodyPages: Array<PdfPageItem[]> = [];
+
+  // Page 1: cover page, styled like the title page of a report handed to
+  // a leadership team -- a navy masthead, scope/date metadata, and a
+  // contents list -- rather than a plain heading.
+  {
+    const bandH = 118;
+    let ops = pdfRectOp(0, PAGE_H - bandH, PAGE_W, bandH, NAVY);
+    ops += pdfRectOp(0, PAGE_H - bandH - 3, PAGE_W, 3, GOLD);
+    ops += pdfLabelOp(MARGIN_X, PAGE_H - 54, 21, pdfTruncate(data.title || 'Executive Dashboard', 46), true, WHITE);
+    ops += pdfLabelOp(MARGIN_X, PAGE_H - 75, 10, 'EXECUTIVE DASHBOARD  |  REVENUE INTELLIGENCE REPORT', false, [0.78, 0.82, 0.89]);
+    ops += pdfLabelOp(MARGIN_X, PAGE_H - 96, 9, `Dataset: ${data.datasetName}`, false, [0.78, 0.82, 0.89]);
+
+    let y = PAGE_H - bandH - 36;
+    ops += pdfLabelOp(
+      MARGIN_X,
+      y,
+      9.5,
+      `Scope: ${data.filteredRowCount.toLocaleString()} of ${data.totalRowCount.toLocaleString()} records (filtered view)`,
+      false,
+      SLATE
+    );
+    y -= 16;
+    ops += pdfLabelOp(
+      MARGIN_X,
+      y,
+      9.5,
+      `Prepared: ${new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}`,
+      false,
+      SLATE
+    );
+    y -= 26;
+    ops += pdfRuleOp(MARGIN_X, y, PAGE_W - MARGIN_X, GRAY_LIGHT, 0.75);
+    y -= 24;
+    ops += pdfLabelOp(MARGIN_X, y, 10.5, 'CONTENTS', true, NAVY);
+    y -= 20;
+    const visualCount = data.visuals?.length || 0;
+    const contents = ['1.  Executive Summary & Key Performance Indicators'];
+    if (visualCount > 0) {
+      contents.push(`2${visualCount > 1 ? `-${1 + visualCount}` : ''}.  Detailed Visual Analysis (${visualCount} chart${visualCount === 1 ? '' : 's'})`);
+    }
+    if (data.steps && data.steps.length > 0) {
+      contents.push(`${2 + visualCount}.  Appendix: Data Lineage & Methodology`);
+    }
+    contents.forEach((line) => {
+      ops += pdfLabelOp(MARGIN_X + 4, y, 9.5, line, false, SLATE);
+      y -= 16;
+    });
+
+    bodyPages.push([{ kind: 'raw', ops }]);
+  }
+
+  // Page 2: Executive Summary -- KPI cards, not a numbered text list.
+  {
+    const header = buildContentHeaderOps(
+      'Executive Summary',
+      'Key Performance Indicators',
+      `Core metrics computed across the active filtered view of ${data.datasetName}`
+    );
+    const items: PdfPageItem[] = [{ kind: 'raw', ops: header.ops, consumesHeight: 745 - header.bottomY }];
+    if (data.kpis && data.kpis.length > 0) {
+      const cards = buildKpiCardsOps(data.kpis, MARGIN_X, header.bottomY, CONTENT_W);
+      items.push({ kind: 'raw', ops: cards.ops, consumesHeight: cards.height });
+    } else {
+      items.push({ kind: 'raw', ops: pdfLabelOp(MARGIN_X, header.bottomY - 10, 9.5, 'No KPI cards are configured on this dashboard.', false, GRAY_MED) });
+    }
+    bodyPages.push(items);
+  }
+
+  // Pages 3+: one real chart per visual, its key-insight callout (when the
+  // dashboard computed one), and its detailed data table.
   if (data.visuals && data.visuals.length > 0) {
     for (let i = 0; i < data.visuals.length; i++) {
       const vis = data.visuals[i];
-      let cursorY = 745;
-      const pVis: PdfPageItem[] = [
-        { text: `Chart ${i + 1}: ${vis.title}`, font: '/F1 14', leading: 20 },
-        {
-          text: `Type: ${vis.type.toUpperCase()} | Grouped by: "${vis.categoryCol}" | Metric: ${vis.aggFunc.toUpperCase()}("${vis.valueCol}")`,
-          font: '/F2 9',
-          leading: 18,
-        },
-      ];
-      cursorY -= 20 + 18;
+      const header = buildContentHeaderOps(
+        `Chart ${i + 1} of ${data.visuals.length}`,
+        vis.title,
+        `${vis.type.toUpperCase()}  |  Grouped by "${vis.categoryCol}"  |  Measure: ${vis.aggFunc.toUpperCase()}("${vis.valueCol}")`
+      );
+      let cursorY = header.bottomY;
+      const pVis: PdfPageItem[] = [{ kind: 'raw', ops: header.ops, consumesHeight: 745 - header.bottomY }];
+
+      if (vis.insight) {
+        const callout = buildInsightCalloutOps(MARGIN_X, cursorY, CONTENT_W, vis.insight);
+        pVis.push({ kind: 'raw', ops: callout.ops, consumesHeight: callout.height + 14 });
+        cursorY -= callout.height + 14;
+      }
 
       const isTabular = vis.type === 'table' || vis.type === 'matrix';
       if (!isTabular && vis.items && vis.items.length > 0) {
-        const chartTop = cursorY - 6;
-        const chartH = 190;
-        const ops = buildChartOps(vis, 70, chartTop, 472, chartH);
+        const chartTop = cursorY;
+        const chartH = 176;
+        const ops = buildChartOps(vis, MARGIN_X, chartTop, CONTENT_W, chartH);
         if (ops) {
-          const consumesHeight = chartH + 20;
+          const consumesHeight = chartH + 22;
           pVis.push({ kind: 'raw', ops, consumesHeight });
           cursorY -= consumesHeight;
         }
       }
 
-      pVis.push({ text: 'DETAILED BREAKDOWN', font: '/F1 10', leading: 14 });
-      pVis.push({ text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 14 });
-      pVis.push({ text: 'Category                        Value         Share %', font: '/F3 8', leading: 14 });
-      pVis.push({ text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 14 });
-      cursorY -= 14 + 14 + 14 + 14;
+      pVis.push({ kind: 'raw', ops: pdfLabelOp(MARGIN_X, cursorY, 9, 'DETAILED DATA', true, NAVY), consumesHeight: 16 });
+      cursorY -= 16;
 
-      vis.items.slice(0, 15).forEach((item) => {
-        const catPad = (item.category || '(Blank)').slice(0, 26).padEnd(28);
-        const valPad = Number(item.value).toLocaleString().padStart(14);
-        const pctPad = (item.percentage || '0.0%').padStart(8);
-        pVis.push({ text: `${catPad} ${valPad} ${pctPad}`, font: '/F3 8', leading: 13 });
-        cursorY -= 13;
-      });
+      const tableRows = vis.items.slice(0, 15).map((item) => [
+        pdfTruncate(item.category || '(Blank)', 42),
+        Number(item.value).toLocaleString(),
+        item.percentage || '0.0%',
+      ]);
+      const table = buildTableOps(
+        [
+          { label: 'Category', width: 290, align: 'left' },
+          { label: 'Value', width: 120, align: 'right' },
+          { label: 'Share %', width: 94, align: 'right' },
+        ],
+        tableRows,
+        MARGIN_X,
+        cursorY
+      );
+      pVis.push({ kind: 'raw', ops: table.ops, consumesHeight: table.height + 12 });
+      cursorY -= table.height + 12;
 
       const totalVal = vis.items.reduce((acc, x) => acc + x.value, 0);
-      pVis.push({ text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 16 });
       pVis.push({
-        text: `Summary Total: ${Number(totalVal).toLocaleString()} across ${vis.items.length} categories.`,
-        font: '/F1 9',
-        leading: 16,
+        kind: 'raw',
+        ops: pdfLabelOp(
+          MARGIN_X,
+          cursorY,
+          9,
+          `Total: ${Number(totalVal).toLocaleString()} across ${vis.items.length} categor${vis.items.length === 1 ? 'y' : 'ies'}`,
+          true,
+          NAVY
+        ),
       });
 
-      pages.push(pVis);
+      bodyPages.push(pVis);
     }
   }
 
-  // Final Page: Lineage & Quality Steps (if any)
+  // Final page: Appendix -- data lineage & methodology (if any transform
+  // steps were applied to produce this dataset).
   if (data.steps && data.steps.length > 0) {
-    const pSteps: PdfPageItem[] = [
-      { text: 'Data Pipeline Transformations & Lineage', font: '/F1 14', leading: 20 },
-      { text: `Applied steps to generate dataset: ${data.datasetName}`, font: '/F2 9', leading: 18 },
-      { text: '--------------------------------------------------------------------------------', font: '/F3 8', leading: 16 },
-    ];
+    const header = buildContentHeaderOps(
+      'Appendix',
+      'Data Lineage & Methodology',
+      `Transformation steps applied to produce ${data.datasetName}`
+    );
+    let cursorY = header.bottomY;
+    const items: PdfPageItem[] = [{ kind: 'raw', ops: header.ops, consumesHeight: 745 - header.bottomY }];
     data.steps.forEach((s, idx) => {
-      pSteps.push({
-        text: `Step ${idx + 1}: [${String(s.type || '').toUpperCase()}] ${s.label || s.id}`,
-        font: '/F1 9',
-        leading: 14,
-      });
+      const line = `${idx + 1}.  [${String(s.type || '').toUpperCase()}]  ${s.label || s.id}`;
+      items.push({ kind: 'raw', ops: pdfLabelOp(MARGIN_X, cursorY, 9, pdfTruncate(line, 95), false, SLATE), consumesHeight: 15 });
+      cursorY -= 15;
     });
-    pages.push(pSteps);
+    bodyPages.push(items);
   }
+
+  // Second pass: now that the final page count is known, prepend/append
+  // the consistent header/footer chrome to every page.
+  const totalPages = bodyPages.length;
+  const pages: Array<PdfPageItem[]> = bodyPages.map((items, idx) => [
+    ...items,
+    { kind: 'raw', ops: buildFooterOps(idx + 1, totalPages, data.datasetName) },
+  ]);
 
   return createMultiPagePdfBlob(pages);
 }

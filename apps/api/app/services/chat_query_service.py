@@ -773,7 +773,9 @@ Output valid JSON only. Do not invent columns. Only reference columns present in
             # Build GROUP BY clause
             group_clause = ""
             if plan.group_by:
-                group_clause = f" GROUP BY {', '.join([f'\"{g}\"' for g in plan.group_by])}"
+                # No backslash inside the f-string expression: SyntaxError before Python 3.12.
+                quoted_groups = ", ".join('"' + g + '"' for g in plan.group_by)
+                group_clause = f" GROUP BY {quoted_groups}"
 
             # Build ORDER BY clause
             order_clause = ""

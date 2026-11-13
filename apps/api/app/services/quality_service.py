@@ -105,7 +105,10 @@ class QualityService:
         elif rtype == "allowed_values":
             allowed = params.get("allowed_values", [])
             if allowed:
-                formatted_vals = ", ".join([f"'{str(v).replace('\'', '\'\'')}'" for v in allowed])
+                # SQL-quote each value, doubling embedded single quotes. Written without
+                # a backslash inside an f-string expression, which is a SyntaxError
+                # before Python 3.12 (CI runs 3.11).
+                formatted_vals = ", ".join("'" + str(v).replace("'", "''") + "'" for v in allowed)
                 fail_cond = f'CAST("{col}" AS VARCHAR) NOT IN ({formatted_vals})'
                 query_expr = f'"{col}" IN ({formatted_vals})'
             else:

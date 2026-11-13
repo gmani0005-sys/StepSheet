@@ -136,7 +136,10 @@ def export_failing_rows(
             fail_cond = " OR ".join(conds) if conds else "1=0"
         elif rtype == "allowed_values":
             allowed = params.get("allowed_values", [])
-            formatted_vals = ", ".join([f"'{str(v).replace('\'', '\'\'')}'" for v in allowed])
+            # SQL-quote each value, doubling embedded single quotes. Written without
+            # a backslash inside an f-string expression, which is a SyntaxError
+            # before Python 3.12 (CI runs 3.11).
+            formatted_vals = ", ".join("'" + str(v).replace("'", "''") + "'" for v in allowed)
             fail_cond = f'CAST("{col}" AS VARCHAR) NOT IN ({formatted_vals})'
         elif rtype == "regex":
             pattern = params.get("pattern", "").replace("'", "''")

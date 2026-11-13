@@ -745,9 +745,12 @@ describe('StepSheet Workbench', () => {
     expect(screen.getAllByText('Pie').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Table').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Matrix Table').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Edit Visual Title/i)).toBeDefined();
-    expect(screen.getByText(/3\. Edit Legend & Colors/i)).toBeDefined();
-    expect(screen.getByText(/4\. Conditional Formatting/i)).toBeDefined();
+    // The Format pane's title editor is a labelled input (not visible text),
+    // and its sections are numbered (a "General" section added in f1a39d8
+    // shifted the numbers), so match the section names without their numbers.
+    expect(screen.getByLabelText('Edit Visual Title')).toBeDefined();
+    expect(screen.getByText(/\d+\. Edit Legend & Colors/i)).toBeDefined();
+    expect(screen.getByText(/\d+\. Conditional Formatting/i)).toBeDefined();
 
     // Verify Legend Position dropdown options (Left, Left Center, Right, Right Center, Top Left, Top Right) update the visual layout
     expect(screen.queryByText(/Place Legend Inside Visual/i)).toBeNull();

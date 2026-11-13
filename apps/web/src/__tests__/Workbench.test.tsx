@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { AppendModal } from '../components/joins/AppendModal';
@@ -711,6 +711,24 @@ describe('StepSheet Workbench', () => {
     expect(screen.getByText('Excel PivotTable Builder')).toBeDefined();
     expect(screen.getByText('Live PivotTable Preview')).toBeDefined();
     expect(screen.getByText('Apply PivotTable to Sheet')).toBeDefined();
+
+    // 8b. PivotTable apply is a destructive, in-place reshape of the active
+    // sheet (regression: previously applied silently with no warning) - it
+    // must be gated behind a confirmation the user can cancel.
+    const stepsBeforePivot = useWorkbenchStore.getState().steps.length;
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    fireEvent.click(screen.getByText('Apply PivotTable to Sheet'));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringMatching(/replace your current sheet view/i));
+    expect(useWorkbenchStore.getState().steps.length).toBe(stepsBeforePivot);
+
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.click(screen.getByText('Apply PivotTable to Sheet'));
+    await waitFor(() => {
+      expect(useWorkbenchStore.getState().steps.length).toBe(stepsBeforePivot + 1);
+    });
+    const stepsAfterPivot = useWorkbenchStore.getState().steps;
+    expect(stepsAfterPivot[stepsAfterPivot.length - 1]?.type).toBe('pivot');
+    confirmSpy.mockRestore();
 
     // 9. Visual Dashboard & Custom Visuals Studio (with Table, Matrix Table, Legend Editor & Conditional Formatting)
     const dashRender = render(<DashboardModal isOpen={false} onClose={() => {}} />);

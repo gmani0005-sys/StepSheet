@@ -292,6 +292,18 @@ export const PivotUnpivotModal: React.FC<PivotUnpivotModalProps> = ({
 
   const handleApply = async () => {
     if (mode === 'pivot') {
+      // Applying a PivotTable step reshapes the entire active sheet in place:
+      // the row-level data underneath is replaced by the pivoted summary, and
+      // it is easy to apply this and then lose track of the fact that the
+      // original rows are gone unless the step is later disabled or removed.
+      // Confirm before making that destructive-looking change.
+      const confirmed = window.confirm(
+        'Applying this PivotTable will replace your current sheet view with the pivoted summary. ' +
+          'Your original row-level data is not lost (you can disable or remove this step from Applied Steps to restore it), ' +
+          'but the active view will change immediately. Continue?'
+      );
+      if (!confirmed) return;
+
       const effectivePivotCol = pivotCol === '__NONE__' ? '' : pivotCol;
       const rowDesc = selectedIdxCols.length > 0 ? selectedIdxCols.join(', ') : 'All Rows';
       await addStep({
@@ -819,7 +831,7 @@ export const PivotUnpivotModal: React.FC<PivotUnpivotModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800 bg-slate-950/60">
           <div className="text-xs text-slate-400">
             {mode === 'pivot'
-              ? 'Applying adds a reusable PivotTable step to your active sheet pipeline (editable anytime).'
+              ? 'Applying replaces your active sheet view with the pivoted summary (the step is editable/removable anytime).'
               : 'Applying melts the selected columns into tall attribute/value rows.'}
           </div>
           <div className="flex items-center gap-2">

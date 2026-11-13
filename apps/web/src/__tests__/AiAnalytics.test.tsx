@@ -329,5 +329,39 @@ describe('AI Analytics Suite (Chat with Data, Native Julius Dashboard, Local AI)
       expect(res.rows[0].min_amount).toBeCloseTo(0.5, 3);
       expect(res.rows[0].max_amount).toBeCloseTo(998.5, 3);
     });
+
+    it('exports 300K rows to Excel quickly, with an exact row-count and content round-trip (regression)', async () => {
+      // exportExcel used ExcelJS's Document-model API (sheet.addRow() builds
+      // a full in-memory Row/Cell object graph per row): ~38s for 100K rows,
+      // ~80s for 250K, a projected 5+ minutes at 1M. ExcelJS's streaming
+      // writer is not an option -- it is absent from the browser build Vite
+      // ships. It now goes through engine/xlsxWriter.ts (~1.3s per 100K rows,
+      // ~11.6s at 1M), which this test pins down end-to-end through the real
+      // previewPipeline -> exportExcel path.
+      const t0 = Date.now();
+      const blob = await localEngine.exportExcel(BIG_ID, []);
+      const ms = Date.now() - t0;
+      // Generous bound so slow CI never flakes, yet far below the old ~110s+.
+      expect(ms).toBeLessThan(15000);
+
+      // jsdom's Blob has no arrayBuffer(); FileReader is the portable path.
+      const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(blob);
+      });
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(bytes);
+      const xml = await zip.file('xl/worksheets/sheet1.xml')!.async('string');
+      // Header + exactly N data rows, numbered contiguously.
+      expect(xml.split('<row ').length - 1).toBe(N + 1);
+      expect(xml).toContain(`<row r="${N + 1}">`);
+      expect(xml).not.toContain(`<row r="${N + 2}">`);
+      // Header, first and last data rows carry the right values and types.
+      expect(xml).toContain('<t xml:space="preserve">order_id</t>');
+      expect(xml).toContain('<row r="2"><c r="A2"><v>1</v></c><c r="B2" t="inlineStr"><is><t xml:space="preserve">Electronics</t></is></c><c r="C2"><v>0.5</v></c></row>');
+      expect(xml).toContain(`<row r="${N + 1}"><c r="A${N + 1}"><v>${N}</v></c><c r="B${N + 1}" t="inlineStr"><is><t xml:space="preserve">Automotive</t></is></c><c r="C${N + 1}"><v>299.5</v></c></row>`);
+    }, 60000);
   });
 });

@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { GeneratedCode, StepDefinition, StepSummary } from '../types/steps';
 import { evaluateFormula, formulaResultToCell, isFxError } from '../engine/formula';
+import { buildXlsx } from '../engine/xlsxWriter';
 import {
   parseSharedNumber,
   looksNumericForImport,
@@ -3991,15 +3992,14 @@ export const localEngine = {
     const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: Number.MAX_SAFE_INTEGER });
     const rows: Record<string, any>[] = preview.rows;
     const cols: string[] = preview.columns.map((c: any) => c.name);
-    const ExcelJS = (await import('exceljs')).default ?? (await import('exceljs'));
-    const workbook = new (ExcelJS as any).Workbook();
-    const sheet = workbook.addWorksheet('Sheet1');
-    sheet.addRow(cols);
-    rows.forEach((r) => {
-      sheet.addRow(cols.map((c) => (r[c] === undefined ? null : r[c])));
-    });
-    const buffer = await workbook.xlsx.writeBuffer();
-    return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    // Written by our own minimal XLSX writer rather than ExcelJS: ExcelJS's
+    // Document model was ~38s per 100K rows (5+ min projected at 1M), and its
+    // fast streaming writer doesn't exist in the browser build Vite ships
+    // (`ExcelJS.stream` is undefined in dist/exceljs.min.js). See the header
+    // comment in engine/xlsxWriter.ts for the full rationale and measurements
+    // (~1.3s per 100K rows, ~11.6s for 1M).
+    const bytes = await buildXlsx(cols, rows);
+    return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   },
 
   async exportParquet(_datasetId: string, _steps: any[]): Promise<Blob> {

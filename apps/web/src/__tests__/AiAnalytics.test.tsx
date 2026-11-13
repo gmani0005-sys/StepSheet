@@ -229,6 +229,15 @@ describe('AI Analytics Suite (Chat with Data, Native Julius Dashboard, Local AI)
     }
   });
 
+  it('answers "how many orders are there" with the total row count, not a nonsensical top-10-by-order_id ranking (regression)', async () => {
+    const datasets = await localEngine.listDatasets();
+    const all = await localEngine.previewPipeline(datasets[0].id, [], { limit: 1000 });
+    const res = await localEngine.executeChatQuery(datasets[0].id, 'how many orders are there?');
+    expect(res.plan.intent).toBe('summary');
+    expect(res.row_count).toBe(1);
+    expect(Object.values(res.rows[0])[0]).toBe(all.total_rows);
+  });
+
   it('answers "how many orders were cancelled" with a filtered count, not the total row count (regression)', async () => {
     const datasets = await localEngine.listDatasets();
     const all = await localEngine.previewPipeline(datasets[0].id, [], { limit: 1000 });

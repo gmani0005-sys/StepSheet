@@ -4945,6 +4945,51 @@ export const localEngine = {
             model: 'duckdb-in-browser',
           };
         }
+
+        // No specific categorical value was named -- e.g. "how many orders
+        // are there?", "how many customers do we have?", "number of
+        // products?". This is one of the single most common ways a real
+        // analyst asks for the dataset's total row count (far more common
+        // than literally saying "rows" or "records"), but previously had no
+        // explicit handling: it fell all the way through to the generic
+        // "group by the primary dimension, sum the primary measure, take
+        // the top 10" default-ranking fallback at the bottom of this
+        // function, which silently fuzzy-matched the entity noun in the
+        // question (e.g. "orders") against an id-like column (e.g.
+        // "order_id") and returned a nonsensical "top 10 individual orders
+        // by amount" instead of a count. Guarded against a numeric
+        // comparison ("how many orders are over $500?"), which needs filter
+        // parsing this branch doesn't attempt, so it deliberately falls
+        // through rather than answering with the wrong (unfiltered) count.
+        const hasNumericComparisonCue = /\b(over|above|under|below|at least|at most|greater than|less than|more than|exceeding)\b/i.test(
+          pLower
+        );
+        if (!hasNumericComparisonCue) {
+          const colAlias = 'Total Records';
+          const sqlTraceTotal = `SELECT COUNT(*) AS "${colAlias}" FROM "${datasetName}";`;
+          return {
+            plan: {
+              schema_version: '1.0',
+              intent: 'summary',
+              dataset_id: datasetId,
+              select: [{ column: cols[0]?.name || 'id', aggregation: 'count', alias: colAlias }],
+              group_by: [],
+              limit: 1,
+              chart: { type: 'table', x: colAlias, y: colAlias },
+              explanation: `Dataset contains ${rows.length.toLocaleString()} total records.`,
+            },
+            explanation: `There are **${rows.length.toLocaleString()}** total rows/records.`,
+            calculation_method: `COUNT(*) across active dataset rows.`,
+            columns: [colAlias],
+            rows: [{ [colAlias]: rows.length }],
+            row_count: 1,
+            chart: { type: 'table', x: colAlias, y: colAlias },
+            query_trace: sqlTraceTotal,
+            latency_ms: 7.5,
+            provider: 'localEngine',
+            model: 'duckdb-in-browser',
+          };
+        }
       }
     }
 

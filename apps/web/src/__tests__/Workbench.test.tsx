@@ -386,6 +386,19 @@ describe('StepSheet Workbench', () => {
     expect(preview.rows[0].discounted).toBeDefined();
   });
 
+  it('classifies a case-change NL instruction as text_transform, not filter_rows (regression)', async () => {
+    const datasets = await localEngine.listDatasets();
+    const aiRes = await localEngine.generateAiStep(datasets[0].id, 'capitalize product names');
+    expect(aiRes.step.type).toBe('text_transform');
+    expect(aiRes.step.params.operation).toBe('proper');
+    expect(aiRes.step.params.column).toBe('product');
+
+    const preview = await localEngine.previewPipeline(datasets[0].id, [aiRes.step]);
+    expect(preview.rows.length).toBeGreaterThan(0);
+    // The product column should now be proper-cased, e.g. "Laptop Pro 15"
+    expect(preview.rows[0].product).toMatch(/^[A-Z][a-z]/);
+  });
+
   it('renders DataGrid transitioning from null selectedDataset to loaded dataset and opens column unique values dropdown', () => {
     // 1. Start with selectedDataset: null (simulating initial startup render)
     useWorkbenchStore.setState({

@@ -3681,6 +3681,68 @@ export const localEngine = {
       };
     }
 
+    // 1b. Text case / cleaning transform, e.g. "capitalize product names",
+    // "make the status column uppercase", "trim spaces in customer name".
+    // This must be checked before the filter/default-fallback branches below,
+    // because a case-change request shares no "filter"/"where" keyword with
+    // the filter branch and was previously falling through to the generic
+    // "filter column is not null" default, silently producing the wrong
+    // step type with no indication anything had gone wrong.
+    const caseOp: string | null = /\b(upper\s*-?\s*case|all\s*caps)\b/i.test(p)
+      ? 'upper'
+      : /\blower\s*-?\s*case\b/i.test(p)
+      ? 'lower'
+      : /\bcapitali[sz]e|\bproper\s*-?\s*case\b|\btitle\s*-?\s*case\b/i.test(p)
+      ? 'proper'
+      : /\btrim(med)?\s+(spaces?|whitespace)\b|\bremove\s+(extra\s+)?spaces?\b/i.test(p)
+      ? 'trim'
+      : /\bclean(\s+up)?\s+(the\s+)?text\b|\bnon-?printable\b/i.test(p)
+      ? 'clean'
+      : null;
+    if (caseOp) {
+      // Resolve the target column: a direct substring match first (handles
+      // "capitalize the status column"), then a fuzzy word-overlap match
+      // that tolerates underscores/pluralization (handles "product names"
+      // matching a "product_name" column).
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const promptWords = new Set(normalize(p).split(' ').filter(Boolean));
+      const direct = cols.find((c) => lower.includes(c.toLowerCase()));
+      let targetCol = direct;
+      if (!targetCol) {
+        let best: { col: string; score: number } | null = null;
+        for (const c of cols) {
+          const colWords = normalize(c).split(' ').filter(Boolean);
+          let score = 0;
+          for (const w of colWords) {
+            const singular = w.endsWith('s') ? w.slice(0, -1) : w;
+            if (promptWords.has(w) || promptWords.has(singular) || promptWords.has(`${w}s`)) score++;
+          }
+          if (score > 0 && (!best || score > best.score)) best = { col: c, score };
+        }
+        targetCol = best?.col;
+      }
+      const col = targetCol || cols[0] || 'text_col';
+      const opLabel: Record<string, string> = {
+        upper: 'UPPERCASE',
+        lower: 'lowercase',
+        proper: 'Proper/Title Case',
+        trim: 'Trim Spaces',
+        clean: 'Clean Non-Printable',
+      };
+      return {
+        step: {
+          id: crypto.randomUUID(),
+          type: 'text_transform',
+          label: `${opLabel[caseOp]} on ${col}`,
+          enabled: true,
+          params: { column: col, operation: caseOp },
+        },
+        explanation: `Applies ${opLabel[caseOp]} to the "${col}" column.`,
+        confidence: targetCol ? 0.93 : 0.75,
+        provider: 'standalone-heuristic',
+      };
+    }
+
     // 2. Filter rows e.g. "filter where amount > 100"
     const filterMatch = p.match(/where\s+([a-zA-Z0-9_]+)\s*(>=|<=|!=|=|>|<|contains)\s*['"]?([^'"]+)['"]?/i);
     if (lower.includes('filter') || filterMatch) {

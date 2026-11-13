@@ -69,6 +69,12 @@ describe('Formula Builder (real tokenizer/parser/evaluator, no eval)', () => {
     expect(evalCell('IF([status]="Completed","Y","N")', row)).toBe('Y');
   });
 
+  it('accepts single-quoted string literals identically to double-quoted ones (regression: used to surface as #NAME?)', () => {
+    expect(evalCell("IF([status]='completed','Y','N')", row)).toBe('Y');
+    expect(evalCell("=IF([amount]>1000,'High','Low')", row)).toBe('High');
+    expect(evalCell("'x'&[blank]&'y'", row)).toBe('xy');
+  });
+
   it('returns Excel error VALUES instead of throwing or echoing the formula text', () => {
     expect(evalCell('[amount]/[zero]', row)).toBe('#DIV/0!');
     expect(evalCell('NOT_A_FUNCTION(1)', row)).toBe('#NAME?');

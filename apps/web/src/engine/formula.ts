@@ -68,13 +68,20 @@ function tokenize(expr: string, columnNames: string[]): Token[] {
       i++;
       continue;
     }
-    if (ch === '"') {
+    if (ch === '"' || ch === "'") {
+      // Both double- and single-quoted literals are accepted as STRING
+      // tokens (Excel itself only recognizes double quotes, but many users
+      // and NL-generated formulas use single quotes interchangeably, so we
+      // treat them identically rather than silently dropping the quote
+      // character and letting the contents fall through as a bare
+      // identifier, which previously surfaced as a spurious #NAME? error).
+      const quote = ch;
       let j = i + 1;
       let val = '';
       while (j < n) {
-        if (expr[j] === '"') {
-          if (expr[j + 1] === '"') {
-            val += '"';
+        if (expr[j] === quote) {
+          if (expr[j + 1] === quote) {
+            val += quote;
             j += 2;
             continue;
           }

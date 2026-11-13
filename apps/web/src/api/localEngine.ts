@@ -4858,6 +4858,95 @@ export const localEngine = {
     const byMatch = pLower.match(/(?:by|per|for each|grouped by|breakdown by)\s+([a-z0-9_'\s]+)/i);
 
     // =========================================================================
+    // 1c. CONDITIONAL COUNT ON A CATEGORICAL VALUE (no grouping requested),
+    // e.g. "how many orders were cancelled?", "count of orders that are
+    // pending", "number of customers in the enterprise tier". Previously
+    // there was no WHERE-clause support at all for a bare categorical value
+    // mentioned in the question, so a question like this fell through to an
+    // unrelated branch (or the unfiltered total row count), producing a
+    // confidently wrong number with no indication anything was missed.
+    // =========================================================================
+    if (!byMatch) {
+      const countCue =
+        pLower.includes('how many') ||
+        pLower.includes('number of') ||
+        pLower.includes('count of') ||
+        /\bcount\b/.test(pLower);
+      if (countCue) {
+        // Collect distinct values for low-cardinality text (categorical)
+        // columns only - a column with many unique values (e.g. a name or
+        // id column) is not something a user would reference by value, and
+        // including it risks a coincidental word match.
+        const valueToCol: Record<string, string> = {};
+        for (const d of profile.dimensions) {
+          const seen = new Set<string>();
+          let tooHighCardinality = false;
+          for (const r of rows) {
+            const v = getRowVal(r, d);
+            if (v === null || v === undefined) continue;
+            const s = String(v).trim();
+            if (s) seen.add(s.toLowerCase());
+            if (seen.size > 30) {
+              tooHighCardinality = true;
+              break;
+            }
+          }
+          if (!tooHighCardinality && seen.size > 0) {
+            for (const v of seen) {
+              if (!(v in valueToCol)) valueToCol[v] = d;
+            }
+          }
+        }
+        // Match the longest candidate value mentioned as a whole word/phrase
+        // in the prompt, so "cancelled" matches a status value rather than a
+        // coincidental substring of something else.
+        let matchedValue = '';
+        let matchedCol = '';
+        const candidates = Object.keys(valueToCol).sort((a, b) => b.length - a.length);
+        for (const val of candidates) {
+          const escaped = val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const re = new RegExp(`\\b${escaped}\\b`, 'i');
+          if (re.test(pLower)) {
+            matchedValue = val;
+            matchedCol = valueToCol[val];
+            break;
+          }
+        }
+        if (matchedValue && matchedCol) {
+          const countVal = rows.filter(
+            (r) => String(getRowVal(r, matchedCol) ?? '').trim().toLowerCase() === matchedValue
+          ).length;
+          const colLabel = matchedCol.replace(/_/g, ' ');
+          const valueLabel = matchedValue.replace(/\b\w/g, (l) => l.toUpperCase());
+          const sqlTrace = `SELECT COUNT(*) AS "Count" FROM "${datasetName}" WHERE LOWER("${matchedCol}") = '${matchedValue.replace(/'/g, "''")}';`;
+          return {
+            plan: {
+              schema_version: '1.0',
+              intent: 'summary',
+              dataset_id: datasetId,
+              select: [{ column: matchedCol, aggregation: 'count', alias: 'Count' }],
+              filters: [{ column: matchedCol, operator: 'eq', value: matchedValue }],
+              group_by: [],
+              limit: 1,
+              chart: { type: 'table', x: 'Count', y: 'Count' },
+              explanation: `Counted rows where "${matchedCol}" = "${matchedValue}".`,
+            },
+            explanation: `There are **${countVal.toLocaleString()}** rows where **${colLabel}** is **${valueLabel}** (out of ${rows.length.toLocaleString()} total).`,
+            calculation_method: `COUNT(*) WHERE LOWER("${matchedCol}") = '${matchedValue}'.`,
+            columns: ['Count'],
+            rows: [{ Count: countVal }],
+            row_count: 1,
+            chart: { type: 'table', x: 'Count', y: 'Count' },
+            query_trace: sqlTrace,
+            latency_ms: 7.8,
+            provider: 'localEngine',
+            model: 'duckdb-in-browser',
+          };
+        }
+      }
+    }
+
+    // =========================================================================
     // 2. EXPLICIT GROUPING INTENT
     // =========================================================================
     if (byMatch) {
@@ -4923,17 +5012,30 @@ export const localEngine = {
       // Case B: Candidate is a Dimension (e.g. "total customer id's by region", "sales by category")
       const groupDim = candAsDim || resolveDimCol(groupCandidate) || profile.primaryDim;
 
-      // Check if subject is counting an entity or ID (e.g. "total customer id's", "unique orders", "count of products")
+      // Check if subject is counting an entity or ID (e.g. "total customer id's", "unique orders", "count of products").
+      // An explicit counting cue ("how many"/"number of"/"count"/distinct) always
+      // means a count. Otherwise, the mere presence of an entity noun like
+      // "order" or "customer" is NOT enough on its own: a question such as
+      // "average order value by category" also contains the word "order" but
+      // is asking for a statistical aggregate (AVG) of a measure, not a count
+      // of orders. A statistical-aggregation cue (average/min/max/...) in the
+      // absence of an explicit counting cue therefore rules entity-count out,
+      // so the question falls through to the Numeric Measure Grouped branch
+      // below instead of being silently miscounted.
+      const hasCountCue =
+        pLower.includes('how many') ||
+        pLower.includes('number of') ||
+        pLower.includes('count of') ||
+        pLower.includes('count ') ||
+        isDistinct;
+      const hasStatAggCue = /\b(average|avg|mean|median|min|minimum|max|maximum)\b/i.test(pLower);
       const isEntityCount =
-        (pLower.includes('customer') ||
+        (hasCountCue ||
+          pLower.includes('customer') ||
           pLower.includes('order') ||
           pLower.includes('product') ||
           pLower.includes('client') ||
-          pLower.includes('id') ||
-          pLower.includes('count') ||
-          pLower.includes('number of') ||
-          pLower.includes('how many') ||
-          isDistinct) &&
+          pLower.includes('id')) &&
         !pLower.includes('revenue') &&
         !pLower.includes('sales') &&
         !pLower.includes('profit') &&
@@ -4941,7 +5043,8 @@ export const localEngine = {
         !pLower.includes('unit_price') &&
         !pLower.includes('margin') &&
         !pLower.includes('cost') &&
-        !pLower.includes('discount');
+        !pLower.includes('discount') &&
+        (hasCountCue || !hasStatAggCue);
 
       let targetEntityCol = '';
       for (const c of profile.colNames) {

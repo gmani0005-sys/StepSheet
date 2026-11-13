@@ -197,4 +197,49 @@ describe('AI Analytics Suite (Chat with Data, Native Julius Dashboard, Local AI)
     const res3 = await localEngine.generateAiDashboard('local-sample-orders', 'create an interactive dashboard using this dataset');
     console.log('TEST RESULT 3:', res3.plan.dashboard_title, res3.plan.kpis, res3.plan.visuals);
   });
+
+  it('answers "average order value by category" with AVG, not an order count (regression)', async () => {
+    const datasets = await localEngine.listDatasets();
+    const all = await localEngine.previewPipeline(datasets[0].id, [], { limit: 1000 });
+
+    const byCategory: Record<string, number[]> = {};
+    for (const r of all.rows) {
+      const cat = String(r.category ?? '').trim();
+      if (!byCategory[cat]) byCategory[cat] = [];
+      byCategory[cat].push(Number(r.amount));
+    }
+    const expectedAvg: Record<string, number> = {};
+    for (const [cat, vals] of Object.entries(byCategory)) {
+      expectedAvg[cat] = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+    }
+
+    const res = await localEngine.executeChatQuery(datasets[0].id, 'what is average order value by category');
+    expect(res.plan.intent).toBe('aggregation');
+    // The result must not have been misclassified as an order-count-per-category
+    // query: its alias must reference an averaged amount, not a count, and its
+    // SQL trace must use AVG(), not COUNT().
+    expect(res.query_trace.toUpperCase()).toContain('AVG(');
+    expect(res.query_trace.toUpperCase()).not.toContain('COUNT(');
+    const valueKey = res.columns.find((c: string) => c !== 'category');
+    for (const row of res.rows) {
+      const cat = row.category;
+      if (expectedAvg[cat] !== undefined) {
+        expect(row[valueKey]).toBeCloseTo(expectedAvg[cat], 1);
+      }
+    }
+  });
+
+  it('answers "how many orders were cancelled" with a filtered count, not the total row count (regression)', async () => {
+    const datasets = await localEngine.listDatasets();
+    const all = await localEngine.previewPipeline(datasets[0].id, [], { limit: 1000 });
+    const expectedCancelled = all.rows.filter(
+      (r: any) => String(r.status ?? '').trim().toLowerCase() === 'cancelled'
+    ).length;
+    expect(expectedCancelled).toBeGreaterThan(0);
+    expect(expectedCancelled).toBeLessThan(all.rows.length);
+
+    const res = await localEngine.executeChatQuery(datasets[0].id, 'how many orders were cancelled?');
+    expect(res.rows[0].Count).toBe(expectedCancelled);
+    expect(res.query_trace.toUpperCase()).toContain('WHERE');
+  });
 });

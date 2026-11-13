@@ -2944,6 +2944,149 @@ function parseNumericValue(val: any): number | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Numeric-comparison parsing for Chat with Data ("how many orders are over
+// $500?", "show orders between 100 and 250", "orders with 10 units or more").
+// ---------------------------------------------------------------------------
+
+export type NumericComparisonOp = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'between';
+
+export interface NumericComparison {
+  op: NumericComparisonOp;
+  value: number;
+  /** Upper bound, for op === 'between' (inclusive on both ends). */
+  value2?: number;
+  /** True when the threshold was written as money ($500, 2k dollars, ...). */
+  isCurrency: boolean;
+  /** Character range of the whole comparison phrase within the input text. */
+  start: number;
+  end: number;
+  /** The word directly after the number, if any ("5 orders" -> "orders"). */
+  wordAfter: string;
+}
+
+// Longest phrases first so "greater than or equal to" wins over "greater than".
+const PREFIX_COMPARISON_OPS: Array<[string, NumericComparisonOp]> = [
+  ['greater than or equal to', 'gte'],
+  ['more than or equal to', 'gte'],
+  ['less than or equal to', 'lte'],
+  ['no less than', 'gte'],
+  ['not less than', 'gte'],
+  ['no more than', 'lte'],
+  ['not more than', 'lte'],
+  ['at least', 'gte'],
+  ['at most', 'lte'],
+  ['up to', 'lte'],
+  ['greater than', 'gt'],
+  ['more than', 'gt'],
+  ['higher than', 'gt'],
+  ['larger than', 'gt'],
+  ['bigger than', 'gt'],
+  ['less than', 'lt'],
+  ['fewer than', 'lt'],
+  ['lower than', 'lt'],
+  ['smaller than', 'lt'],
+  ['equal to', 'eq'],
+  ['exceeding', 'gt'],
+  ['exceeds', 'gt'],
+  ['exceed', 'gt'],
+  ['exactly', 'eq'],
+  ['above', 'gt'],
+  ['over', 'gt'],
+  ['under', 'lt'],
+  ['below', 'lt'],
+  ['>=', 'gte'],
+  ['<=', 'lte'],
+  ['>', 'gt'],
+  ['<', 'lt'],
+  ['=', 'eq'],
+];
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const CUR = '(?:[$€£₹]\\s*)?';
+const NUM = '(-?\\d[\\d,]*(?:\\.\\d+)?|-?\\.\\d+)';
+const SCALE = '(?:\\s*(k|m|bn|thousand|million|billion)\\b)?';
+const CURRENCY_WORDS = /^(dollars?|usd|bucks|euros?|eur|pounds?|gbp|rupees?|inr|rs)$/;
+
+const scaleNumber = (raw: string, scale?: string) => {
+  const n = Number(raw.replace(/,/g, ''));
+  const s = (scale || '').toLowerCase();
+  if (s === 'k' || s === 'thousand') return n * 1e3;
+  if (s === 'm' || s === 'million') return n * 1e6;
+  if (s === 'bn' || s === 'billion') return n * 1e9;
+  return n;
+};
+
+/**
+ * Find the first numeric comparison in a natural-language question.
+ * Requires an actual number, so "revenue over time" or "orders above
+ * average" are deliberately NOT treated as comparisons.
+ */
+export function parseNumericComparison(text: string): NumericComparison | null {
+  const t = text.toLowerCase();
+  const found: NumericComparison[] = [];
+  const nextWord = (from: number) => (t.slice(from).match(/^\s*([a-z_]+)/) || [])[1] || '';
+  const hasCurrency = (phrase: string, after: string) => /[$€£₹]/.test(phrase) || CURRENCY_WORDS.test(after);
+
+  // "between 100 and 250" / "between $1k to $2k"
+  const between = new RegExp(`\\bbetween\\s+${CUR}${NUM}${SCALE}\\s*(?:and|to|-)\\s*${CUR}${NUM}${SCALE}`, 'g');
+  for (const m of t.matchAll(between)) {
+    const a = scaleNumber(m[1], m[2]);
+    const b = scaleNumber(m[3], m[4]);
+    const end = m.index! + m[0].length;
+    const after = nextWord(end);
+    found.push({ op: 'between', value: Math.min(a, b), value2: Math.max(a, b), isCurrency: hasCurrency(m[0], after), start: m.index!, end, wordAfter: after });
+  }
+
+  // "<op> [than] $500", e.g. "over $500", "at least 10", ">= 3"
+  // Word operators must start at a word boundary ("turnover 500" is not
+  // "over 500"); symbol operators may follow a letter directly ("amount<50").
+  const wordOps = PREFIX_COMPARISON_OPS.filter(([p]) => /^[a-z]/.test(p)).map(([p]) => escapeRe(p)).join('|');
+  const symbolOps = PREFIX_COMPARISON_OPS.filter(([p]) => !/^[a-z]/.test(p)).map(([p]) => escapeRe(p)).join('|');
+  const prefix = new RegExp(
+    `(?:(?:^|[^a-z0-9_<>=])(${wordOps})|(?:^|[^<>=])(${symbolOps}))\\s*${CUR}${NUM}${SCALE}(?!\\d|\\.\\d)`,
+    'g',
+  );
+  for (const m of t.matchAll(prefix)) {
+    const opText = m[1] || m[2];
+    const op = PREFIX_COMPARISON_OPS.find(([p]) => p === opText)![1];
+    const start = m.index! + m[0].indexOf(opText);
+    const end = m.index! + m[0].length;
+    const after = nextWord(end);
+    found.push({ op, value: scaleNumber(m[3], m[4]), isCurrency: hasCurrency(m[0], after), start, end, wordAfter: after });
+  }
+
+  // "500 or more", "$1k and above", "10+ units"
+  const postfix = new RegExp(
+    // The optional word between the number and the qualifier is the unit:
+    // "5 units or more", "10 orders or fewer".
+    `(?:^|[^a-z0-9_.])(${CUR}${NUM}${SCALE})(?:\\s+([a-z_]+))?\\s*(\\+|or more|or greater|or higher|or above|or over|and above|and up|and over|or less|or fewer|or lower|or below|or under|and below|and under)(?![a-z])`,
+    'g',
+  );
+  for (const m of t.matchAll(postfix)) {
+    const isUpper = /less|fewer|lower|below|under/.test(m[5]);
+    const start = m.index! + m[0].indexOf(m[1]);
+    const end = m.index! + m[0].length;
+    const after = m[4] || nextWord(end);
+    found.push({ op: isUpper ? 'lte' : 'gte', value: scaleNumber(m[2], m[3]), isCurrency: hasCurrency(m[0], after), start, end, wordAfter: after });
+  }
+
+  if (!found.length) return null;
+  found.sort((a, b) => a.start - b.start);
+  return found[0];
+}
+
+export function numericComparisonMatches(v: number, c: NumericComparison): boolean {
+  switch (c.op) {
+    case 'gt': return v > c.value;
+    case 'gte': return v >= c.value;
+    case 'lt': return v < c.value;
+    case 'lte': return v <= c.value;
+    case 'eq': return v === c.value;
+    case 'between': return v >= c.value && v <= (c.value2 as number);
+  }
+}
+
 function resolveActiveDatasetContext(
   datasetId: string,
   context?: { columns?: any[]; rows?: any[]; datasetName?: string }
@@ -4859,6 +5002,314 @@ export const localEngine = {
     // Check for explicit grouping phrase: "by <dim>", "per <dim>", "for each <dim>", "grouped by <dim>", "breakdown by <dim>"
     const byMatch = pLower.match(/(?:by|per|for each|grouped by|breakdown by)\s+([a-z0-9_'\s]+)/i);
 
+    // Find a low-cardinality categorical value named as a whole word/phrase in
+    // the prompt ("cancelled", "enterprise", "north"), longest match first.
+    // Only columns with <= 30 distinct values qualify -- a high-cardinality
+    // column (a name or id) is not something a user references by value, and
+    // including it risks a coincidental word match.
+    const findNamedCategoricalValue = (): { value: string; col: string } | null => {
+      const valueToCol: Record<string, string> = {};
+      for (const d of profile.dimensions) {
+        const seen = new Set<string>();
+        let tooHighCardinality = false;
+        for (const r of rows) {
+          const v = getRowVal(r, d);
+          if (v === null || v === undefined) continue;
+          const s = String(v).trim();
+          if (s) seen.add(s.toLowerCase());
+          if (seen.size > 30) {
+            tooHighCardinality = true;
+            break;
+          }
+        }
+        if (!tooHighCardinality && seen.size > 0) {
+          for (const v of seen) {
+            if (!(v in valueToCol)) valueToCol[v] = d;
+          }
+        }
+      }
+      const candidates = Object.keys(valueToCol).sort((a, b) => b.length - a.length);
+      for (const val of candidates) {
+        const escaped = val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (new RegExp(`\\b${escaped}\\b`, 'i').test(pLower)) return { value: val, col: valueToCol[val] };
+      }
+      return null;
+    };
+
+    // =========================================================================
+    // 1b. NUMERIC COMPARISON FILTER (no grouping requested), e.g. "how many
+    // orders are over $500?", "show orders between 100 and 250", "count of
+    // orders with 10 units or more", "how many cancelled orders are above
+    // 1k?". Previously there was no filter parsing for these at all: they
+    // fell through to the generic default-ranking fallback and returned a
+    // "top 10 order_id by amount" table that answers a different question.
+    // Runs before the categorical-count branch below so a question naming
+    // both a category value and a threshold applies BOTH filters, instead of
+    // the categorical branch answering with a count that ignores the
+    // threshold.
+    // =========================================================================
+    const numericComparison = !byMatch ? parseNumericComparison(prompt) : null;
+    if (numericComparison && profile.measures.length > 0) {
+      const cmp = numericComparison;
+      const countCue =
+        pLower.includes('how many') ||
+        pLower.includes('number of') ||
+        pLower.includes('count of') ||
+        /\bcount\b/.test(pLower);
+      const statAggCue = /\b(average|avg|mean|median|sum|min|minimum|max|maximum)\b/.test(pLower);
+      const STOP_WORDS = new Set(['in', 'on', 'at', 'and', 'or', 'the', 'for', 'with', 'from', 'of', 'per', 'each', 'this', 'that', 'last', 'next', 'year', 'month', 'week', 'day', 'days', 'today']);
+      const UNIT_WORDS = /^(units?|items?|pieces?|pcs|qty)$/;
+      const ENTITY_WORDS = /^(orders?|customers?|clients?|products?|transactions?|purchases?|invoices?|accounts?|users?|visits?|tickets?|records?|rows?)$/;
+
+      // Which column is being compared? In priority order:
+      //  1. a measure/unit named right after the number ("10 units");
+      //  2. the measure named closest BEFORE the comparison ("orders with
+      //     an amount over 500", "unit price above 50"), else one after it;
+      //  3. for a money threshold ("$500", "2k dollars"), the main monetary
+      //     measure;
+      //  4. the dataset's primary measure -- always named in the answer, so
+      //     the assumption is visible.
+      let targetCol = '';
+      let howResolved = '';
+      // An entity noun right after the number ("customers with more than 5
+      // orders") asks for a per-entity count (GROUP BY ... HAVING COUNT(*)),
+      // not a threshold on a column; comparing some measure to 5 would give
+      // a confidently wrong answer, so leave this branch to the other paths.
+      const isPerEntityCount = ENTITY_WORDS.test(cmp.wordAfter) && !resolveMeasureCol(cmp.wordAfter);
+      if (!isPerEntityCount) {
+        if (cmp.wordAfter && !STOP_WORDS.has(cmp.wordAfter) && !CURRENCY_WORDS.test(cmp.wordAfter)) {
+          if (UNIT_WORDS.test(cmp.wordAfter)) targetCol = resolveMeasureCol('quantity');
+          else if (cmp.wordAfter.length >= 3) {
+            targetCol = profile.measures.find((m) => {
+              const ml = m.toLowerCase();
+              return ml === cmp.wordAfter || ml.replace(/_/g, ' ') === cmp.wordAfter || ml === cmp.wordAfter.replace(/s$/, '');
+            }) || '';
+            if (!targetCol && Object.keys(MEASURE_SYNONYMS).includes(cmp.wordAfter.replace(/s$/, ''))) {
+              targetCol = resolveMeasureCol(cmp.wordAfter.replace(/s$/, ''));
+            }
+          }
+          if (targetCol) howResolved = 'named';
+        }
+        if (!targetCol) {
+          // Collect every measure mention (column names, spaced forms, and
+          // synonym keys like "revenue"/"price"), keyed by position.
+          const mentions: Array<{ col: string; idx: number }> = [];
+          const addMentions = (needle: string, col: string) => {
+            if (!col || !needle) return;
+            const re = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?\\b`, 'g');
+            for (const m of pLower.matchAll(re)) mentions.push({ col, idx: m.index! });
+          };
+          for (const m of profile.measures) {
+            addMentions(m.toLowerCase(), m);
+            addMentions(m.toLowerCase().replace(/_/g, ' '), m);
+          }
+          for (const key of Object.keys(MEASURE_SYNONYMS)) addMentions(key, resolveMeasureCol(key));
+          const before = mentions.filter((m) => m.idx < cmp.start).sort((a, b) => b.idx - a.idx);
+          const after = mentions.filter((m) => m.idx >= cmp.end).sort((a, b) => a.idx - b.idx);
+          const pick = before[0] || after[0];
+          if (pick) {
+            targetCol = pick.col;
+            howResolved = 'named';
+          }
+        }
+        if (!targetCol && cmp.isCurrency) {
+          targetCol = resolveMeasureCol('amount') || resolveMeasureCol('revenue') || resolveMeasureCol('sales') || '';
+          if (targetCol) howResolved = 'currency';
+        }
+        if (!targetCol && profile.measures.includes(profile.primaryMeasure)) {
+          targetCol = profile.primaryMeasure;
+          howResolved = 'default';
+        }
+      }
+
+      const listCue = !countCue && !statAggCue;
+      // The function-wide isAscending flag fires on "least", which here is
+      // almost always "at least" (a threshold, not a sort order).
+      const sortAscending = /\b(bottom|lowest)\b/.test(pLower) || /(?<!\bat )\bleast\b/.test(pLower);
+
+      // "how many customers have more than 5 orders?" / "which customers
+      // placed at least 3 orders?": a per-entity count compared against the
+      // threshold -- GROUP BY <entity> HAVING COUNT(...) <op> N.
+      if (isPerEntityCount && (countCue || listCue)) {
+        const singular = (w: string) => w.replace(/s$/, '');
+        const subjectWord = (pLower.slice(0, cmp.start).match(/[a-z_]+/g) || [])
+          .reverse()
+          .find((w) => ENTITY_WORDS.test(w) && singular(w) !== singular(cmp.wordAfter));
+        const groupCol = subjectWord ? resolveDimCol(subjectWord) : '';
+        // Count distinct ids of the counted entity when the dataset has a
+        // column for it (several rows can share one order_id); otherwise
+        // ("records", "rows", or no matching column) count rows.
+        const countedCol = /^(records?|rows?)$/.test(cmp.wordAfter) ? '' : resolveDimCol(cmp.wordAfter);
+        if (groupCol && groupCol !== countedCol) {
+          const perGroup = new Map<string, Set<string> | number>();
+          for (const r of rows) {
+            const g = String(getRowVal(r, groupCol) ?? '').trim();
+            if (!g) continue;
+            if (countedCol) {
+              const v = String(getRowVal(r, countedCol) ?? '').trim();
+              if (!v) continue;
+              let set = perGroup.get(g) as Set<string> | undefined;
+              if (!set) perGroup.set(g, (set = new Set()));
+              set.add(v);
+            } else {
+              perGroup.set(g, ((perGroup.get(g) as number) || 0) + 1);
+            }
+          }
+          const countAlias = `${cmp.wordAfter.replace(/\b\w/g, (l) => l.toUpperCase())} Count`;
+          const qualifying: Array<Record<string, any>> = [];
+          for (const [g, v] of perGroup) {
+            const c = typeof v === 'number' ? v : v.size;
+            if (numericComparisonMatches(c, cmp)) qualifying.push({ [groupCol]: g, [countAlias]: c });
+          }
+          const opSql: Record<NumericComparisonOp, string> = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=', between: 'BETWEEN' };
+          const countExpr = countedCol ? `COUNT(DISTINCT "${countedCol}")` : 'COUNT(*)';
+          const havingSql =
+            cmp.op === 'between' ? `${countExpr} BETWEEN ${cmp.value} AND ${cmp.value2}` : `${countExpr} ${opSql[cmp.op]} ${cmp.value}`;
+          const condText =
+            cmp.op === 'between'
+              ? `between ${cmp.value} and ${cmp.value2}`
+              : `${{ gt: 'more than', gte: 'at least', lt: 'fewer than', lte: 'at most', eq: 'exactly' }[cmp.op]} ${cmp.value.toLocaleString()}`;
+          const groupLabel = groupCol.replace(/_/g, ' ');
+          const sentence = `**${qualifying.length.toLocaleString()}** of ${perGroup.size.toLocaleString()} distinct **${groupLabel}** values have ${condText} ${cmp.wordAfter}`;
+          const plan = {
+            schema_version: '1.0',
+            intent: countCue ? 'summary' : 'filter',
+            dataset_id: datasetId,
+            select: [{ column: groupCol }, { column: countedCol || groupCol, aggregation: 'count', alias: countAlias }],
+            group_by: [groupCol],
+            limit: countCue ? 1 : 100,
+            chart: { type: 'table', x: groupCol, y: countAlias },
+            explanation: `Grouped by "${groupCol}" and kept groups where ${havingSql}.`,
+          };
+          const common = { latency_ms: 8.1, provider: 'localEngine', model: 'duckdb-in-browser' };
+          if (countCue) {
+            const alias = `${groupLabel.replace(/\b\w/g, (l) => l.toUpperCase())} Count`;
+            return {
+              ...common,
+              plan,
+              explanation: `${sentence}.`,
+              calculation_method: `Counted "${groupCol}" groups where ${havingSql}.`,
+              columns: [alias],
+              rows: [{ [alias]: qualifying.length }],
+              row_count: 1,
+              chart: { type: 'table', x: alias, y: alias },
+              query_trace: `SELECT COUNT(*) AS "${alias}" FROM (SELECT "${groupCol}" FROM "${datasetName}" GROUP BY "${groupCol}" HAVING ${havingSql});`,
+            };
+          }
+          qualifying.sort((a, b) => (sortAscending ? a[countAlias] - b[countAlias] : b[countAlias] - a[countAlias]));
+          const shown = qualifying.slice(0, topMatch ? limit : 100);
+          return {
+            ...common,
+            plan,
+            explanation: `${sentence}.${qualifying.length > shown.length ? ` Showing the first ${shown.length.toLocaleString()}.` : ''}`,
+            calculation_method: `GROUP BY "${groupCol}" HAVING ${havingSql}, ordered by count.`,
+            columns: [groupCol, countAlias],
+            rows: shown,
+            row_count: shown.length,
+            chart: { type: 'bar', x: groupCol, y: countAlias },
+            query_trace: `SELECT "${groupCol}", ${countExpr} AS "${countAlias}" FROM "${datasetName}" GROUP BY "${groupCol}" HAVING ${havingSql} ORDER BY 2 ${sortAscending ? 'ASC' : 'DESC'} LIMIT ${shown.length};`,
+          };
+        }
+      }
+      if (targetCol && (countCue || listCue)) {
+        const category = findNamedCategoricalValue();
+        const opSymbol: Record<NumericComparisonOp, string> = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=', between: 'BETWEEN' };
+        const fmt = (n: number) => (cmp.isCurrency ? `$${n.toLocaleString()}` : n.toLocaleString());
+        const conditionSql =
+          cmp.op === 'between'
+            ? `"${targetCol}" BETWEEN ${cmp.value} AND ${cmp.value2}`
+            : `"${targetCol}" ${opSymbol[cmp.op]} ${cmp.value}`;
+        const conditionText =
+          cmp.op === 'between'
+            ? `between ${fmt(cmp.value)} and ${fmt(cmp.value2 as number)}`
+            : `${{ gt: 'greater than', gte: 'at least', lt: 'less than', lte: 'at most', eq: 'equal to' }[cmp.op]} ${fmt(cmp.value)}`;
+        const whereSql = category
+          ? `${conditionSql} AND LOWER("${category.col}") = '${category.value.replace(/'/g, "''")}'`
+          : conditionSql;
+        const filters: any[] =
+          cmp.op === 'between'
+            ? [
+                { column: targetCol, operator: 'gte', value: cmp.value },
+                { column: targetCol, operator: 'lte', value: cmp.value2 },
+              ]
+            : [{ column: targetCol, operator: cmp.op, value: cmp.value }];
+        if (category) filters.push({ column: category.col, operator: 'eq', value: category.value });
+
+        const matching = rows.filter((r) => {
+          const num = parseNumericValue(getRowVal(r, targetCol));
+          if (num === null || !numericComparisonMatches(num, cmp)) return false;
+          if (category && String(getRowVal(r, category.col) ?? '').trim().toLowerCase() !== category.value) return false;
+          return true;
+        });
+
+        const colLabel = targetCol.replace(/_/g, ' ');
+        const categoryText = category
+          ? ` and **${category.col.replace(/_/g, ' ')}** is **${category.value.replace(/\b\w/g, (l) => l.toUpperCase())}**`
+          : '';
+        const assumptionNote =
+          howResolved === 'currency'
+            ? ` (the threshold looks like money, so it was compared against **${colLabel}**; name a different column to change this)`
+            : howResolved === 'default'
+              ? ` (no column was named, so **${colLabel}** was assumed; name a column to change this)`
+              : '';
+        const base = {
+          plan: {
+            schema_version: '1.0',
+            intent: countCue ? 'summary' : 'filter',
+            dataset_id: datasetId,
+            select: countCue ? [{ column: targetCol, aggregation: 'count', alias: 'Count' }] : profile.colNames.map((c) => ({ column: c })),
+            filters,
+            group_by: [],
+            limit: countCue ? 1 : 0,
+            chart: { type: 'table', x: countCue ? 'Count' : targetCol, y: countCue ? 'Count' : targetCol },
+            explanation: `Filtered rows where ${conditionSql}${category ? ` and "${category.col}" = "${category.value}"` : ''}.`,
+          },
+          latency_ms: 7.9,
+          provider: 'localEngine',
+          model: 'duckdb-in-browser',
+        };
+
+        if (countCue) {
+          return {
+            ...base,
+            explanation: `There are **${matching.length.toLocaleString()}** rows where **${colLabel}** is ${conditionText}${categoryText} (out of ${rows.length.toLocaleString()} total)${assumptionNote}.`,
+            calculation_method: `COUNT(*) WHERE ${whereSql}. Rows with a blank or non-numeric "${targetCol}" are excluded.`,
+            columns: ['Count'],
+            rows: [{ Count: matching.length }],
+            row_count: 1,
+            chart: { type: 'table', x: 'Count', y: 'Count' },
+            query_trace: `SELECT COUNT(*) AS "Count" FROM "${datasetName}" WHERE ${whereSql};`,
+          };
+        }
+
+        // "show/list/which orders are over $500": return the matching rows.
+        // "top N ..." sorts by the compared column; otherwise rows keep their
+        // dataset order. Capped at 100 shown, and the answer says so -- the
+        // full count is always stated.
+        const showLimit = topMatch ? limit : 100;
+        const ordered = topMatch
+          ? [...matching].sort((a, b) => {
+              const x = parseNumericValue(getRowVal(a, targetCol)) as number;
+              const y = parseNumericValue(getRowVal(b, targetCol)) as number;
+              return sortAscending ? x - y : y - x;
+            })
+          : matching;
+        const shown = ordered.slice(0, showLimit);
+        const shownNote = matching.length > shown.length ? ` Showing the first ${shown.length.toLocaleString()}.` : '';
+        base.plan.limit = showLimit;
+        return {
+          ...base,
+          explanation: `Found **${matching.length.toLocaleString()}** rows where **${colLabel}** is ${conditionText}${categoryText} (out of ${rows.length.toLocaleString()} total)${assumptionNote}.${shownNote}`,
+          calculation_method: `SELECT * WHERE ${whereSql}${topMatch ? ` ORDER BY "${targetCol}" ${sortAscending ? 'ASC' : 'DESC'}` : ''} LIMIT ${showLimit}. Rows with a blank or non-numeric "${targetCol}" are excluded.`,
+          columns: profile.colNames,
+          rows: shown,
+          row_count: shown.length,
+          chart: { type: 'table', x: targetCol, y: targetCol },
+          query_trace: `SELECT * FROM "${datasetName}" WHERE ${whereSql}${topMatch ? ` ORDER BY "${targetCol}" ${sortAscending ? 'ASC' : 'DESC'}` : ''} LIMIT ${showLimit};`,
+        };
+      }
+    }
+
     // =========================================================================
     // 1c. CONDITIONAL COUNT ON A CATEGORICAL VALUE (no grouping requested),
     // e.g. "how many orders were cancelled?", "count of orders that are
@@ -4875,45 +5326,9 @@ export const localEngine = {
         pLower.includes('count of') ||
         /\bcount\b/.test(pLower);
       if (countCue) {
-        // Collect distinct values for low-cardinality text (categorical)
-        // columns only - a column with many unique values (e.g. a name or
-        // id column) is not something a user would reference by value, and
-        // including it risks a coincidental word match.
-        const valueToCol: Record<string, string> = {};
-        for (const d of profile.dimensions) {
-          const seen = new Set<string>();
-          let tooHighCardinality = false;
-          for (const r of rows) {
-            const v = getRowVal(r, d);
-            if (v === null || v === undefined) continue;
-            const s = String(v).trim();
-            if (s) seen.add(s.toLowerCase());
-            if (seen.size > 30) {
-              tooHighCardinality = true;
-              break;
-            }
-          }
-          if (!tooHighCardinality && seen.size > 0) {
-            for (const v of seen) {
-              if (!(v in valueToCol)) valueToCol[v] = d;
-            }
-          }
-        }
-        // Match the longest candidate value mentioned as a whole word/phrase
-        // in the prompt, so "cancelled" matches a status value rather than a
-        // coincidental substring of something else.
-        let matchedValue = '';
-        let matchedCol = '';
-        const candidates = Object.keys(valueToCol).sort((a, b) => b.length - a.length);
-        for (const val of candidates) {
-          const escaped = val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const re = new RegExp(`\\b${escaped}\\b`, 'i');
-          if (re.test(pLower)) {
-            matchedValue = val;
-            matchedCol = valueToCol[val];
-            break;
-          }
-        }
+        const named = findNamedCategoricalValue();
+        const matchedValue = named?.value || '';
+        const matchedCol = named?.col || '';
         if (matchedValue && matchedCol) {
           const countVal = rows.filter(
             (r) => String(getRowVal(r, matchedCol) ?? '').trim().toLowerCase() === matchedValue
@@ -4961,9 +5376,15 @@ export const localEngine = {
         // comparison ("how many orders are over $500?"), which needs filter
         // parsing this branch doesn't attempt, so it deliberately falls
         // through rather than answering with the wrong (unfiltered) count.
-        const hasNumericComparisonCue = /\b(over|above|under|below|at least|at most|greater than|less than|more than|exceeding)\b/i.test(
-          pLower
-        );
+        // numericComparison (parsed above) catches every phrasing the 1b
+        // branch understands ("5 units or more", ">= 3", "between ..."); the
+        // keyword regex additionally catches number-less comparisons. Any
+        // question reaching here with either one was NOT answered by 1b
+        // (e.g. a statistical aggregate over a filter), and must never get
+        // the unfiltered total as its answer.
+        const hasNumericComparisonCue =
+          !!numericComparison ||
+          /\b(over|above|under|below|at least|at most|greater than|less than|more than|fewer than|exceeding)\b/i.test(pLower);
         if (!hasNumericComparisonCue) {
           const colAlias = 'Total Records';
           const sqlTraceTotal = `SELECT COUNT(*) AS "${colAlias}" FROM "${datasetName}";`;

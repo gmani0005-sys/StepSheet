@@ -97,6 +97,31 @@ export function isBlank(v: any): boolean {
   return v === null || v === undefined || v === '';
 }
 
+/**
+ * Scale-safe replacements for Math.min(...arr) / Math.max(...arr).
+ *
+ * The spread-call form throws `RangeError: Maximum call stack size exceeded`
+ * once `arr.length` is large enough to overflow the JS engine's per-call
+ * argument limit — in V8 this is not a fixed constant but depends on the
+ * current call-stack depth, so it can trip anywhere from roughly 60K to a
+ * few hundred thousand elements depending on how deep the call site is
+ * nested. At the row counts a real analytics workload deals with (a
+ * `group_by`, a pivot cell, or a "what is the min/max X" question over a
+ * dataset of hundreds of thousands to millions of rows), hitting this is
+ * close to certain. A manual reduction loop has no such limit.
+ */
+export function arrayMin(arr: number[]): number {
+  let m = Infinity;
+  for (let i = 0; i < arr.length; i++) if (arr[i] < m) m = arr[i];
+  return m;
+}
+
+export function arrayMax(arr: number[]): number {
+  let m = -Infinity;
+  for (let i = 0; i < arr.length; i++) if (arr[i] > m) m = arr[i];
+  return m;
+}
+
 const ROUND_EPS = 1e-9;
 
 /** Excel ROUND: half away from zero, supports negative digits. */

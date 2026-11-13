@@ -242,4 +242,83 @@ describe('AI Analytics Suite (Chat with Data, Native Julius Dashboard, Local AI)
     expect(res.rows[0].Count).toBe(expectedCancelled);
     expect(res.query_trace.toUpperCase()).toContain('WHERE');
   });
+
+  describe('scale: MIN/MAX aggregation on large arrays (regression)', () => {
+    // Math.min(...arr) / Math.max(...arr) throws `RangeError: Maximum call
+    // stack size exceeded` once the spread array is large enough to overflow
+    // the JS engine's per-call argument limit. At the row counts a real
+    // "data company handling millions of records" would run through this
+    // engine, this used to crash: a plain "what is the minimum/maximum X?"
+    // question (scalar, no grouping) and a "min/max by <low-cardinality
+    // column>" question (grouped) over a dataset with a few hundred thousand
+    // rows or more. Confirmed via an end-to-end 1,000,000-row harness run
+    // through the real previewPipeline/executeChatQuery code paths before
+    // this fix (both crashed); this test seeds a smaller but still
+    // comfortably-over-the-old-threshold dataset (300,000 rows) directly so
+    // it stays fast in CI while still exercising the exact same code paths.
+    const N = 300000;
+    let BIG_ID = '';
+
+    // Go through the real uploadDataset() path (JSON file -> parse -> schema
+    // infer -> saveStoredDatasets()) rather than writing to localStorage
+    // directly, so the module's in-memory dataset cache (memoryDatasets) is
+    // populated the same way a real upload would populate it — getStoredDatasets()
+    // returns that cache first and ignores localStorage once it is warm, so a
+    // direct localStorage write from a test is silently ignored once any
+    // earlier test in this file has already warmed the cache.
+    beforeEach(async () => {
+      const rows = Array.from({ length: N }, (_, i) => ({
+        order_id: i + 1,
+        category: i % 6 === 0 ? 'Electronics' : i % 6 === 1 ? 'Apparel' : i % 6 === 2 ? 'Toys' : i % 6 === 3 ? 'Books' : i % 6 === 4 ? 'Grocery' : 'Automotive',
+        amount: (i % 999) + 0.5,
+      }));
+      const text = JSON.stringify(rows);
+      // jsdom's File polyfill doesn't implement arrayBuffer()/text() in this
+      // environment, so hand uploadDataset a minimal object satisfying the
+      // same interface it actually uses.
+      const file = {
+        name: 'scale.json',
+        type: 'application/json',
+        text: async () => text,
+        arrayBuffer: async () => new TextEncoder().encode(text).buffer,
+      } as unknown as File;
+      const meta = await localEngine.uploadDataset(file, 'Scale MinMax Regression');
+      BIG_ID = meta.id;
+    });
+
+    it('computes a scalar MIN/MAX over 300K rows via Chat with Data without crashing', async () => {
+      const resMin = await localEngine.executeChatQuery(BIG_ID, 'what is the minimum amount?');
+      expect(resMin.rows[0][Object.keys(resMin.rows[0])[0]]).toBeCloseTo(0.5, 3);
+      const resMax = await localEngine.executeChatQuery(BIG_ID, 'what is the maximum amount?');
+      expect(resMax.rows[0][Object.keys(resMax.rows[0])[0]]).toBeCloseTo(998.5, 3);
+    });
+
+    it('computes a grouped MIN/MAX by category over 300K rows via Chat with Data without crashing', async () => {
+      const res = await localEngine.executeChatQuery(BIG_ID, 'what is the minimum amount by category?');
+      expect(res.rows.length).toBe(6);
+    });
+
+    it('computes an overall (no group columns) MIN/MAX over 300K rows via the group_by pipeline step without crashing', async () => {
+      const res = await localEngine.previewPipeline(
+        BIG_ID,
+        [
+          {
+            id: 's1',
+            type: 'group_by',
+            enabled: true,
+            params: {
+              group_by_columns: [],
+              aggregations: [
+                { column: 'amount', function: 'min', alias: 'min_amount' },
+                { column: 'amount', function: 'max', alias: 'max_amount' },
+              ],
+            },
+          } as any,
+        ],
+        { limit: 10 }
+      );
+      expect(res.rows[0].min_amount).toBeCloseTo(0.5, 3);
+      expect(res.rows[0].max_amount).toBeCloseTo(998.5, 3);
+    });
+  });
 });

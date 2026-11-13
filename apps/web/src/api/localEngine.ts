@@ -29,6 +29,8 @@ import {
   daysBetweenUTC,
   isBlank,
   cleanFloat,
+  arrayMin,
+  arrayMax,
   roundHalfAwayFromZero,
   roundUpAwayFromZero,
   roundDownTowardZero,
@@ -867,8 +869,8 @@ function legacyEvaluateFormulaForRow(expression: string, row: Record<string, any
       return nums.length ? Number((nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(4)) : 0;
     },
     SUM: (...args: any[]) => args.reduce((a, b) => a + (Number(b) || 0), 0),
-    MIN: (...args: any[]) => Math.min(...args.map((n) => (Number.isNaN(Number(n)) ? Infinity : Number(n)))),
-    MAX: (...args: any[]) => Math.max(...args.map((n) => (Number.isNaN(Number(n)) ? -Infinity : Number(n)))),
+    MIN: (...args: any[]) => arrayMin(args.map((n) => (Number.isNaN(Number(n)) ? Infinity : Number(n)))),
+    MAX: (...args: any[]) => arrayMax(args.map((n) => (Number.isNaN(Number(n)) ? -Infinity : Number(n)))),
     MEDIAN: (...args: any[]) => {
       const nums = args.map(Number).filter((n) => !Number.isNaN(n)).sort((a, b) => a - b);
       if (!nums.length) return 0;
@@ -1946,7 +1948,7 @@ function executePipelineSteps(
               if (rawVals.length === 0) {
                 base[alias] = null;
               } else if (nums.length === rawVals.length) {
-                base[alias] = fn === 'min' ? Math.min(...nums) : Math.max(...nums);
+                base[alias] = fn === 'min' ? arrayMin(nums) : arrayMax(nums);
               } else {
                 const dates = rawVals.map((v) => parseSharedDate(v));
                 if (dates.every((d) => d !== null)) {
@@ -2124,8 +2126,8 @@ function executePipelineSteps(
             if (nums.length === 0) return null;
             const sum = nums.reduce((a, b) => a + b, 0);
             if (aggFn === 'avg') return cleanFloat(sum / nums.length);
-            if (aggFn === 'min') return Math.min(...nums);
-            if (aggFn === 'max') return Math.max(...nums);
+            if (aggFn === 'min') return arrayMin(nums);
+            if (aggFn === 'max') return arrayMax(nums);
             if (aggFn === 'pct_total') {
               return overallSum !== 0 ? cleanFloat((sum / overallSum) * 100) : null;
             }
@@ -5153,8 +5155,8 @@ export const localEngine = {
         if (vals.length > 0) {
           if (aggFunc === 'sum') aggVal = vals.reduce((a, b) => a + b, 0);
           else if (aggFunc === 'avg') aggVal = vals.reduce((a, b) => a + b, 0) / vals.length;
-          else if (aggFunc === 'min') aggVal = Math.min(...vals);
-          else if (aggFunc === 'max') aggVal = Math.max(...vals);
+          else if (aggFunc === 'min') aggVal = arrayMin(vals);
+          else if (aggFunc === 'max') aggVal = arrayMax(vals);
         }
         return {
           [groupDim]: key,
@@ -5323,8 +5325,8 @@ export const localEngine = {
         if (validNums.length > 0) {
           if (scalarAgg === 'sum') scalarVal = validNums.reduce((a, b) => a + b, 0);
           else if (scalarAgg === 'avg') scalarVal = validNums.reduce((a, b) => a + b, 0) / validNums.length;
-          else if (scalarAgg === 'min') scalarVal = Math.min(...validNums);
-          else if (scalarAgg === 'max') scalarVal = Math.max(...validNums);
+          else if (scalarAgg === 'min') scalarVal = arrayMin(validNums);
+          else if (scalarAgg === 'max') scalarVal = arrayMax(validNums);
         }
         scalarVal = Math.round(scalarVal * 100) / 100;
 

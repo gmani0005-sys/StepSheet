@@ -52,6 +52,8 @@ export interface StepSummary {
   type: string;
   enabled: boolean;
   generated_code: GeneratedCode;
+  /** Plain-language notes about values the step could not handle (never silent). */
+  warnings?: string[];
 }
 
 export interface PipelinePreviewResponse {

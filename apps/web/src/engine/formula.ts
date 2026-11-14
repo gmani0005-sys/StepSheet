@@ -21,6 +21,7 @@ import {
   roundDownTowardZero,
   dateToExcelSerial,
   daysInMonth,
+  preciseSum,
 } from './values';
 
 // ---------------------------------------------------------------------------
@@ -1253,18 +1254,18 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
       return isFxError(n) ? n : Math.sign(n);
     }
     case 'SUM': {
-      let total = 0;
+      const nums: number[] = [];
       for (const a of args) {
         if (a === null || a === undefined || a === '') continue;
         const n = asNum(a);
-        if (!isFxError(n)) total += n;
+        if (!isFxError(n)) nums.push(n);
       }
-      return cleanFloat(total);
+      return cleanFloat(preciseSum(nums));
     }
     case 'AVERAGE': {
       const nums = args.filter((a) => a !== null && a !== undefined && a !== '').map((a) => asNum(a)).filter((n): n is number => !isFxError(n));
       if (nums.length === 0) return DIV0_ERR();
-      return cleanFloat(nums.reduce((s, n) => s + n, 0) / nums.length);
+      return cleanFloat(preciseSum(nums) / nums.length);
     }
     case 'MIN': {
       const nums = args.filter((a) => a !== null && a !== undefined && a !== '').map((a) => asNum(a)).filter((n): n is number => !isFxError(n));

@@ -779,6 +779,18 @@ export const EditStepModal: React.FC = () => {
                 <option value="boolean">Boolean (TRUE/FALSE)</option>
               </select>
             </div>
+            <div>
+              <label className="text-xs font-medium text-slate-300 block mb-1">Values that can't be converted</label>
+              <select
+                value={params.on_error || 'blank'}
+                onChange={(e) => handleParamChange('on_error', e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200"
+              >
+                <option value="blank">Set to blank (column stays one type)</option>
+                <option value="keep">Keep as typed</option>
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">Either way, the step shows how many values were affected.</p>
+            </div>
           </div>
         );
 

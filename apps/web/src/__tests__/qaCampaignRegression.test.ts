@@ -69,9 +69,10 @@ describe('D04 impossible dates are not dates', () => {
     expect(toISODate(parseSharedDate('March 5, 2024')!)).toBe('2024-03-05');
     expect(toISODate(parseSharedDate('5 Mar 2024')!)).toBe('2024-03-05');
   });
-  it('Change type to date leaves an impossible date blank', async () => {
+  it('Change type to date leaves an impossible date blank, and says so', async () => {
     const r = await run([{ d: '31/02/2024' }, { d: '28/02/2024' }], [{ type: 'change_type', params: { column: 'd', target_type: 'date' } }]);
     expect(r.rows.map((x: any) => x.d)).toEqual([null, '2024-02-28']);
+    expect(r.stepSummaries[0].warnings?.[0]).toMatch(/1 value in "d" could not be read as a date/);
   });
 });
 

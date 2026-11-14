@@ -463,6 +463,19 @@ export const RightPanel: React.FC = () => {
                 </div>
               </div>
 
+              {selectedStepSummary?.warnings && selectedStepSummary.warnings.length > 0 && (
+                <div
+                  role="alert"
+                  data-testid="step-warnings"
+                  className="p-2 rounded-[2px] bg-[#FFF4CE] border border-[#E8C33C] text-[12px] text-[#5C4A00] space-y-1"
+                >
+                  <div className="font-semibold">Check this step</div>
+                  {selectedStepSummary.warnings.map((w, i) => (
+                    <div key={i}>{w}</div>
+                  ))}
+                </div>
+              )}
+
               {/* Equivalent Code Generator Section */}
               <div className="space-y-2.5">
                 <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#212121]">

@@ -36,7 +36,10 @@ import {
   roundHalfAwayFromZero,
   roundUpAwayFromZero,
   roundDownTowardZero,
+  preciseSum,
+  RunningSum,
 } from '../engine/values';
+import { planChatQuery } from '../engine/chatPlanner';
 
 const LOCAL_DATASETS_KEY = 'stepsheet_local_datasets_v1';
 const LOCAL_TEMPLATES_KEY = 'stepsheet_local_templates_v2';
@@ -308,67 +311,140 @@ export function hasPendingPersistenceWarning(): boolean {
   return pendingPersistenceWarning;
 }
 
-function getStoredDatasets(): StoredLocalDataset[] {
-  if (memoryDatasets) return memoryDatasets;
+// ---------------------------------------------------------------------------
+// Persistence. Both stores hold an envelope { savedAt, datasets } so a reload
+// can tell which copy is newer (a stale localStorage copy used to win over a
+// newer IndexedDB one when the counts were equal). Nothing is written until
+// the stored copy has been read: seeding the samples before IndexedDB had
+// answered used to overwrite the user's datasets on reload (R2-17).
+// ---------------------------------------------------------------------------
+type StoreEnvelope = { savedAt: number; datasets?: StoredLocalDataset[]; inIdb?: boolean };
+/** Above this many cells the copy lives only in IndexedDB: stringifying it for
+ * localStorage costs several times the data in memory and overflows the ~5MB quota anyway. */
+const LOCALSTORAGE_CELL_LIMIT = 200_000;
+
+function readEnvelope(raw: any): StoreEnvelope | null {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return { savedAt: 0, datasets: raw }; // legacy: bare array
+  if (typeof raw === 'object' && typeof raw.savedAt === 'number') return raw as StoreEnvelope;
+  return null;
+}
+
+function readLocalStorageEnvelope(): StoreEnvelope | null {
   try {
     const raw = localStorage.getItem(LOCAL_DATASETS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        memoryDatasets = parsed;
-        // Background-hydrate from IndexedDB too, in case localStorage holds
-        // a stale/truncated copy from a prior quota failure.
-        if (indexedDbAvailable) {
-          idbGet<StoredLocalDataset[]>(LOCAL_DATASETS_KEY)
-            .then((idbCopy) => {
-              if (Array.isArray(idbCopy) && idbCopy.length > (memoryDatasets?.length ?? 0)) {
-                memoryDatasets = idbCopy;
-              }
-            })
-            .catch(() => {});
+    return raw ? readEnvelope(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+let hydrated = false;
+let hydrationPromise: Promise<void> | null = null;
+let lastSavedAt = 0;
+
+/** Resolve once the newest stored copy is in memory. Every localEngine call awaits this. */
+export function ensureHydrated(): Promise<void> {
+  if (hydrated) return Promise.resolve();
+  if (!hydrationPromise) {
+    hydrationPromise = (async () => {
+      const ls = readLocalStorageEnvelope();
+      let idb: StoreEnvelope | null = null;
+      if (indexedDbAvailable) {
+        try {
+          idb = readEnvelope(await idbGet<any>(LOCAL_DATASETS_KEY));
+        } catch {
+          idb = null;
         }
-        return memoryDatasets;
       }
-    } else if (indexedDbAvailable) {
-      // localStorage is empty (e.g. it was too small to hold anything) -
-      // nothing synchronous to return yet, but kick off IDB hydration for
-      // the next call.
-      idbGet<StoredLocalDataset[]>(LOCAL_DATASETS_KEY)
-        .then((idbCopy) => {
-          if (Array.isArray(idbCopy) && idbCopy.length > 0 && !memoryDatasets) {
-            memoryDatasets = idbCopy;
-          }
-        })
-        .catch(() => {});
+      const candidates = [idb, ls].filter((e): e is StoreEnvelope => !!e && Array.isArray(e.datasets));
+      // Newest wins; on a tie (legacy copies without a timestamp) prefer the
+      // one with more datasets, then IndexedDB, which is written every time.
+      candidates.sort((a, b) => b.savedAt - a.savedAt || (b.datasets!.length - a.datasets!.length));
+      const best = candidates[0];
+      hydrated = true;
+      if (memoryDatasets && memoryDatasets !== seededDatasets) return; // set by a caller in this session
+      if (best && best.datasets!.length > 0) {
+        memoryDatasets = best.datasets!;
+        lastSavedAt = best.savedAt;
+      } else if (!ls && !idb) {
+        // First run: nothing stored anywhere, so the samples become the store.
+        memoryDatasets = seededDatasets || buildSampleDatasets();
+        saveStoredDatasets(memoryDatasets);
+      } else {
+        memoryDatasets = best?.datasets || [];
+      }
+      if (typeof window !== 'undefined') {
+        try {
+          window.dispatchEvent(new CustomEvent('stepsheet:datasets-hydrated'));
+        } catch {}
+      }
+    })();
+  }
+  return hydrationPromise;
+}
+
+let seededDatasets: StoredLocalDataset[] | null = null;
+
+function getStoredDatasets(): StoredLocalDataset[] {
+  if (memoryDatasets) return memoryDatasets;
+  if (!indexedDbAvailable) {
+    // No async store to wait for: localStorage is the whole truth.
+    const ls = readLocalStorageEnvelope();
+    hydrated = true;
+    if (ls?.datasets && ls.datasets.length > 0) {
+      memoryDatasets = ls.datasets;
+      return memoryDatasets;
     }
-  } catch {}
-  const seeded = buildSampleDatasets();
-  memoryDatasets = seeded;
-  saveStoredDatasets(seeded);
-  return seeded;
+    memoryDatasets = buildSampleDatasets();
+    saveStoredDatasets(memoryDatasets);
+    return memoryDatasets;
+  }
+  // Called before hydration finished: show the samples, but never save them
+  // over the stored copy -- the user's real datasets may still be loading.
+  void ensureHydrated();
+  if (!seededDatasets) seededDatasets = buildSampleDatasets();
+  return seededDatasets;
 }
 
 function saveStoredDatasets(datasets: StoredLocalDataset[]) {
   memoryDatasets = datasets;
+  if (!hydrated) {
+    // Defer until the stored copy is known (see ensureHydrated); the newer
+    // in-memory list still wins because memoryDatasets is already set.
+    void ensureHydrated().then(() => saveStoredDatasets(memoryDatasets || datasets));
+    return;
+  }
+  const savedAt = Math.max(Date.now(), lastSavedAt + 1);
+  lastSavedAt = savedAt;
+  const cells = datasets.reduce((n, d) => n + (d.rows?.length || 0) * Math.max(1, d.meta?.column_count || 1), 0);
   let localStorageOk = true;
   let localStorageError: unknown = null;
   try {
-    localStorage.setItem(LOCAL_DATASETS_KEY, JSON.stringify(datasets));
+    if (indexedDbAvailable && cells > LOCALSTORAGE_CELL_LIMIT) {
+      // Large: keep only a marker here so a stale full copy can never win.
+      localStorage.setItem(LOCAL_DATASETS_KEY, JSON.stringify({ savedAt, inIdb: true }));
+    } else {
+      localStorage.setItem(LOCAL_DATASETS_KEY, JSON.stringify({ savedAt, datasets }));
+    }
   } catch (e) {
     localStorageOk = false;
     localStorageError = e;
+    try {
+      localStorage.setItem(LOCAL_DATASETS_KEY, JSON.stringify({ savedAt, inIdb: true }));
+    } catch {}
   }
 
   if (indexedDbAvailable) {
     // IndexedDB has no practical quota like localStorage's ~5MB, so it is
     // the durable backing store; write to it every time so it never falls
     // behind, and never silently swallow a failure.
-    idbPut(LOCAL_DATASETS_KEY, datasets).catch((e) => {
-      if (!localStorageOk) {
-        reportPersistenceFailure(
-          `localStorage failed (${String(localStorageError)}) and IndexedDB also failed (${String(e)}). Changes may be lost on reload.`
-        );
-      }
+    idbPut(LOCAL_DATASETS_KEY, { savedAt, datasets }).catch((e) => {
+      reportPersistenceFailure(
+        localStorageOk && cells <= LOCALSTORAGE_CELL_LIMIT
+          ? `IndexedDB failed (${String(e)}); the copy in localStorage is still current.`
+          : `IndexedDB failed (${String(e)})${localStorageOk ? '' : ` and localStorage failed (${String(localStorageError)})`}. Changes may be lost on reload.`
+      );
     });
   } else if (!localStorageOk) {
     reportPersistenceFailure(
@@ -542,18 +618,42 @@ function detectDelimiter(headerLine: string): string {
 }
 
 function parseDelimitedText(text: string, delimiter?: string): Record<string, any>[] {
+  return parseDelimitedTable(text, delimiter).rows;
+}
+
+/** Make header names usable as keys: blanks get column_N, repeats get _2, _3
+ * (a second "Amount" used to overwrite the first), and "__proto__" -- which a
+ * plain object silently swallows -- is renamed. */
+function uniqueHeaders(raw: string[]): string[] {
+  const seen = new Set<string>();
+  return raw.map((h, i) => {
+    let base = h.trim() || `column_${i + 1}`;
+    if (base === '__proto__') base = '_proto_';
+    let name = base;
+    let n = 2;
+    while (seen.has(name.toLowerCase())) name = `${base}_${n++}`;
+    seen.add(name.toLowerCase());
+    return name;
+  });
+}
+
+function parseDelimitedTable(text: string, delimiter?: string): { rows: Record<string, any>[]; headers: string[] } {
   const cleaned = text.replace(/^﻿/, '');
-  if (!cleaned.trim()) return [];
+  if (!cleaned.trim()) return { rows: [], headers: [] };
   const firstLineEnd = cleaned.search(/[\r\n]/);
   const headerSample = firstLineEnd === -1 ? cleaned : cleaned.slice(0, firstLineEnd);
   const delim = delimiter || detectDelimiter(headerSample);
 
   const cells = parseCsvCells(cleaned, delim);
-  if (cells.length === 0) return [];
+  if (cells.length === 0) return { rows: [], headers: [] };
 
-  const headerRow = cells[0];
-  const headers = headerRow.map((h, i) => h.trim() || `column_${i + 1}`);
+  const headerRow = [...cells[0]];
   const dataRows = cells.slice(1);
+  // Rows longer than the header keep their extra fields as column_N
+  // instead of dropping them.
+  const widest = dataRows.reduce((m, r) => (r.length > m ? r.length : m), headerRow.length);
+  for (let i = headerRow.length; i < widest; i++) headerRow.push('');
+  const headers = uniqueHeaders(headerRow);
   const colCount = headers.length;
 
   const colRawValues: string[][] = headers.map(() => []);
@@ -575,7 +675,7 @@ function parseDelimitedText(text: string, delimiter?: string): Record<string, an
     return nonBlank.every((v) => /^(true|false)$/i.test(v));
   });
 
-  return dataRows.map((r) => {
+  const rows = dataRows.map((r) => {
     const row: Record<string, any> = {};
     headers.forEach((h, idx) => {
       const raw = (r[idx] ?? '').trim();
@@ -591,6 +691,7 @@ function parseDelimitedText(text: string, delimiter?: string): Record<string, an
     });
     return row;
   });
+  return { rows, headers };
 }
 
 /** Decode a CSV/text file's bytes, auto-detecting UTF-8 vs Windows-1252
@@ -1476,14 +1577,17 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
 function executePipelineSteps(
   initialRows: Record<string, any>[],
   steps: StepDefinition[],
-  allDatasets: StoredLocalDataset[]
+  allDatasets: StoredLocalDataset[],
+  baseColumns?: ColumnSchema[]
 ): {
   rows: Record<string, any>[];
   columns: ColumnSchema[];
   compiledSql: string;
   stepSummaries: StepSummary[];
 } {
-  let rows = (initialRows || []).map((r) => ({ ...r }));
+  // Every step builds new row objects and never edits one in place, so the
+  // source rows need no up-front copy (copying 1M rows doubled peak memory).
+  let rows = (initialRows || []).slice();
   const stepSummaries: StepSummary[] = [];
   const sqlParts: string[] = ['WITH source_data AS (\n  SELECT * FROM dataset\n)'];
   let prevCte = 'source_data';
@@ -1491,13 +1595,17 @@ function executePipelineSteps(
   (steps || []).forEach((step, idx) => {
     if (!step) return;
     const code = generateStepCode(step);
-    stepSummaries.push({
+    const summary: StepSummary = {
       step_id: step.id,
       label: step.label,
       type: step.type,
       enabled: step.enabled,
       generated_code: code,
-    });
+    };
+    stepSummaries.push(summary);
+    const warn = (msg: string) => {
+      (summary.warnings ||= []).push(msg);
+    };
 
     if (!step.enabled) return;
 
@@ -1512,29 +1620,51 @@ function executePipelineSteps(
         const col = p.column;
         const targetType: DataType = p.target_type || 'text';
         if (col) {
+          // A US-style column (it holds 03/13/2024) is read month-first for
+          // every row, so 04/05/2024 is April 5 there -- not May 4.
+          const monthFirst = targetType === 'date' && inferMonthFirst(rows.map((r) => r[col]));
+          // Default: an unreadable value becomes blank so the column stays one
+          // clean type (a text "31/02/2024" in a date column breaks sorts and
+          // "latest date"); on_error: 'keep' leaves it as typed instead.
+          // Either way the step reports it -- never silent.
+          const keepOnError = p.on_error === 'keep';
+          let failed = 0;
+          const examples: string[] = [];
           rows = rows.map((r) => {
             const val = r[col];
-            if (isBlank(val)) return { ...r, [col]: null };
-            let nextVal: any = val;
+            if (isBlank(val) || isNullToken(val)) return { ...r, [col]: null };
+            let nextVal: any = null;
             if (targetType === 'integer') {
-              const parsed = parseSharedNumber(val);
-              // integer truncates only if the value is a whole number, else blank (SPEC.md)
+              const parsed = parseSharedNumber(val, { allowScientific: true });
               nextVal = parsed !== null && Number.isInteger(parsed) ? parsed : null;
             } else if (targetType === 'float') {
-              nextVal = parseSharedNumber(val);
+              nextVal = parseSharedNumber(val, { allowScientific: true });
             } else if (targetType === 'boolean') {
-              const s = String(val).trim().toLowerCase();
-              if (['true', 'yes', 'y', '1'].includes(s)) nextVal = true;
-              else if (['false', 'no', 'n', '0'].includes(s)) nextVal = false;
-              else nextVal = null;
+              if (typeof val === 'boolean') nextVal = val;
+              else {
+                const s = String(val).trim().toLowerCase();
+                if (['true', 'yes', 'y', '1'].includes(s)) nextVal = true;
+                else if (['false', 'no', 'n', '0'].includes(s)) nextVal = false;
+              }
             } else if (targetType === 'date') {
-              const d = parseSharedDate(val, { asDateStep: true });
+              const d = parseSharedDate(val, { asDateStep: true, monthFirst });
               nextVal = d ? toISODate(d) : null;
             } else {
-              nextVal = String(val);
+              return { ...r, [col]: String(val) };
+            }
+            if (nextVal === null) {
+              failed++;
+              if (examples.length < 3) examples.push(String(val));
+              return keepOnError ? r : { ...r, [col]: null };
             }
             return { ...r, [col]: nextVal };
           });
+          if (failed > 0) {
+            const what = targetType === 'integer' ? 'a whole number' : targetType === 'float' ? 'a number' : `a ${targetType}`;
+            warn(
+              `${failed.toLocaleString()} value${failed === 1 ? '' : 's'} in "${col}" could not be read as ${what} and ${failed === 1 ? 'was' : 'were'} ${keepOnError ? 'left unchanged' : 'set to blank'} (e.g. ${examples.map((e) => `"${e}"`).join(', ')}).`
+            );
+          }
         }
         break;
       }
@@ -2007,9 +2137,9 @@ function executePipelineSteps(
             const nums = rawVals.map((x) => parseSharedNumber(x)).filter((n): n is number => n !== null);
             if (fn === 'count') base[alias] = rawVals.length;
             else if (fn === 'distinct_count') base[alias] = new Set(rawVals.map((v) => String(v).toLowerCase())).size;
-            else if (fn === 'sum') base[alias] = nums.length ? cleanFloat(nums.reduce((a, b) => a + b, 0)) : null;
+            else if (fn === 'sum') base[alias] = nums.length ? cleanFloat(preciseSum(nums)) : null;
             else if (fn === 'avg' || fn === 'mean')
-              base[alias] = nums.length ? cleanFloat(nums.reduce((a, b) => a + b, 0) / nums.length) : null;
+              base[alias] = nums.length ? cleanFloat(preciseSum(nums) / nums.length) : null;
             else if (fn === 'min' || fn === 'max') {
               if (rawVals.length === 0) {
                 base[alias] = null;
@@ -2107,14 +2237,14 @@ function executePipelineSteps(
             return isBlank(v) ? null : parseSharedNumber(v);
           };
           const groupNums = evalOrder.map((idx) => numAt(idx)).filter((n): n is number => n !== null);
-          const groupTotal = groupNums.reduce((a, b) => a + b, 0);
-          let running = 0;
+          const groupTotal = preciseSum(groupNums);
+          const running = new RunningSum();
           let runningCount = 0;
 
           evalOrder.forEach((idx, pos) => {
             const v = numAt(idx);
             if (v !== null) {
-              running += v;
+              running.add(v);
               runningCount++;
             }
             if (fn === 'row_number') {
@@ -2125,9 +2255,9 @@ function executePipelineSteps(
               const startPos = Math.max(0, pos - winSize + 1);
               const sliceIdx = evalOrder.slice(startPos, pos + 1);
               const sliceNums = sliceIdx.map((sIdx) => numAt(sIdx)).filter((n): n is number => n !== null);
-              nextRows[idx][outCol] = sliceNums.length ? cleanFloat(sliceNums.reduce((a, b) => a + b, 0) / sliceNums.length) : null;
+              nextRows[idx][outCol] = sliceNums.length ? cleanFloat(preciseSum(sliceNums) / sliceNums.length) : null;
             } else if (fn === 'running_avg') {
-              nextRows[idx][outCol] = runningCount ? cleanFloat(running / runningCount) : null;
+              nextRows[idx][outCol] = runningCount ? cleanFloat(running.value / runningCount) : null;
             } else if (fn === 'lag') {
               const prevIdx = pos - offsetCount >= 0 ? evalOrder[pos - offsetCount] : -1;
               nextRows[idx][outCol] = prevIdx >= 0 ? rows[prevIdx][valCol] ?? null : null;
@@ -2136,7 +2266,7 @@ function executePipelineSteps(
               nextRows[idx][outCol] = nextIdx >= 0 ? rows[nextIdx][valCol] ?? null : null;
             } else {
               // running_total / running_sum
-              nextRows[idx][outCol] = runningCount ? cleanFloat(running) : null;
+              nextRows[idx][outCol] = runningCount ? cleanFloat(running.value) : null;
             }
           });
         });
@@ -2161,10 +2291,12 @@ function executePipelineSteps(
               ? rows.filter((r) => String(r[filterCol] ?? '') === String(filterVal))
               : rows;
 
-          const overallSum = workingRows.reduce((acc, r) => {
+          const overallAcc = new RunningSum();
+          for (const r of workingRows) {
             const n = isBlank(r[valCol]) ? null : parseSharedNumber(r[valCol]);
-            return acc + (n ?? 0);
-          }, 0);
+            if (n !== null) overallAcc.add(n);
+          }
+          const overallSum = overallAcc.value;
 
           const computeAgg = (subset: Record<string, any>[]): number | null => {
             if (subset.length === 0) return null;
@@ -2175,7 +2307,7 @@ function executePipelineSteps(
               .map((v) => parseSharedNumber(v))
               .filter((n): n is number => n !== null);
             if (nums.length === 0) return null;
-            const sum = nums.reduce((a, b) => a + b, 0);
+            const sum = preciseSum(nums);
             if (aggFn === 'avg') return cleanFloat(sum / nums.length);
             if (aggFn === 'min') return arrayMin(nums);
             if (aggFn === 'max') return arrayMax(nums);
@@ -2229,9 +2361,16 @@ function executePipelineSteps(
             }
 
             if (pivotCol) {
+              // One pass per group (was one filter per pivot value: groups x values).
+              const buckets = new Map<string, Record<string, any>[]>();
+              for (const r of gRows) {
+                const pv = pivotNorm(r[pivotCol]);
+                let b = buckets.get(pv);
+                if (!b) buckets.set(pv, (b = []));
+                b.push(r);
+              }
               pivotValues.forEach((pv) => {
-                const matching = gRows.filter((r) => pivotNorm(r[pivotCol]) === pv);
-                outRow[pv] = computeAgg(matching);
+                outRow[pv] = computeAgg(buckets.get(pv) || []);
               });
             } else {
               outRow[pivotValues[0]] = computeAgg(gRows);
@@ -2855,15 +2994,20 @@ function executePipelineSteps(
         const strategy = p.strategy || 'mean';
         const targetCol = p.output_column || col;
         let fillVal: any = p.fixed_value ?? 0;
+        let noFill = false;
         if (strategy === 'mean' || strategy === 'median') {
           const nums = rows
             .map((r) => r[col])
             .filter((v) => !isBlank(v))
             .map((v) => parseSharedNumber(v))
             .filter((n): n is number => n !== null);
-          if (nums.length > 0) {
+          if (nums.length === 0) {
+            // No numbers to average: filling 0 would invent data.
+            noFill = true;
+            warn(`"${col}" has no numeric values, so there is no ${strategy} to fill with; blanks were left as they are.`);
+          } else {
             if (strategy === 'mean') {
-              fillVal = cleanFloat(nums.reduce((a, b) => a + b, 0) / nums.length);
+              fillVal = cleanFloat(preciseSum(nums) / nums.length);
             } else {
               nums.sort((a, b) => a - b);
               const mid = Math.floor(nums.length / 2);
@@ -2887,6 +3031,14 @@ function executePipelineSteps(
             }
           });
           fillVal = bestVal;
+          if (bestCount === 0) {
+            noFill = true;
+            warn(`"${col}" has no values, so there is no most common value to fill with; blanks were left as they are.`);
+          }
+        }
+        if (noFill) {
+          if (targetCol !== col) rows = rows.map((r) => ({ ...r, [targetCol]: r[col] }));
+          break;
         }
         rows = rows.map((r) => {
           const current = r[col];
@@ -2951,7 +3103,22 @@ function executePipelineSteps(
   });
 
   const compiledSql = `${sqlParts.join(',\n')}\nSELECT * FROM ${prevCte};`;
-  const columns = inferSchema(rows);
+  let columns = inferSchema(rows);
+  if (rows.length === 0 && baseColumns && baseColumns.length > 0) {
+    // No rows left (a header-only file, a filter that matches nothing): the
+    // columns come from the rows, so the grid would lose its headers. Run the
+    // column-shaping steps over one blank row to learn the column names.
+    const ROW_DROPPING = new Set(['filter_rows', 'remove_duplicates', 'remove_rows', 'top_bottom_n', 'promote_headers', 'transpose']);
+    const byName = new Map(baseColumns.map((c) => [c.name, c]));
+    try {
+      const blank = Object.fromEntries(baseColumns.map((c) => [c.name, null]));
+      const probe = executePipelineSteps([blank], (steps || []).filter((st) => st && !ROW_DROPPING.has(st.type)), allDatasets);
+      const names = probe.rows[0] ? Object.keys(probe.rows[0]) : baseColumns.map((c) => c.name);
+      columns = names.map((n) => byName.get(n) || { name: n, data_type: 'text' as DataType, physical_type: physicalTypeFor('text'), nullable: true });
+    } catch {
+      columns = baseColumns;
+    }
+  }
   return { rows, columns, compiledSql, stepSummaries };
 }
 
@@ -2983,12 +3150,29 @@ function parseNumericValue(val: any): number | null {
   if (val === null || val === undefined || val === '') return null;
   if (typeof val === 'number') return Number.isNaN(val) ? null : val;
   if (typeof val === 'string') {
-    const cleaned = val.replace(/[$€£¥, %]/g, '').trim();
-    if (!cleaned) return null;
-    const num = Number(cleaned);
-    return Number.isNaN(num) ? null : num;
+    // Same reader as the steps, so Chat and the grid never disagree on "₹1,23,456".
+    return parseSharedNumber(val, { allowScientific: true });
   }
   return null;
+}
+
+const NULL_TOKENS = new Set(['n/a', 'na', '-', '--', 'null', 'none', '#n/a', 'nan', 'tbd', 'nil']);
+function isNullToken(v: any): boolean {
+  return typeof v === 'string' && NULL_TOKENS.has(v.trim().toLowerCase());
+}
+
+/** True when a column's slash dates are month-first (some value has a day > 12 in the 2nd slot and none in the 1st). */
+function inferMonthFirst(values: any[]): boolean {
+  let mf = 0;
+  let df = 0;
+  for (const v of values) {
+    if (typeof v !== 'string') continue;
+    const m = v.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-]\d{2,4}$/);
+    if (!m) continue;
+    if (+m[1] > 12 && +m[2] <= 12) df++;
+    else if (+m[2] > 12 && +m[1] <= 12) mf++;
+  }
+  return mf > 0 && df === 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -3316,6 +3500,7 @@ export const localEngine = {
   async uploadDataset(file: File, name?: string): Promise<Dataset> {
     const ext = file.name.split('.').pop()?.toLowerCase() || 'csv';
     let rows: Record<string, any>[] = [];
+    let parsedHeaders: string[] = [];
     let byteSize = file.size || 0;
 
     if (ext === 'xlsx' || ext === 'xlsm') {
@@ -3394,15 +3579,19 @@ export const localEngine = {
       } else if (ext === 'json') {
         const parsed = JSON.parse(text);
         rows = Array.isArray(parsed) ? parsed : [parsed];
-      } else if (ext === 'tsv') {
-        rows = parseDelimitedText(text, '\t');
       } else {
         // 'txt' and 'csv' both auto-detect comma vs semicolon vs tab
-        rows = parseDelimitedText(text);
+        const table = parseDelimitedTable(text, ext === 'tsv' ? '\t' : undefined);
+        rows = table.rows;
+        parsedHeaders = table.headers;
       }
     }
 
-    const schema = inferSchema(rows);
+    let schema = inferSchema(rows);
+    if (schema.length === 0 && parsedHeaders.length > 0) {
+      // A header-only file still has columns (it is a template to fill).
+      schema = parsedHeaders.map((h) => ({ name: h, data_type: 'text' as DataType, physical_type: physicalTypeFor('text'), nullable: true }));
+    }
     const now = new Date().toISOString();
     const meta: Dataset = {
       id: `local-ds-${crypto.randomUUID().slice(0, 8)}`,
@@ -3633,7 +3822,8 @@ export const localEngine = {
     const { rows: pipelineRows, columns, compiledSql, stepSummaries } = executePipelineSteps(
       ds.rows,
       steps,
-      all
+      all,
+      ds.meta.schema_metadata
     );
     let rows = [...pipelineRows];
 
@@ -3690,7 +3880,7 @@ export const localEngine = {
     const all = datasetsOverride || getStoredDatasets();
     const ds = all.find((d) => d.meta.id === datasetId);
     if (!ds) throw new Error(`Dataset not found: ${datasetId}`);
-    const res = executePipelineSteps(ds.rows, steps, all);
+    const res = executePipelineSteps(ds.rows, steps, all, ds.meta.schema_metadata);
     return {
       rows: res.rows.slice(0, limit),
       columns: res.columns,
@@ -4935,6 +5125,43 @@ export const localEngine = {
       };
     }
 
+    // Multi-part questions (several filters, NOT/IN, dates, ids, rankings,
+    // shares, group conditions, spread, growth) go to the structured planner,
+    // which answers all of the question or declines -- never a partial answer.
+    const planned = planChatQuery(prompt, rows, profile);
+    if (planned) {
+      if (planned.kind === 'decline') {
+        return {
+          plan: { schema_version: '1.0', intent: 'unsupported', dataset_id: datasetId, select: [], filters: [], group_by: [], limit: 0, chart: null, explanation: planned.reason },
+          explanation: `I can't answer that reliably yet: I couldn't work out ${planned.reason}. Try naming the column and value, e.g. "total revenue where status is Completed".`,
+          calculation_method: 'Declined rather than guess: part of the question could not be mapped to the data.',
+          columns: [],
+          rows: [],
+          row_count: 0,
+          chart: null,
+          query_trace: '',
+          latency_ms: 2.0,
+          provider: 'localEngine',
+          model: 'duckdb-in-browser',
+          declined: true,
+        };
+      }
+      const a = planned.answer;
+      return {
+        plan: { schema_version: '1.0', intent: a.intent, dataset_id: datasetId, select: a.columns.map((c) => ({ column: c })), filters: a.filters, group_by: a.groupBy, limit: a.rows.length, chart: a.chart, explanation: a.method },
+        explanation: a.explanation,
+        calculation_method: a.method,
+        columns: a.columns,
+        rows: a.rows,
+        row_count: a.rows.length,
+        chart: a.chart,
+        query_trace: a.trace,
+        latency_ms: 8.0,
+        provider: 'localEngine',
+        model: 'duckdb-in-browser',
+      };
+    }
+
     // Synonym Dictionaries
     const MEASURE_SYNONYMS: Record<string, string[]> = {
       revenue: ['revenue', 'amount', 'sales', 'total_amount', 'total_sales', 'turnover', 'gross', 'price', 'subtotal'],
@@ -5150,8 +5377,8 @@ export const localEngine = {
     const aggregate = (nums: number[], fn: ChatAgg): number | null => {
       if (fn === 'count') return nums.length;
       if (nums.length === 0) return null;
-      if (fn === 'sum') return cleanFloat(nums.reduce((a, b) => a + b, 0));
-      if (fn === 'avg') return cleanFloat(nums.reduce((a, b) => a + b, 0) / nums.length);
+      if (fn === 'sum') return cleanFloat(preciseSum(nums));
+      if (fn === 'avg') return cleanFloat(preciseSum(nums) / nums.length);
       if (fn === 'min') return arrayMin(nums);
       if (fn === 'max') return arrayMax(nums);
       const sorted = [...nums].sort((a, b) => a - b);
@@ -5927,8 +6154,8 @@ export const localEngine = {
       let groupedRows = Object.entries(groupValues).map(([key, vals]) => {
         let aggVal = 0;
         if (vals.length > 0) {
-          if (aggFunc === 'sum') aggVal = vals.reduce((a, b) => a + b, 0);
-          else if (aggFunc === 'avg') aggVal = vals.reduce((a, b) => a + b, 0) / vals.length;
+          if (aggFunc === 'sum') aggVal = preciseSum(vals);
+          else if (aggFunc === 'avg') aggVal = preciseSum(vals) / vals.length;
           else if (aggFunc === 'min') aggVal = arrayMin(vals);
           else if (aggFunc === 'max') aggVal = arrayMax(vals);
           else if (aggFunc === 'median') aggVal = aggregate(vals, 'median') as number;
@@ -6116,8 +6343,8 @@ export const localEngine = {
         }
         let scalarVal = 0;
         if (validNums.length > 0) {
-          if (scalarAgg === 'sum') scalarVal = validNums.reduce((a, b) => a + b, 0);
-          else if (scalarAgg === 'avg') scalarVal = validNums.reduce((a, b) => a + b, 0) / validNums.length;
+          if (scalarAgg === 'sum') scalarVal = preciseSum(validNums);
+          else if (scalarAgg === 'avg') scalarVal = preciseSum(validNums) / validNums.length;
           else if (scalarAgg === 'min') scalarVal = arrayMin(validNums);
           else if (scalarAgg === 'max') scalarVal = arrayMax(validNums);
           else if (scalarAgg === 'median') scalarVal = aggregate(validNums, 'median') as number;
@@ -7096,3 +7323,23 @@ export const localEngine = {
   },
 };
 
+// Every call waits for the stored datasets to load first, so no operation can
+// read the placeholder samples or save over the user's data (R2-17).
+for (const key of Object.keys(localEngine) as Array<keyof typeof localEngine>) {
+  const fn = localEngine[key] as unknown;
+  if (typeof fn === 'function') {
+    (localEngine as any)[key] = async function (this: unknown, ...args: any[]) {
+      await ensureHydrated();
+      return (fn as (...a: any[]) => any).apply(localEngine, args);
+    };
+  }
+}
+
+/** Test hook: forget the in-memory copy, as a page reload would. */
+export function __resetLocalStoreForTests(): void {
+  memoryDatasets = null;
+  seededDatasets = null;
+  hydrated = false;
+  hydrationPromise = null;
+  lastSavedAt = 0;
+}

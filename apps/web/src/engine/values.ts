@@ -20,40 +20,94 @@ const MONTH_NAMES: Record<string, number> = {
  * Anything else (including blanks, scientific notation typed as text, and
  * free text) is "not a number" -> null. Never returns NaN.
  */
-export function parseSharedNumber(raw: any): number | null {
-  if (raw === null || raw === undefined || raw === '') return null;
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
-  if (typeof raw === 'boolean') return null;
-  let s = String(raw).trim();
-  if (s === '') return null;
-  if (/[eE]/.test(s)) return null; // scientific notation stays text (SPEC.md import rule)
+// Currency markers recognised around a number, before or after it:
+// symbols ($ € £ ¥ ₹) and codes/abbreviations common in Indian and
+// international exports (Rs, Rs., INR, USD, EUR, GBP, AED, SGD).
+const CURRENCY_PREFIX = /^(?:[$€£¥₹]|rs\.?|inr|usd|eur|gbp|aed|sgd)\s*/i;
+const CURRENCY_SUFFIX = /\s*(?:[$€£¥₹]|rs\.?|inr|usd|eur|gbp|aed|sgd|\/-)$/i;
 
+/**
+ * Parse the numeric core of a value (sign, currency and % already handled
+ * by the caller) in any of the grouping conventions found in real exports:
+ *   1234.5 / 1,234.5        international
+ *   1,23,456.78 / 2,00,000  Indian lakh/crore grouping
+ *   1.234,56 / 99,5         European decimal comma
+ *   1.234.567               European thousands (2+ dot groups only)
+ * Returns null for anything else.
+ */
+function parseNumberCore(core: string): number | null {
+  let normalised: string | null = null;
+  if (/^\d+(\.\d+)?$|^\.\d+$/.test(core)) normalised = core;
+  else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(core)) normalised = core.replace(/,/g, '');
+  else if (/^\d{1,2}(,\d{2})+,\d{3}(\.\d+)?$/.test(core)) normalised = core.replace(/,/g, ''); // Indian
+  else if (/^\d{1,3}(\.\d{3})+,\d+$/.test(core)) normalised = core.replace(/\./g, '').replace(',', '.'); // 1.234,56
+  else if (/^\d+,\d{1,2}$/.test(core)) normalised = core.replace(',', '.'); // 99,5 / 1234,56
+  else if (/^\d{1,3}(\.\d{3}){2,}$/.test(core)) normalised = core.replace(/\./g, ''); // 1.234.567
+  if (normalised === null) return null;
+  const n = Number(normalised);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Strip sign, currency and percent around a number; null if no number core. */
+function splitNumberParts(raw: string): { core: string; negative: boolean; percent: boolean } | null {
+  let s = raw.trim();
+  if (s === '') return null;
   let negative = false;
   if (/^\(.*\)$/.test(s)) {
     negative = true;
     s = s.slice(1, -1).trim();
   }
-  if (/^[-+]/.test(s)) {
-    if (s[0] === '-') negative = !negative; // (−..) and leading - cancel out; keep simple: treat leading - as negative
-    s = s.slice(1).trim();
+  // sign and currency may come in either order: -₹500, ₹-500, Rs. -1,234
+  for (let pass = 0; pass < 2; pass++) {
+    if (/^[-+]/.test(s)) {
+      if (s[0] === '-') negative = !negative;
+      s = s.slice(1).trim();
+    }
+    s = s.replace(CURRENCY_PREFIX, '').trim();
   }
-  // strip currency symbols (prefix or suffix) and surrounding whitespace
-  s = s.replace(/^[$€£¥₹]\s*/, '').replace(/\s*[$€£¥₹]$/, '').trim();
-
-  let isPercent = false;
+  s = s.replace(CURRENCY_SUFFIX, '').trim();
+  let percent = false;
   if (/%$/.test(s)) {
-    isPercent = true;
+    percent = true;
+    s = s.slice(0, -1).trim();
+  }
+  // SAP / mainframe style trailing minus: "1,234.00-"
+  if (/\d-$/.test(s)) {
+    negative = !negative;
     s = s.slice(0, -1).trim();
   }
   if (s === '') return null;
-  // thousands separators
-  if (!/^\d{1,3}(,\d{3})*(\.\d+)?$|^\d+(\.\d+)?$|^\.\d+$/.test(s)) return null;
-  const cleaned = s.replace(/,/g, '');
-  const num = Number(cleaned);
-  if (Number.isNaN(num)) return null;
-  let result = num;
-  if (isPercent) result = result / 100;
-  if (negative) result = -result;
+  return { core: s, negative, percent };
+}
+
+/**
+ * Parse a value as a number. Accepts currency symbols/codes, accounting
+ * negatives (1,234.00), trailing minus (1234-), percentages (15% -> 0.15)
+ * and international, Indian (1,23,456.78) and European (1.234,56)
+ * grouping. Scientific notation ("1.5E+03") only with allowScientific --
+ * an explicit conversion asks for it, but a value like "12E4" in a free
+ * text column is more often a code than a number.
+ * Anything else (blanks, free text) -> null. Never returns NaN.
+ */
+export function parseSharedNumber(raw: any, opts: { allowScientific?: boolean } = {}): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'boolean') return null;
+  const str = String(raw).trim();
+  if (str === '') return null;
+  const parts = splitNumberParts(str);
+  if (!parts) return null;
+  let n: number | null;
+  if (/^(?:\d+\.?\d*|\.\d+)[eE][-+]?\d+$/.test(parts.core)) {
+    if (!opts.allowScientific) return null; // scientific stays text unless asked (SPEC.md import rule)
+    n = Number(parts.core);
+    if (!Number.isFinite(n)) return null;
+  } else {
+    n = parseNumberCore(parts.core);
+  }
+  if (n === null) return null;
+  let result = parts.percent ? n / 100 : n;
+  if (parts.negative) result = -result;
   return cleanFloat(result);
 }
 
@@ -61,9 +115,12 @@ export function parseSharedNumber(raw: any): number | null {
 export function cleanFloat(n: number): number {
   if (!Number.isFinite(n)) return n;
   if (Number.isInteger(n)) return n;
-  // round to 12 significant digits to kill float noise, nothing more
+  // Round to 15 significant digits -- Excel's precision -- which removes
+  // binary-float noise (0.1+0.2) without the visible loss 12 digits caused
+  // after subtracting near-equal numbers (MOD(762/0.57,2) drifted in the
+  // 9th digit).
   const abs = Math.abs(n);
-  const digits = abs === 0 ? 0 : Math.max(0, 12 - Math.ceil(Math.log10(abs)));
+  const digits = abs === 0 ? 0 : Math.max(0, 15 - Math.ceil(Math.log10(abs)));
   const factor = Math.pow(10, Math.min(15, digits));
   return Math.round(n * factor) / factor;
 }
@@ -77,20 +134,48 @@ export function cleanFloat(n: number): number {
 export function looksNumericForImport(raw: string): boolean {
   const s = raw.trim();
   if (s === '') return false;
-  if (/[eE]/.test(s)) return false;
-  let core = s;
-  if (/^\(.*\)$/.test(core)) core = core.slice(1, -1).trim();
-  if (/^[-+]/.test(core)) core = core.slice(1).trim();
-  core = core.replace(/^[$€£¥₹]\s*/, '').replace(/\s*[$€£¥₹]$/, '').trim();
-  if (/%$/.test(core)) core = core.slice(0, -1).trim();
-  if (!/^\d{1,3}(,\d{3})*(\.\d+)?$|^\d+(\.\d+)?$|^\.\d+$/.test(core)) return false;
+  const parts = splitNumberParts(s);
+  if (!parts) return false;
+  const core = parts.core;
+  if (/[eE]/.test(core)) return false; // scientific notation stays text on import
+  if (parseNumberCore(core) === null) return false;
   const digitsOnly = core.replace(/[,.]/g, '');
-  if (digitsOnly.length > 1 && digitsOnly[0] === '0' && !/^0\.\d+$/.test(core) && !core.includes(',')) {
+  if (digitsOnly.length > 1 && digitsOnly[0] === '0' && !/^0[.,]\d+$/.test(core) && !core.includes(',')) {
     return false; // leading-zero code, e.g. "00501"
   }
   const significant = digitsOnly.replace(/^0+/, '') || '0';
   if (significant.length > 15) return false; // precision-losing long id/card number
   return true;
+}
+
+/**
+ * Compensated (Neumaier) summation. Adding many values one by one lets
+ * rounding error build up -- 0.1 added a million times gave
+ * 100,000.000001 -- this keeps the running error and adds it back.
+ */
+export function preciseSum(nums: number[]): number {
+  let sum = 0;
+  let comp = 0;
+  for (const x of nums) {
+    const t = sum + x;
+    comp += Math.abs(sum) >= Math.abs(x) ? sum - t + x : x - t + sum;
+    sum = t;
+  }
+  return sum + comp;
+}
+
+/** Incremental form of preciseSum for running totals. */
+export class RunningSum {
+  private sum = 0;
+  private comp = 0;
+  add(x: number): void {
+    const t = this.sum + x;
+    this.comp += Math.abs(this.sum) >= Math.abs(x) ? this.sum - t + x : x - t + this.sum;
+    this.sum = t;
+  }
+  get value(): number {
+    return this.sum + this.comp;
+  }
 }
 
 export function isBlank(v: any): boolean {
@@ -156,7 +241,9 @@ export function properCase(s: string): string {
   let out = '';
   let prevIsLetter = false;
   for (const ch of s) {
-    const isLetter = /[A-Za-z]/.test(ch);
+    // Any Unicode letter (é, Ñ, ü ...), like Excel -- A-Z only turned
+    // "élise" into "éLise" and "MÜLLER" into "MüLler".
+    const isLetter = /\p{L}/u.test(ch);
     if (isLetter) {
       out += prevIsLetter ? ch.toLowerCase() : ch.toUpperCase();
     } else {
@@ -206,7 +293,7 @@ function to24h(h: number, ampm?: string): number {
   return pm ? h + 12 : h;
 }
 
-export function parseSharedDate(raw: any, opts: { asDateStep?: boolean } = {}): Date | null {
+export function parseSharedDate(raw: any, opts: { asDateStep?: boolean; monthFirst?: boolean } = {}): Date | null {
   if (raw === null || raw === undefined || raw === '') return null;
   if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
 
@@ -215,7 +302,12 @@ export function parseSharedDate(raw: any, opts: { asDateStep?: boolean } = {}): 
     return null;
   }
 
-  const s = String(raw).trim();
+  // Drop a leading weekday ("Tue, 05 Mar 2024") and ordinal suffixes
+  // ("5th March 2024") -- they carry no extra information.
+  const s = String(raw)
+    .trim()
+    .replace(/^(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*\.?,?\s+(?=\d|[a-z])/i, '')
+    .replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, '$1');
   if (s === '') return null;
 
   // Excel serial typed as text, only under a date step
@@ -231,7 +323,7 @@ export function parseSharedDate(raw: any, opts: { asDateStep?: boolean } = {}): 
   // A string that names an impossible date is simply not a date.
 
   // ISO yyyy-mm-dd (optional time, optional seconds)
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(am|pm)?)?/i);
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(am|pm)?)?(?![\d])/i);
   if (m) {
     const [, y, mo, d, hh, mi, se, ap] = m;
     return validDate(+y, +mo, +d, hh ? to24h(+hh, ap) : 0, mi ? +mi : 0, se ? +se : 0);
@@ -262,17 +354,22 @@ export function parseSharedDate(raw: any, opts: { asDateStep?: boolean } = {}): 
 
   // dd/mm/yyyy or dd-mm-yyyy (day-first by default; swap to mm/dd if the
   // "month" slot would otherwise be invalid)
-  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  // Two-digit years follow Excel: 00-29 -> 2000s, 30-99 -> 1900s.
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})$/);
   if (m) {
     const [, aStr, bStr, yStr] = m;
     const a = +aStr;
     const b = +bStr;
-    const y = +yStr;
+    const y = yStr.length === 2 ? (+yStr < 30 ? 2000 + +yStr : 1900 + +yStr) : +yStr;
     let day: number, month: number;
     if (a > 12) {
       day = a;
       month = b;
     } else if (b > 12) {
+      month = a;
+      day = b;
+    } else if (opts.monthFirst) {
+      // the column as a whole is month-first (US), e.g. it also holds 03/13/2024
       month = a;
       day = b;
     } else {

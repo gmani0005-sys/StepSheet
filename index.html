@@ -119,6 +119,40 @@ section.band{padding:96px 0}
 .demo-caption{font-size:13px;line-height:1.6;color:var(--muted);text-align:center;max-width:580px;margin:0 auto}
 .sr-explain{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
 
+/* STEP BUILDER (no-code UI, not a formula bar) */
+.step-builder{border-radius:20px;padding:22px 24px;display:flex;flex-direction:column;gap:18px}
+.step-builder-head{display:flex;align-items:flex-start;gap:14px}
+.step-badge{flex-shrink:0;width:26px;height:26px;border-radius:9999px;background:var(--brand-light);color:#06241a;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.step-builder-head h4{font-size:16px;font-weight:600}
+.step-builder-head p{font-size:13px;color:var(--muted);margin-top:4px}
+.step-fields{display:flex;flex-wrap:wrap;gap:14px}
+.step-field{flex:1 1 150px;display:flex;flex-direction:column;gap:6px}
+.step-field label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+.select-box{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);font-size:13.5px;font-weight:500;transition:box-shadow .25s ease,border-color .25s ease,background .25s ease}
+.select-box.selecting{box-shadow:0 0 0 3px rgba(61,220,132,.35);border-color:rgba(61,220,132,.65)}
+.select-box.selected{background:rgba(33,163,102,.24);border-color:rgba(61,220,132,.45)}
+.icon-stack{position:relative;width:14px;height:14px;flex-shrink:0}
+.icon-stack svg{position:absolute;inset:0;transition:opacity .2s ease,transform .2s ease}
+.icon-chev{opacity:1}
+.icon-chk{opacity:0;transform:scale(.6);color:#3ddc84}
+.select-box.selected .icon-chev{opacity:0}
+.select-box.selected .icon-chk{opacity:1;transform:scale(1)}
+.step-apply{display:inline-flex;align-items:center;gap:10px;padding:13px 24px;border-radius:9999px;background:var(--brand-light);color:#06241a;font-weight:600;font-size:14px;align-self:flex-start;transition:background .25s ease,transform .15s ease}
+.step-apply.applying{background:#bdf0d6}
+.step-apply.done{background:#3ddc84}
+.btn-icon-stack{position:relative;width:16px;height:16px;flex-shrink:0}
+.btn-icon-stack svg{position:absolute;inset:0;transition:opacity .15s ease}
+.icon-arrow{opacity:1}
+.icon-spin{opacity:0;animation:spin .8s linear infinite}
+.icon-done{opacity:0}
+.step-apply.applying .icon-arrow{opacity:0}
+.step-apply.applying .icon-spin{opacity:1}
+.step-apply.done .icon-spin{opacity:0}
+.step-apply.done .icon-done{opacity:1}
+@keyframes spin{to{transform:rotate(360deg)}}
+.step-under-hood{font-size:12px;color:var(--muted-2);line-height:1.6}
+.step-under-hood code{font-family:var(--font-mono);background:rgba(255,255,255,.08);padding:2px 6px;border-radius:5px;color:rgba(255,255,255,.75)}
+
 /* FEATURES */
 .feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
 .feature-card{padding:28px;border-radius:22px;display:flex;flex-direction:column;gap:14px}
@@ -167,7 +201,7 @@ Sign In
 <div class="hero-inner">
 <span class="pill liquid-glass">Excel · CSV · No-code</span>
 <h1>Excel formulas,<br><em>without the chaos</em></h1>
-<p class="lede">StepSheet connects directly to your Excel and CSV data sources, applies formula-driven transformations — XLOOKUP, VLOOKUP and 60 more — as reusable pipeline steps, and turns the result into <strong style="color:#fff;font-weight:500">AI-generated dashboards</strong>. One auditable workflow carries your spreadsheet from raw rows to decision-ready insight.</p>
+<p class="lede">StepSheet connects directly to your Excel and CSV data sources and lets you apply formula-grade transformations — XLOOKUP, VLOOKUP and 60 more — by picking options from a simple form, not by writing syntax. The result feeds straight into <strong style="color:#fff;font-weight:500">AI-generated dashboards</strong>. One auditable workflow, no formula knowledge required.</p>
 <div class="btn-row">
 <a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="liquid-glass-strong hov" style="display:flex;align-items:center;gap:12px;padding:8px 8px 8px 24px;border-radius:9999px;font-size:15px;font-weight:500">
 Try StepSheet Free
@@ -191,12 +225,12 @@ Scroll
 <section class="band shell" id="demo">
 <div class="section-head">
 <span class="eyebrow">See it work</span>
-<h2>Type the formula once.<br>Watch every row fill in.</h2>
-<p>A live preview of StepSheet's XLOOKUP step: the Orders sheet matches each SKU against a separate Price List sheet and fills in Unit Price and Total automatically — no copy-pasting, no dragging formulas by hand.</p>
+<h2>Pick a few options.<br>Skip the formula entirely.</h2>
+<p>A live preview of adding a Lookup step in StepSheet: choose what to match, where to look, and what to bring back. StepSheet writes and runs the underlying Excel logic for you, across every row — nobody on the team has to know formula syntax.</p>
 </div>
 
 <figure style="margin:0">
-<figcaption class="sr-explain">Animated demonstration: an Orders spreadsheet and a Price List spreadsheet. As the formula =XLOOKUP(A2,PriceList!A:A,PriceList!B:B) is entered, StepSheet matches each order's SKU against the price list, fills in the Unit Price column, and calculates the Total column, row by row, looping continuously to illustrate the automation.</figcaption>
+<figcaption class="sr-explain">Animated demonstration of StepSheet's no-code step builder: a person selects "SKU" to look up, "PriceList" as the sheet to search, and "Price" as the column to return, then clicks Add Step. No formula is typed by the user. StepSheet applies the equivalent of XLOOKUP(SKU, PriceList, Price) automatically, filling in the Unit Price and Total columns of the Orders sheet row by row, looping continuously to illustrate the automation.</figcaption>
 <div class="demo-card liquid-glass-strong">
 <div class="demo-topbar">
 <div class="demo-title">
@@ -206,15 +240,52 @@ Orders.xlsx — StepSheet workspace
 <span class="live-pill"><span class="live-dot" aria-hidden="true"></span>Live preview</span>
 </div>
 
+<div class="step-builder liquid-glass" aria-hidden="true">
+<div class="step-builder-head">
+<span class="step-badge">2</span>
+<div>
+<h4>Add a step: Lookup a value</h4>
+<p>No formula to write — just tell StepSheet what to match.</p>
+</div>
+</div>
+<div class="step-fields">
+<div class="step-field">
+<label>Look up this value</label>
+<div class="select-box" id="field-lookup"><span>SKU</span><span class="icon-stack">
+<svg class="icon-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+<svg class="icon-chk" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+</span></div>
+</div>
+<div class="step-field">
+<label>Search in sheet</label>
+<div class="select-box" id="field-sheet"><span>PriceList</span><span class="icon-stack">
+<svg class="icon-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+<svg class="icon-chk" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+</span></div>
+</div>
+<div class="step-field">
+<label>Return this column</label>
+<div class="select-box" id="field-return"><span>Price</span><span class="icon-stack">
+<svg class="icon-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+<svg class="icon-chk" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+</span></div>
+</div>
+</div>
+<button type="button" class="step-apply" id="step-apply-btn">
+<span id="step-apply-label">Add Step</span>
+<span class="btn-icon-stack">
+<svg class="icon-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+<svg class="icon-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9" stroke-dasharray="40" stroke-dashoffset="10"></path></svg>
+<svg class="icon-done" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+</span>
+</button>
+<p class="step-under-hood">Behind the scenes: <code>XLOOKUP(SKU, PriceList, Price)</code> — generated and run automatically, so nobody has to write it.</p>
+</div>
+
 <div class="sheet" aria-hidden="true">
 <div class="sheet-bar">
 <span class="name">Orders</span>
 <span style="opacity:.75;font-size:12px">PriceList</span>
-</div>
-<div class="formula-bar">
-<div class="name-box">D2</div>
-<div class="fx">fx</div>
-<div class="formula-text-wrap"><span id="formula-text"></span><span class="caret"></span></div>
 </div>
 
 <div style="padding:14px" class="demo-grids">
@@ -254,7 +325,7 @@ Orders.xlsx — StepSheet workspace
 </div>
 </div>
 
-<p class="demo-caption">The two sheets never touch — StepSheet's XLOOKUP step reads across them, row by row, so the Price List can be reordered, filtered or updated without breaking a single Order row.</p>
+<p class="demo-caption">You never see a formula bar. StepSheet translates the three choices above into the right Excel logic and applies it to every row instantly — so analysts who have never written XLOOKUP can still use it correctly, every time.</p>
 </div>
 </figure>
 </section>
@@ -268,8 +339,8 @@ Orders.xlsx — StepSheet workspace
 <div class="feature-grid">
 <div class="feature-card liquid-glass">
 <span class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"></path></svg></span>
-<h3>Formula Steps</h3>
-<p>XLOOKUP, VLOOKUP and 60+ more, applied as named pipeline steps you can reorder, preview and re-run — not a frozen snapshot of what you typed once.</p>
+<h3>Formula Steps, No Formulas</h3>
+<p>XLOOKUP, VLOOKUP and 60+ more — picked from simple menus, not typed. If you've never written a formula in your life, you can still apply one correctly.</p>
 </div>
 <div class="feature-card liquid-glass">
 <span class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"></path></svg></span>
@@ -316,8 +387,6 @@ StepSheet
 <script>
 (function(){
   var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var formula = "=XLOOKUP(A2,PriceList!A:A,PriceList!B:B)";
-  var formulaEl = document.getElementById('formula-text');
   var rows = [
     { sku:'SKU-204', qty:12, price:14.50, d:'d2', e:'e2' },
     { sku:'SKU-118', qty:8,  price:21.75, d:'d3', e:'e3' },
@@ -327,36 +396,50 @@ StepSheet
   ];
   var ordersBody = document.getElementById('orders-body');
   var priceBody = document.getElementById('pricelist-body');
+  var fields = ['field-lookup','field-sheet','field-return'].map(function(id){ return document.getElementById(id); });
+  var applyBtn = document.getElementById('step-apply-btn');
+  var applyLabel = document.getElementById('step-apply-label');
 
   function fmtMoney(n){ return '$' + n.toFixed(2); }
   function priceRowFor(sku){ return priceBody.querySelector('tr[data-sku="'+sku+'"]'); }
   function orderRowFor(sku){ return ordersBody.querySelector('tr[data-sku="'+sku+'"]'); }
 
   function fillStatic(){
-    formulaEl.textContent = formula;
+    fields.forEach(function(f){ f.classList.add('selected'); });
+    applyBtn.classList.add('done');
+    applyLabel.textContent = 'Step added';
     rows.forEach(function(r){
       document.getElementById(r.d).innerHTML = fmtMoney(r.price);
       document.getElementById(r.e).innerHTML = fmtMoney(r.price * r.qty);
     });
   }
 
-  function clearAll(){
+  function resetAll(){
+    fields.forEach(function(f){ f.classList.remove('selected','selecting'); });
+    applyBtn.classList.remove('applying','done');
+    applyLabel.textContent = 'Add Step';
     rows.forEach(function(r){
       document.getElementById(r.d).innerHTML = '<span class="cell-empty">—</span>';
       document.getElementById(r.e).innerHTML = '<span class="cell-empty">—</span>';
       orderRowFor(r.sku).classList.remove('active-row');
       priceRowFor(r.sku).classList.remove('price-active');
     });
-    formulaEl.textContent = '';
   }
 
-  function typeFormula(done){
+  function selectFields(done){
     var i = 0;
-    var iv = setInterval(function(){
-      i++;
-      formulaEl.textContent = formula.slice(0, i);
-      if(i >= formula.length){ clearInterval(iv); setTimeout(done, 350); }
-    }, 42);
+    function next(){
+      if(i >= fields.length){ setTimeout(done, 300); return; }
+      var f = fields[i];
+      f.classList.add('selecting');
+      setTimeout(function(){
+        f.classList.remove('selecting');
+        f.classList.add('selected');
+        i++;
+        setTimeout(next, 260);
+      }, 320);
+    }
+    next();
   }
 
   function runRow(index, done){
@@ -369,7 +452,6 @@ StepSheet
     dCell.innerHTML = '<span class="fill-dot" aria-hidden="true"></span>';
     setTimeout(function(){
       dCell.innerHTML = fmtMoney(r.price);
-      dCell.firstElementChild && dCell.firstElementChild.classList.add('cell-fill');
       dCell.classList.add('cell-fill');
       setTimeout(function(){
         var eCell = document.getElementById(r.e);
@@ -380,19 +462,24 @@ StepSheet
           setTimeout(function(){ runRow(index + 1, done); }, 220);
         }, 180);
       }, 160);
-    }, 320);
+    }, 280);
   }
 
   function cycle(){
-    clearAll();
-    typeFormula(function(){
+    resetAll();
+    selectFields(function(){
+      applyBtn.classList.add('applying');
+      applyLabel.textContent = 'Applying to 5 rows…';
       runRow(0, function(){
+        applyBtn.classList.remove('applying');
+        applyBtn.classList.add('done');
+        applyLabel.textContent = 'Step added';
         setTimeout(function(){
           rows.forEach(function(r){
             document.getElementById(r.d).classList.remove('cell-fill');
             document.getElementById(r.e).classList.remove('cell-fill');
           });
-          setTimeout(cycle, 2600);
+          setTimeout(cycle, 2800);
         }, 2200);
       });
     });

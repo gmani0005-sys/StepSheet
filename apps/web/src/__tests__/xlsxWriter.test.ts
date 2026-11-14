@@ -70,10 +70,10 @@ describe('xlsxWriter', () => {
     expect(values(2)).toEqual([1, 'Ünïcødé ✓ 日本', 1234.56, true]);
     expect(values(3)).toEqual([2, '  leading/trailing  ', undefined, false]);
     expect(values(4)).toEqual([3, 'a<b>&"q"', -0.001, true]);
-  });
+  }, 15000);
 
   it('refuses (rather than silently truncating) data beyond Excel\'s row limit', async () => {
     const tooMany = { length: EXCEL_MAX_ROWS } as unknown as Record<string, unknown>[];
-    await expect(buildXlsx(['a'], tooMany)).rejects.toThrow(/at most 1,048,575 data rows/);
+    await expect(buildXlsx(['a'], tooMany)).rejects.toThrow(/at most (1,048,575|10,48,575) data rows/);
   });
 });

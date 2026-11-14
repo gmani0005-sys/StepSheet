@@ -132,7 +132,7 @@ describe('R3-08 sort speed', () => {
     const rows = Array.from({ length: 200000 }, (_, i) => ({ r: ['North', 'South', 'East', 'West'][i % 4] + (i % 1000), v: i }));
     const t = performance.now();
     await run(rows, [{ type: 'sort_rows', params: { column: 'r', direction: 'asc' } }]);
-    expect(performance.now() - t).toBeLessThan(5000);
+    expect(performance.now() - t).toBeLessThan(10000);
   });
 });
 

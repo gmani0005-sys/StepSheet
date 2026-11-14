@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StepSheet — Excel formulas, without the chaos</title>
+<meta name="description" content="StepSheet turns XLOOKUP, VLOOKUP and 60+ other Excel formulas into no-code pipeline steps you can chain, preview and export — right in your browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Serif+4:ital,opsz,wght@1,8..60,400;1,8..60,500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-deep:#06241a;
+  --bg-deep-2:#0b3b24;
+  --brand:#217346;
+  --brand-light:#21a366;
+  --fg:#ffffff;
+  --muted:rgba(255,255,255,.68);
+  --muted-2:rgba(255,255,255,.52);
+  --font-display:'Poppins',sans-serif;
+  --font-serif:'Source Serif 4',Georgia,serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-deep);font-family:var(--font-display);color:var(--fg);-webkit-font-smoothing:antialiased}
+a{color:#fff;text-decoration:none}
+a:hover{color:rgba(255,255,255,.82)}
+h1,h2,h3{font-weight:500;margin:0}
+em{font-family:var(--font-serif);font-style:italic;font-weight:400;color:rgba(255,255,255,.86)}
+button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
+p{margin:0}
+
+.bg-grid{
+  position:fixed;inset:0;z-index:0;
+  background:
+    radial-gradient(1200px 800px at 18% 8%, rgba(33,163,102,.35), transparent 60%),
+    radial-gradient(1000px 900px at 92% 88%, rgba(33,115,70,.4), transparent 55%),
+    linear-gradient(180deg,var(--bg-deep-2) 0%,var(--bg-deep) 100%);
+}
+.bg-grid::before{
+  content:"";position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(circle at 50% 40%, rgba(0,0,0,.9), transparent 75%);
+}
+
+.liquid-glass{
+  background:rgba(33,163,102,.08);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  border:none;box-shadow:inset 0 1px 1px rgba(255,255,255,.12);
+  position:relative;overflow:hidden;
+}
+.liquid-glass::before{
+  content:"";position:absolute;inset:0;border-radius:inherit;padding:1.4px;
+  background:linear-gradient(180deg,rgba(255,255,255,.4) 0%,rgba(255,255,255,.12) 20%,transparent 40%,transparent 60%,rgba(255,255,255,.12) 80%,rgba(255,255,255,.4) 100%);
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;
+}
+.liquid-glass-strong{
+  background:rgba(33,163,102,.1);
+  -webkit-backdrop-filter:blur(40px);backdrop-filter:blur(40px);
+  border:none;box-shadow:4px 4px 12px rgba(0,0,0,.18),inset 0 1px 1px rgba(255,255,255,.16);
+  position:relative;overflow:hidden;
+}
+.liquid-glass-strong::before{
+  content:"";position:absolute;inset:0;border-radius:inherit;padding:1.4px;
+  background:linear-gradient(180deg,rgba(255,255,255,.45) 0%,rgba(255,255,255,.16) 20%,transparent 40%,transparent 60%,rgba(255,255,255,.16) 80%,rgba(255,255,255,.45) 100%);
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;
+}
+.hov{transition:transform .2s ease}
+.hov:hover{transform:scale(1.04)}
+.hov:active{transform:scale(.96)}
+.social{color:#fff;transition:color .2s ease,transform .2s ease;display:flex}
+.social:hover{color:rgba(255,255,255,.8);transform:scale(1.06)}
+
+.wrap{position:relative;z-index:10;min-height:100vh;display:flex;flex-direction:row}
+.left-panel{width:54%;position:relative;display:flex;flex-direction:column;min-height:100vh;box-sizing:border-box}
+.right-panel{width:46%;display:flex;flex-direction:column;padding:48px 48px 48px 24px;box-sizing:border-box;gap:24px;min-height:100vh}
+.glass-overlay{position:absolute;inset:24px;border-radius:28px}
+.hero-h1{font-size:68px;line-height:1.04;letter-spacing:-0.03em}
+
+@media (max-width:1023px){
+  .left-panel{width:100%}
+  .right-panel{display:none}
+  .hero-h1{font-size:52px}
+  .glass-overlay{inset:16px}
+}
+@media (max-width:520px){.hero-h1{font-size:38px}}
+
+.grid-logo{display:grid;grid-template-columns:repeat(3,7px);grid-template-rows:repeat(3,7px);gap:2px}
+.grid-logo span{background:rgba(255,255,255,.3);border-radius:1px}
+.grid-logo span.on{background:var(--brand-light)}
+</style>
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+
+<div class="wrap">
+
+<!-- LEFT PANEL -->
+<section class="left-panel">
+<div class="liquid-glass-strong glass-overlay"></div>
+<div style="position:relative;display:flex;flex-direction:column;flex:1;padding:48px 56px;box-sizing:border-box;gap:32px">
+
+<nav style="display:flex;align-items:center;justify-content:space-between">
+<a href="#" class="hov" style="display:flex;align-items:center;gap:10px" aria-label="StepSheet home">
+<span class="grid-logo" aria-hidden="true">
+<span></span><span></span><span class="on"></span>
+<span></span><span class="on"></span><span></span>
+<span class="on"></span><span></span><span></span>
+</span>
+<span style="font-size:22px;font-weight:600;letter-spacing:-0.03em;color:#fff">StepSheet</span>
+</a>
+<a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="liquid-glass hov" style="display:flex;align-items:center;gap:8px;padding:10px 18px;border-radius:9999px;font-size:14px;color:#fff;min-height:44px;box-sizing:border-box">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.73.5.75 5.48.75 11.75c0 4.96 3.22 9.17 7.68 10.66.56.1.77-.24.77-.53 0-.27-.01-1.17-.02-2.12-3.12.68-3.78-1.33-3.78-1.33-.51-1.3-1.24-1.64-1.24-1.64-1.02-.7.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 1.72 2.63 1.22 3.27.93.1-.73.39-1.22.71-1.5-2.49-.28-5.11-1.25-5.11-5.56 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.42.11-2.96 0 0 .95-.3 3.1 1.16a10.7 10.7 0 0 1 5.65 0c2.15-1.46 3.1-1.16 3.1-1.16.61 1.54.23 2.68.11 2.96.72.79 1.16 1.79 1.16 3.02 0 4.32-2.63 5.28-5.13 5.56.4.35.76 1.04.76 2.1 0 1.52-.01 2.74-.01 3.11 0 .29.21.64.78.53 4.45-1.49 7.67-5.7 7.67-10.66C23.25 5.48 18.27.5 12 .5z"></path></svg>
+View on GitHub
+</a>
+</nav>
+
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:32px;padding:24px 0">
+<span class="grid-logo" aria-hidden="true" style="transform:scale(2.4);grid-template-columns:repeat(3,9px);grid-template-rows:repeat(3,9px)">
+<span></span><span class="on"></span><span></span>
+<span class="on"></span><span></span><span class="on"></span>
+<span></span><span class="on"></span><span></span>
+</span>
+<h1 class="hero-h1" style="color:#fff">Excel formulas,<br><em>without the chaos</em></h1>
+<a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="liquid-glass-strong hov" style="display:flex;align-items:center;gap:12px;padding:8px 8px 8px 24px;border-radius:9999px;font-size:15px;font-weight:500;color:#fff">
+Try StepSheet Free
+<span style="width:28px;height:28px;border-radius:9999px;background:rgba(33,163,102,.35);display:flex;align-items:center;justify-content:center">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+</span>
+</a>
+<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:10px">
+<span class="liquid-glass hov" style="padding:8px 16px;border-radius:9999px;font-size:12px;color:rgba(255,255,255,.85)">65+ formula functions</span>
+<span class="liquid-glass hov" style="padding:8px 16px;border-radius:9999px;font-size:12px;color:rgba(255,255,255,.85)">No-code pipelines</span>
+<span class="liquid-glass hov" style="padding:8px 16px;border-radius:9999px;font-size:12px;color:rgba(255,255,255,.85)">AI chat with your data</span>
+</div>
+</div>
+
+<figure style="margin:0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;padding-bottom:8px">
+<span style="font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.5)">Built for analysts</span>
+<blockquote style="margin:0;font-size:22px;line-height:1.35;color:#fff;letter-spacing:-0.02em">“Excel power, <em>without the Excel chaos.</em>”</blockquote>
+<figcaption style="display:flex;align-items:center;gap:14px;font-size:12px;letter-spacing:.2em;color:rgba(255,255,255,.6)">
+<span style="width:40px;height:1px;background:rgba(255,255,255,.4)"></span>
+STEPSHEET
+<span style="width:40px;height:1px;background:rgba(255,255,255,.4)"></span>
+</figcaption>
+</figure>
+
+</div>
+</section>
+
+<!-- RIGHT PANEL -->
+<aside class="right-panel">
+
+<div style="display:flex;align-items:center;justify-content:space-between">
+<div class="liquid-glass" style="display:flex;align-items:center;gap:18px;padding:10px 12px;border-radius:9999px">
+<a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="social" aria-label="GitHub"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.73.5.75 5.48.75 11.75c0 4.96 3.22 9.17 7.68 10.66.56.1.77-.24.77-.53 0-.27-.01-1.17-.02-2.12-3.12.68-3.78-1.33-3.78-1.33-.51-1.3-1.24-1.64-1.24-1.64-1.02-.7.08-.68.08-.68 1.12.08 1.71 1.15 1.71 1.15 1 1.72 2.63 1.22 3.27.93.1-.73.39-1.22.71-1.5-2.49-.28-5.11-1.25-5.11-5.56 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.42.11-2.96 0 0 .95-.3 3.1 1.16a10.7 10.7 0 0 1 5.65 0c2.15-1.46 3.1-1.16 3.1-1.16.61 1.54.23 2.68.11 2.96.72.79 1.16 1.79 1.16 3.02 0 4.32-2.63 5.28-5.13 5.56.4.35.76 1.04.76 2.1 0 1.52-.01 2.74-.01 3.11 0 .29.21.64.78.53 4.45-1.49 7.67-5.7 7.67-10.66C23.25 5.48 18.27.5 12 .5z"></path></svg></a>
+<a href="#" class="social" aria-label="LinkedIn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg></a>
+<a href="#" class="social" aria-label="X (Twitter)"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.9 2H22l-7.2 8.2L22.7 22H16l-5.2-6.8L4.8 22H1.7l7.7-8.8L1.3 2H8.1l4.7 6.2L18.9 2z"></path></svg></a>
+</div>
+<div style="display:flex;align-items:center;gap:10px">
+<a href="https://github.com/gmani0005-sys/StepSheet#readme" target="_blank" rel="noopener" class="liquid-glass hov" style="display:flex;align-items:center;padding:12px 22px;border-radius:9999px;font-size:14px;color:#fff;min-height:44px;box-sizing:border-box">Docs</a>
+<a href="https://github.com/gmani0005-sys/StepSheet/stargazers" target="_blank" rel="noopener" class="liquid-glass hov" aria-label="Star on GitHub" style="width:44px;height:44px;border-radius:9999px;display:flex;align-items:center;justify-content:center;color:#fff">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+</a>
+</div>
+</div>
+
+<div class="liquid-glass hov" style="width:240px;padding:20px;border-radius:24px;display:flex;flex-direction:column;gap:8px;align-self:flex-end">
+<h3 style="font-size:16px;font-weight:500;color:#fff;letter-spacing:-0.02em">Enter the <em>workspace</em></h3>
+<p style="font-size:12px;line-height:1.55;color:rgba(255,255,255,.65)">No sign-up needed — upload a file and start chaining formula steps right in your browser.</p>
+</div>
+
+<div class="liquid-glass" style="margin-top:auto;padding:16px;border-radius:40px;display:flex;flex-direction:column;gap:12px">
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+<div class="liquid-glass hov" style="padding:20px;border-radius:24px;display:flex;flex-direction:column;gap:14px">
+<span style="width:32px;height:32px;border-radius:9999px;background:rgba(33,163,102,.3);display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"></path></svg></span>
+<div style="display:flex;flex-direction:column;gap:4px">
+<h3 style="font-size:15px;font-weight:500;color:#fff">Formula Steps</h3>
+<p style="font-size:12px;line-height:1.5;color:rgba(255,255,255,.65)">XLOOKUP, VLOOKUP and 60+ more, chained like a pipeline.</p>
+</div>
+</div>
+<div class="liquid-glass hov" style="padding:20px;border-radius:24px;display:flex;flex-direction:column;gap:14px">
+<span style="width:32px;height:32px;border-radius:9999px;background:rgba(33,163,102,.3);display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"></path></svg></span>
+<div style="display:flex;flex-direction:column;gap:4px">
+<h3 style="font-size:15px;font-weight:500;color:#fff">No-Code Pipelines</h3>
+<p style="font-size:12px;line-height:1.5;color:rgba(255,255,255,.65)">Filter, pivot, join and dedupe, no code required.</p>
+</div>
+</div>
+</div>
+<div class="liquid-glass" style="padding:20px;border-radius:24px;display:flex;align-items:center;gap:16px">
+<span style="width:48px;height:48px;border-radius:9999px;background:rgba(33,163,102,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"></path><path d="m19 9-5 5-4-4-3 3"></path></svg></span>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+<h3 style="font-size:15px;font-weight:500;color:#fff">AI-Generated <em>Dashboards</em></h3>
+<p style="font-size:12px;line-height:1.5;color:rgba(255,255,255,.65)">Ask in plain English, get a dashboard that matches your data, every time.</p>
+</div>
+<a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="liquid-glass hov" aria-label="Learn more about AI dashboards" style="width:44px;height:44px;border-radius:9999px;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></a>
+</div>
+</div>
+
+</aside>
+</div>
+</body>
+</html>

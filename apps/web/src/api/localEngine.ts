@@ -756,6 +756,19 @@ function groupKeyOf(v: any): string {
   return String(v ?? '').trim().toLowerCase();
 }
 
+/** Case/space-insensitive category label, like dashboards and the structured
+ * chat planner already use (dashboardData.ts's makeLabeler, chatPlanner.ts's
+ * valueIndex): rows whose value differs only by case or surrounding
+ * whitespace ("East" / "east " / " EAST") group together instead of
+ * fragmenting into separate rows, under the first-seen spelling. `labelOf`
+ * is a plain object the caller keeps around for one grouping pass. */
+function canonicalGroupKey(raw: any, labelOf: Record<string, string>): string {
+  const label = raw === null || raw === undefined || String(raw).trim() === '' ? '(Blank)' : String(raw).trim();
+  const key = label.toLowerCase();
+  if (!(key in labelOf)) labelOf[key] = label;
+  return key;
+}
+
 function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): boolean {
   if (operator === 'is_null') return rowVal === null || rowVal === undefined || rowVal === '';
   if (operator === 'is_not_null') return rowVal !== null && rowVal !== undefined && rowVal !== '';
@@ -6211,9 +6224,9 @@ export const localEngine = {
 
         const nfA = namedFilter(dimCol);
         const groupSums: Record<string, number> = Object.create(null); // keyed by data values: no inherited keys
+        const groupLabels: Record<string, string> = Object.create(null);
         for (const r of nfA ? nfA.rows : rows) {
-          let k = String(getRowVal(r, dimCol) ?? '(Blank)').trim();
-          if (!k) k = '(Blank)';
+          const k = canonicalGroupKey(getRowVal(r, dimCol), groupLabels);
           const num = parseNumericValue(getRowVal(r, targetMeasure));
           if (num !== null) {
             groupSums[k] = (groupSums[k] || 0) + num;
@@ -6221,7 +6234,7 @@ export const localEngine = {
         }
 
         let groupedRows = Object.entries(groupSums).map(([k, sumVal]) => ({
-          [dimCol]: k,
+          [dimCol]: groupLabels[k],
           [alias]: Math.round(sumVal * 100) / 100,
         }));
         groupedRows.sort((a, b) => isAscending ? (a[alias] as number) - (b[alias] as number) : (b[alias] as number) - (a[alias] as number));
@@ -6315,10 +6328,10 @@ export const localEngine = {
 
         const distinctByGroup: Record<string, Set<string>> = {};
         const countByGroup: Record<string, number> = Object.create(null); // keyed by data values: no inherited keys
+        const entityGroupLabels: Record<string, string> = Object.create(null);
 
         for (const r of rows) {
-          let g = String(getRowVal(r, groupDim) ?? '(Blank)').trim();
-          if (!g) g = '(Blank)';
+          const g = canonicalGroupKey(getRowVal(r, groupDim), entityGroupLabels);
           const val = getRowVal(r, targetEntityCol);
           if (val !== null && val !== undefined && String(val).trim() !== '') {
             if (isDistCount) {
@@ -6331,7 +6344,7 @@ export const localEngine = {
         }
 
         let groupedRows = Object.keys(isDistCount ? distinctByGroup : countByGroup).map((key) => ({
-          [groupDim]: key,
+          [groupDim]: entityGroupLabels[key],
           [alias]: isDistCount ? distinctByGroup[key].size : countByGroup[key],
         }));
         groupedRows.sort((a, b) => isAscending ? (a[alias] as number) - (b[alias] as number) : (b[alias] as number) - (a[alias] as number));
@@ -6384,9 +6397,9 @@ export const localEngine = {
 
       const nfG = namedFilter(groupDim);
       const groupValues: Record<string, number[]> = Object.create(null); // keyed by data values: no inherited keys
+      const measureGroupLabels: Record<string, string> = Object.create(null);
       for (const r of nfG ? nfG.rows : rows) {
-        let k = String(getRowVal(r, groupDim) ?? '(Blank)').trim();
-        if (!k) k = '(Blank)';
+        const k = canonicalGroupKey(getRowVal(r, groupDim), measureGroupLabels);
         const parsedNum = parseNumericValue(getRowVal(r, targetMeasure));
         if (!groupValues[k]) groupValues[k] = [];
         if (parsedNum !== null) {
@@ -6404,7 +6417,7 @@ export const localEngine = {
           else if (aggFunc === 'median') aggVal = aggregate(vals, 'median') as number;
         }
         return {
-          [groupDim]: key,
+          [groupDim]: measureGroupLabels[key],
           [metricAlias]: Math.round(aggVal * 100) / 100,
         };
       });
@@ -6650,9 +6663,9 @@ export const localEngine = {
     const groupKey = resolveDimCol(pLower) || profile.primaryDim;
 
     const groupSums: Record<string, number> = Object.create(null); // keyed by data values: no inherited keys
+    const defaultGroupLabels: Record<string, string> = Object.create(null);
     for (const r of rows) {
-      let k = String(getRowVal(r, groupKey) ?? '(Blank)').trim();
-      if (!k) k = '(Blank)';
+      const k = canonicalGroupKey(getRowVal(r, groupKey), defaultGroupLabels);
       const num = parseNumericValue(getRowVal(r, targetMeasure));
       if (num !== null) {
         groupSums[k] = (groupSums[k] || 0) + num;
@@ -6661,7 +6674,7 @@ export const localEngine = {
 
     const metricAlias = `Total ${targetMeasure}`;
     let groupedRows = Object.entries(groupSums).map(([k, sumVal]) => ({
-      [groupKey]: k,
+      [groupKey]: defaultGroupLabels[k],
       [metricAlias]: Math.round(sumVal * 100) / 100,
     }));
     groupedRows.sort((a, b) => isAscending ? (a[metricAlias] as number) - (b[metricAlias] as number) : (b[metricAlias] as number) - (a[metricAlias] as number));

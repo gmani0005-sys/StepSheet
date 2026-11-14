@@ -19,6 +19,8 @@ import {
   roundHalfAwayFromZero,
   roundUpAwayFromZero,
   roundDownTowardZero,
+  dateToExcelSerial,
+  daysInMonth,
 } from './values';
 
 // ---------------------------------------------------------------------------
@@ -362,6 +364,24 @@ function toNumber(v: FxValue): number | FxError {
   return n === null ? VALUE_ERR() : n;
 }
 
+const MS_DAY = 86400000;
+
+/** A text value that reads as a date (and not as a plain number). */
+function dateOperand(v: FxValue): Date | null {
+  if (typeof v !== 'string') return null;
+  if (parseSharedNumber(v) !== null) return null;
+  return parseSharedDate(v);
+}
+
+/** d shifted by n days, as an ISO date (or date + time when a time remains). */
+function dateResult(d: Date, n: number): string {
+  const out = new Date(d.getTime() + n * MS_DAY);
+  const hasTime = out.getUTCHours() || out.getUTCMinutes() || out.getUTCSeconds();
+  if (!hasTime) return toISODate(out);
+  const pad = (x: number) => String(x).padStart(2, '0');
+  return `${toISODate(out)} ${pad(out.getUTCHours())}:${pad(out.getUTCMinutes())}:${pad(out.getUTCSeconds())}`;
+}
+
 function formatNumberCompact(n: number): string {
   if (!Number.isFinite(n)) return String(n);
   if (Number.isInteger(n)) return String(n);
@@ -480,9 +500,35 @@ function evalBinary(node: Extract<Node, { kind: 'binary' }>, ctx: FormulaContext
     if (isFxError(r)) return r;
     return l + r;
   }
-  const l = toNumber(evalNode(node.left, ctx));
+  const lv = evalNode(node.left, ctx);
+  const rv = evalNode(node.right, ctx);
+  if (op === '+' || op === '-') {
+    // Excel date arithmetic: a date is a day count, so date - date = days
+    // and date +/- n = a date n days away. Dates here are text cells
+    // ("2024-03-05", "05-Mar-2024"), which toNumber() alone rejects as
+    // #VALUE! -- that made the most common date formulas in Excel
+    // ([ship_date]-[order_date], [due]+30) unusable.
+    const ld = dateOperand(lv);
+    const rd = dateOperand(rv);
+    if (ld || rd) {
+      if (ld && rd) {
+        if (op === '+') return VALUE_ERR();
+        return cleanFloat((ld.getTime() - rd.getTime()) / MS_DAY);
+      }
+      if (ld) {
+        const n = toNumber(rv);
+        if (isFxError(n)) return n;
+        return dateResult(ld, op === '+' ? n : -n);
+      }
+      const n = toNumber(lv);
+      if (isFxError(n)) return n;
+      if (op === '+') return dateResult(rd as Date, n);
+      return cleanFloat(n - dateToExcelSerial(rd as Date));
+    }
+  }
+  const l = toNumber(lv);
   if (isFxError(l)) return l;
-  const r = toNumber(evalNode(node.right, ctx));
+  const r = toNumber(rv);
   if (isFxError(r)) return r;
   switch (op) {
     case '+':
@@ -617,61 +663,359 @@ function excelFloorMod(n: number, d: number): number {
   return r;
 }
 
-function formatNumberWithPattern(n: number, fmt: string): string {
-  let isPct = /%$/.test(fmt);
-  let base = isPct ? fmt.slice(0, -1) : fmt;
-  let value = isPct ? n * 100 : n;
-  const decMatch = base.match(/\.(0+)/);
-  const decimals = decMatch ? decMatch[1].length : 0;
-  const grouped = base.includes(',');
-  const fixed = value.toFixed(decimals);
-  const [intPart, fracPart] = fixed.split('.');
-  let intOut = intPart;
-  if (grouped) {
-    const neg = intOut.startsWith('-');
-    const digits = neg ? intOut.slice(1) : intOut;
-    const withCommas = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    intOut = (neg ? '-' : '') + withCommas;
+// Excel number-format codes, as used by TEXT(). Supports the parts people
+// actually type: 0 # ? digit placeholders, thousands commas, decimals, %,
+// literal text ("..." or \x) and plain literal characters ($, Rs, spaces)
+// around the number, and up to four ;-separated sections (positive;
+// negative; zero; text).
+function splitFormatSections(fmt: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQuote = false;
+  for (let i = 0; i < fmt.length; i++) {
+    const ch = fmt[i];
+    if (ch === '"') inQuote = !inQuote;
+    if (ch === '\\' && !inQuote && i + 1 < fmt.length) {
+      cur += ch + fmt[i + 1];
+      i++;
+      continue;
+    }
+    if (ch === ';' && !inQuote) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
   }
-  let out = fracPart !== undefined ? `${intOut}.${fracPart}` : intOut;
-  if (isPct) out += '%';
+  out.push(cur);
   return out;
 }
 
+/** Strip quoted literals / escapes, for format-type detection only. */
+function formatCodesOnly(fmt: string): string {
+  return fmt.replace(/"[^"]*"/g, '').replace(/\\./g, '');
+}
+
+function formatNumberWithPattern(n: number, fmt: string): string {
+  const sections = splitFormatSections(fmt);
+  let sec = sections[0];
+  let value = n;
+  let explicitNegSection = false;
+  if (n < 0 && sections.length > 1 && sections[1] !== '') {
+    sec = sections[1];
+    value = -n;
+    explicitNegSection = true;
+  } else if (n === 0 && sections.length > 2 && sections[2] !== '') {
+    sec = sections[2];
+  }
+
+  // Tokenise into literals and the numeric core (first run of 0 # ? , .).
+  type Tok = { lit: string } | { core: string };
+  const toks: Tok[] = [];
+  let i = 0;
+  let coreTaken = false;
+  let percentCount = 0;
+  while (i < sec.length) {
+    const ch = sec[i];
+    if (ch === '"') {
+      const end = sec.indexOf('"', i + 1);
+      toks.push({ lit: sec.slice(i + 1, end === -1 ? sec.length : end) });
+      i = end === -1 ? sec.length : end + 1;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < sec.length) {
+      toks.push({ lit: sec[i + 1] });
+      i += 2;
+      continue;
+    }
+    if (!coreTaken && /[0#?.,]/.test(ch) && /[0#?]/.test(sec.slice(i))) {
+      let j = i;
+      while (j < sec.length && /[0#?.,]/.test(sec[j])) j++;
+      toks.push({ core: sec.slice(i, j) });
+      coreTaken = true;
+      i = j;
+      continue;
+    }
+    if (ch === '%') percentCount++;
+    if (ch === '_' || ch === '*') {
+      // _x = space the width of x; *x = repeat fill: render as nothing
+      i += 2;
+      continue;
+    }
+    toks.push({ lit: ch });
+    i++;
+  }
+
+  let v = Math.abs(value) * Math.pow(100, percentCount);
+  const coreTok = toks.find((t): t is { core: string } => 'core' in t);
+  let numText = '';
+  if (coreTok) {
+    let core = coreTok.core;
+    // trailing commas scale by 1,000 each (e.g. "0.0,," = millions)
+    while (core.endsWith(',')) {
+      v /= 1000;
+      core = core.slice(0, -1);
+    }
+    const dot = core.indexOf('.');
+    const intPat = dot === -1 ? core : core.slice(0, dot);
+    const fracPat = dot === -1 ? '' : core.slice(dot + 1).replace(/,/g, '');
+    const decimals = (fracPat.match(/[0#?]/g) || []).length;
+    const minFrac = (fracPat.match(/0/g) || []).length;
+    const minInt = (intPat.match(/0/g) || []).length;
+    const grouping = intPat.includes(',');
+    const rounded = roundHalfAwayFromZero(v, decimals);
+    const fixed = rounded.toFixed(decimals);
+    let [intDigits, fracDigits = ''] = fixed.split('.');
+    if (intDigits === '0' && minInt === 0) intDigits = '';
+    intDigits = intDigits.padStart(minInt, '0');
+    if (grouping) intDigits = intDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    while (fracDigits.length > minFrac && fracDigits.endsWith('0')) fracDigits = fracDigits.slice(0, -1);
+    numText = intDigits + (dot !== -1 ? '.' + fracDigits : '');
+    v = rounded;
+  }
+  const body = toks.map((t) => ('core' in t ? numText : t.lit)).join('');
+  const negative = value < 0 && !explicitNegSection && (!coreTok || v !== 0);
+  return (negative ? '-' : '') + body;
+}
+
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Excel date/time format codes for TEXT(): yyyy yy, mmmm mmm mm m (month,
+// or minutes right after h / before s), dddd ddd dd d, hh h, ss s,
+// AM/PM, am/pm, A/P, quoted literals and \ escapes.
 function formatDateWithPattern(d: Date, fmt: string): string {
   const y = d.getUTCFullYear();
   const mo = d.getUTCMonth() + 1;
   const day = d.getUTCDate();
-  const monthNamesShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const monthNamesFull = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const tokens = ['yyyy', 'mmmm', 'mmm', 'yy', 'mm', 'dd', 'm', 'd'];
-  let out = '';
+  const dow = d.getUTCDay();
+  let h = d.getUTCHours();
+  const mi = d.getUTCMinutes();
+  const se = d.getUTCSeconds();
+  const hasAmPm = /am\/pm|a\/p/i.test(formatCodesOnly(fmt));
+  const pad = (x: number) => String(x).padStart(2, '0');
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  const hourShown = hasAmPm ? hour12 : h;
+
+  const out: string[] = [];
+  const kinds: string[] = []; // token kind per out entry, for m-as-minutes
   let i = 0;
+  const lower = fmt.toLowerCase();
+  const push = (txt: string, kind: string) => {
+    out.push(txt);
+    kinds.push(kind);
+  };
   while (i < fmt.length) {
-    let matched = false;
-    for (const tok of tokens) {
-      if (fmt.slice(i, i + tok.length).toLowerCase() === tok) {
-        switch (tok) {
-          case 'yyyy': out += String(y); break;
-          case 'yy': out += String(y).slice(-2); break;
-          case 'mmmm': out += monthNamesFull[mo - 1]; break;
-          case 'mmm': out += monthNamesShort[mo - 1]; break;
-          case 'mm': out += String(mo).padStart(2, '0'); break;
-          case 'm': out += String(mo); break;
-          case 'dd': out += String(day).padStart(2, '0'); break;
-          case 'd': out += String(day); break;
+    const ch = fmt[i];
+    if (ch === '"') {
+      const end = fmt.indexOf('"', i + 1);
+      push(fmt.slice(i + 1, end === -1 ? fmt.length : end), 'lit');
+      i = end === -1 ? fmt.length : end + 1;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < fmt.length) {
+      push(fmt[i + 1], 'lit');
+      i += 2;
+      continue;
+    }
+    const rest = lower.slice(i);
+    const run = (c: string) => {
+      let j = i;
+      while (j < lower.length && lower[j] === c) j++;
+      return j - i;
+    };
+    if (rest.startsWith('am/pm')) {
+      push(h < 12 ? (fmt.slice(i, i + 2) === 'am' ? 'am' : 'AM') : (fmt.slice(i, i + 2) === 'am' ? 'pm' : 'PM'), 'ampm');
+      i += 5;
+      continue;
+    }
+    if (rest.startsWith('a/p')) {
+      push(h < 12 ? (fmt[i] === 'a' ? 'a' : 'A') : (fmt[i] === 'a' ? 'p' : 'P'), 'ampm');
+      i += 3;
+      continue;
+    }
+    if (ch.toLowerCase() === 'y') {
+      const n = run('y');
+      push(n <= 2 ? String(y).slice(-2) : String(y), 'y');
+      i += n;
+      continue;
+    }
+    if (ch.toLowerCase() === 'd') {
+      const n = run('d');
+      push(n === 1 ? String(day) : n === 2 ? pad(day) : n === 3 ? DAYS_SHORT[dow] : DAYS_FULL[dow], 'd');
+      i += n;
+      continue;
+    }
+    if (ch.toLowerCase() === 'h') {
+      const n = run('h');
+      push(n === 1 ? String(hourShown) : pad(hourShown), 'h');
+      i += n;
+      continue;
+    }
+    if (ch.toLowerCase() === 's') {
+      const n = run('s');
+      // a preceding m/mm token meant minutes
+      for (let k = kinds.length - 1; k >= 0; k--) {
+        if (kinds[k] === 'lit') continue;
+        if (kinds[k] === 'm' && (out[k] === String(mo) || out[k] === pad(mo))) {
+          out[k] = kinds[k] === 'm' && out[k].length === 2 ? pad(mi) : String(mi);
+          kinds[k] = 'min';
         }
-        i += tok.length;
-        matched = true;
         break;
       }
+      push(n === 1 ? String(se) : pad(se), 's');
+      i += n;
+      continue;
     }
-    if (!matched) {
-      out += fmt[i];
+    if (ch.toLowerCase() === 'm') {
+      const n = run('m');
+      let prev = '';
+      for (let k = kinds.length - 1; k >= 0; k--) {
+        if (kinds[k] !== 'lit') {
+          prev = kinds[k];
+          break;
+        }
+      }
+      if (n <= 2 && prev === 'h') push(n === 1 ? String(mi) : pad(mi), 'min');
+      else if (n === 1) push(String(mo), 'm');
+      else if (n === 2) push(pad(mo), 'm');
+      else if (n === 3) push(MONTHS_SHORT[mo - 1], 'mon');
+      else if (n === 5) push(MONTHS_FULL[mo - 1][0], 'mon');
+      else push(MONTHS_FULL[mo - 1], 'mon');
+      i += n;
+      continue;
+    }
+    push(ch, 'lit');
+    i++;
+  }
+  void h;
+  return out.join('');
+}
+
+/** Excel wildcard pattern (* ? with ~ escape) -> RegExp source. */
+function wildcardToRegex(pattern: string): string {
+  let out = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '~' && i + 1 < pattern.length && /[*?~]/.test(pattern[i + 1])) {
+      out += pattern[i + 1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       i++;
-    }
+    } else if (ch === '*') out += '[\\s\\S]*';
+    else if (ch === '?') out += '[\\s\\S]';
+    else out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
   return out;
+}
+
+/** Does `val` meet an Excel COUNTIF/SUMIF-style criterion (">1000", "N*", "<>x", 5)? */
+function meetsCriteria(val: FxValue, crit: FxValue): boolean {
+  if (isFxError(val)) return false;
+  if (typeof crit === 'number' || typeof crit === 'boolean') return compareValues(val, '=', crit) === true;
+  const critStr = asText(crit);
+  const m = critStr.match(/^(<=|>=|<>|=|<|>)([\s\S]*)$/);
+  const op = m ? m[1] : '=';
+  const operand = m ? m[2] : critStr;
+  const valBlank = val === null || val === undefined || val === '';
+  const valNum = typeof val === 'number' ? val : typeof val === 'string' ? parseSharedNumber(val) : null;
+  const opNum = parseSharedNumber(operand);
+  if (op === '=' || op === '<>') {
+    let eq: boolean;
+    if (operand === '') eq = valBlank;
+    else if (opNum !== null && valNum !== null) eq = valNum === opNum;
+    else if (/[*?]/.test(operand.replace(/~[*?~]/g, ''))) {
+      eq = !valBlank && new RegExp(`^${wildcardToRegex(operand)}$`, 'i').test(asText(val));
+    } else if (/~[*?~]/.test(operand)) {
+      eq = !valBlank && new RegExp(`^${wildcardToRegex(operand)}$`, 'i').test(asText(val));
+    } else eq = !valBlank && asText(val).toLowerCase() === operand.toLowerCase();
+    return op === '=' ? eq : !eq;
+  }
+  if (valBlank) return false;
+  if (opNum !== null) {
+    if (valNum === null) return false;
+    return compareValues(valNum, op, opNum) === true;
+  }
+  if (valNum !== null) return false;
+  return compareValues(asText(val), op, operand) === true;
+}
+
+/** k-th (1-based; negative = from the end) occurrence index of delim in s. */
+function nthIndexOf(s: string, delim: string, k: number, caseInsensitive: boolean): number {
+  const hay = caseInsensitive ? s.toLowerCase() : s;
+  const needle = caseInsensitive ? delim.toLowerCase() : delim;
+  const hits: number[] = [];
+  let from = 0;
+  while (needle.length > 0) {
+    const idx = hay.indexOf(needle, from);
+    if (idx === -1) break;
+    hits.push(idx);
+    from = idx + needle.length;
+  }
+  const pos = k > 0 ? k - 1 : hits.length + k;
+  return pos >= 0 && pos < hits.length ? hits[pos] : -1;
+}
+
+/** Excel YEARFRAC for bases 0 (US 30/360), 1 (actual/actual), 2 (actual/360), 3 (actual/365), 4 (European 30/360). */
+function yearFrac(start: Date, end: Date, basis: number): number | null {
+  let a = start;
+  let b = end;
+  if (a.getTime() > b.getTime()) [a, b] = [b, a];
+  let sy = a.getUTCFullYear(), sm = a.getUTCMonth() + 1, sd = a.getUTCDate();
+  let ey = b.getUTCFullYear(), em = b.getUTCMonth() + 1, ed = b.getUTCDate();
+  const actualDays = Math.round((b.getTime() - a.getTime()) / MS_DAY);
+  const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  switch (basis) {
+    case 0: {
+      const lastFeb = (y: number, m: number, d: number) => m === 2 && d === daysInMonth(y, 2);
+      if (lastFeb(sy, sm, sd) && lastFeb(ey, em, ed)) ed = 30;
+      if (lastFeb(sy, sm, sd)) sd = 30;
+      if (ed === 31 && sd >= 30) ed = 30;
+      if (sd === 31) sd = 30;
+      return (ey * 360 + em * 30 + ed - (sy * 360 + sm * 30 + sd)) / 360;
+    }
+    case 1: {
+      const oneYearOn = new Date(Date.UTC(sy + 1, sm - 1, Math.min(sd, daysInMonth(sy + 1, sm))));
+      if (b.getTime() <= oneYearOn.getTime()) {
+        let denom = 365;
+        if (sy === ey && isLeap(sy)) denom = 366;
+        else {
+          // a Feb 29 inside (start, end] makes it a 366-day year
+          for (let y = sy; y <= ey; y++) {
+            if (!isLeap(y)) continue;
+            const feb29 = Date.UTC(y, 1, 29);
+            if (feb29 >= a.getTime() && feb29 <= b.getTime()) denom = 366;
+          }
+        }
+        return actualDays / denom;
+      }
+      let total = 0;
+      for (let y = sy; y <= ey; y++) total += isLeap(y) ? 366 : 365;
+      return actualDays / (total / (ey - sy + 1));
+    }
+    case 2:
+      return actualDays / 360;
+    case 3:
+      return actualDays / 365;
+    case 4: {
+      if (sd === 31) sd = 30;
+      if (ed === 31) ed = 30;
+      return (ey * 360 + em * 30 + ed - (sy * 360 + sm * 30 + sd)) / 360;
+    }
+    default:
+      return null;
+  }
+}
+
+function localDateParts(): { date: string; time: string } {
+  // TODAY()/NOW() are the user's local calendar date and clock, like Excel --
+  // not UTC (which is the previous day in India until 05:30 IST).
+  const now = new Date();
+  const pad = (x: number) => String(x).padStart(2, '0');
+  return {
+    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    time: `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
+  };
 }
 
 function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxValue {
@@ -728,32 +1072,41 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
     case 'LEFT': {
       const s = asText(a0);
       const cnt = args.length > 1 ? Number(asNum(args[1])) : 1;
-      return s.slice(0, Math.max(0, cnt));
+      if (!(cnt >= 0)) return VALUE_ERR();
+      return s.slice(0, Math.floor(cnt));
     }
     case 'RIGHT': {
       const s = asText(a0);
       const cnt = args.length > 1 ? Number(asNum(args[1])) : 1;
-      return cnt <= 0 ? '' : s.slice(-cnt);
+      if (!(cnt >= 0)) return VALUE_ERR();
+      return cnt === 0 ? '' : s.slice(-Math.floor(cnt));
     }
     case 'MID': {
       const s = asText(a0);
-      const start = Math.max(1, Number(asNum(args[1])));
-      const len = Math.max(0, Number(asNum(args[2])));
-      return s.slice(start - 1, start - 1 + len);
+      const start = Number(asNum(args[1]));
+      const len = Number(asNum(args[2]));
+      if (!(start >= 1) || !(len >= 0)) return VALUE_ERR();
+      return s.slice(Math.floor(start) - 1, Math.floor(start) - 1 + Math.floor(len));
     }
     case 'FIND': {
       const needle = asText(a0);
       const hay = asText(args[1]);
-      const start = args.length > 2 ? Math.max(1, Number(asNum(args[2]))) : 1;
-      const idx = hay.indexOf(needle, start - 1);
-      return idx === -1 ? NA_ERR() : idx + 1;
+      const start = args.length > 2 ? Number(asNum(args[2])) : 1;
+      // Excel: not found, or a start outside the text, is #VALUE! (not #N/A)
+      if (!(start >= 1) || start > hay.length + 1) return VALUE_ERR();
+      const idx = hay.indexOf(needle, Math.floor(start) - 1);
+      return idx === -1 ? VALUE_ERR() : idx + 1;
     }
     case 'SEARCH': {
-      const needle = asText(a0).toLowerCase();
-      const hay = asText(args[1]).toLowerCase();
-      const start = args.length > 2 ? Math.max(1, Number(asNum(args[2]))) : 1;
-      const idx = hay.indexOf(needle, start - 1);
-      return idx === -1 ? NA_ERR() : idx + 1;
+      // case-insensitive, with Excel wildcards (* ? and ~ to escape)
+      const needle = asText(a0);
+      const hay = asText(args[1]);
+      const start = args.length > 2 ? Number(asNum(args[2])) : 1;
+      if (!(start >= 1) || start > hay.length + 1) return VALUE_ERR();
+      const rx = new RegExp(wildcardToRegex(needle), 'gi');
+      rx.lastIndex = Math.floor(start) - 1;
+      const hit = rx.exec(hay);
+      return hit ? hit.index + 1 : VALUE_ERR();
     }
     case 'SUBSTITUTE': {
       const s = asText(a0);
@@ -790,7 +1143,8 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
       return asText(a0).repeat(Math.max(0, Math.floor(Number(asNum(args[1])))));
     case 'TEXT': {
       const fmt = asText(args[1]);
-      const isDateFmt = /[ymd]/i.test(fmt) && !/[#0]/.test(fmt);
+      const codes = formatCodesOnly(fmt);
+      const isDateFmt = /[ymdhs]/i.test(codes) && !/[#0?]/.test(codes);
       if (isDateFmt) {
         const d = asDate(a0);
         if (!d) return VALUE_ERR();
@@ -804,17 +1158,20 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
       const n = parseSharedNumber(asText(a0));
       return n === null ? VALUE_ERR() : n;
     }
-    case 'TEXTBEFORE': {
-      const s = asText(a0);
-      const delim = asText(args[1]);
-      const idx = s.indexOf(delim);
-      return idx === -1 ? NA_ERR() : s.slice(0, idx);
-    }
+    case 'TEXTBEFORE':
     case 'TEXTAFTER': {
+      // TEXTBEFORE/TEXTAFTER(text, delimiter, [instance_num], [match_mode],
+      // [match_end], [if_not_found]); a negative instance counts from the end.
       const s = asText(a0);
       const delim = asText(args[1]);
-      const idx = s.indexOf(delim);
-      return idx === -1 ? NA_ERR() : s.slice(idx + delim.length);
+      const inst = args.length > 2 && args[2] !== null ? Number(asNum(args[2])) : 1;
+      if (!Number.isFinite(inst) || inst === 0 || Math.abs(inst) > Math.max(1, s.length)) return VALUE_ERR();
+      const ci = args.length > 3 && toBool(args[3]);
+      const notFound = () => (args.length > 5 ? args[5] : NA_ERR());
+      if (delim === '') return name === 'TEXTBEFORE' ? (inst > 0 ? '' : s) : inst > 0 ? s : '';
+      const idx = nthIndexOf(s, delim, Math.trunc(inst), ci);
+      if (idx === -1) return notFound();
+      return name === 'TEXTBEFORE' ? s.slice(0, idx) : s.slice(idx + delim.length);
     }
     case 'DATEVALUE': {
       const d = asDate(a0);
@@ -936,9 +1293,7 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
 
     // --- COUNTIF-lite (single-cell convenience, not part of the required list) ---
     case 'COUNTIF': {
-      const val = a0;
-      const crit = args[1];
-      return compareValues(val, '=', crit) === true ? 1 : 0;
+      return meetsCriteria(a0, args[1]) ? 1 : 0;
     }
 
     // --- dates ---
@@ -974,9 +1329,11 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
       return d ? d.getUTCSeconds() : VALUE_ERR();
     }
     case 'TODAY':
-      return toISODate(new Date());
-    case 'NOW':
-      return new Date().toISOString();
+      return localDateParts().date;
+    case 'NOW': {
+      const { date, time } = localDateParts();
+      return `${date} ${time}`;
+    }
     case 'DATEDIF': {
       const d1 = asDate(a0);
       const d2 = asDate(args[1]);
@@ -1000,9 +1357,15 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
     case 'WEEKDAY': {
       const d = asDate(a0);
       if (!d) return VALUE_ERR();
-      const type = args.length > 1 ? Number(asNum(args[1])) : 1;
+      const type = args.length > 1 && args[1] !== null ? Number(asNum(args[1])) : 1;
       const sun0 = weekdaySun0(d);
-      return type === 1 ? sun0 + 1 : sun0;
+      // Excel return types: 1/17 Sun=1..Sat=7, 2/11 Mon=1..Sun=7,
+      // 3 Mon=0..Sun=6, 12..16 week starting Tue..Sat = 1.
+      if (type === 1 || type === 17) return sun0 + 1;
+      if (type === 2 || type === 11) return ((sun0 + 6) % 7) + 1;
+      if (type === 3) return (sun0 + 6) % 7;
+      if (type >= 12 && type <= 16) return ((sun0 - (type - 10) + 7) % 7) + 1;
+      return NUM_ERR();
     }
     case 'WEEKNUM': {
       const d = asDate(a0);
@@ -1024,8 +1387,9 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
       const d1 = asDate(a0);
       const d2 = asDate(args[1]);
       if (!d1 || !d2) return VALUE_ERR();
-      const days = Math.abs((d2.getTime() - d1.getTime()) / 86400000);
-      return cleanFloat(days / 365);
+      const basis = args.length > 2 && args[2] !== null ? Math.trunc(Number(asNum(args[2]))) : 0;
+      const yf = yearFrac(d1, d2, basis);
+      return yf === null ? NUM_ERR() : cleanFloat(yf);
     }
 
     default:

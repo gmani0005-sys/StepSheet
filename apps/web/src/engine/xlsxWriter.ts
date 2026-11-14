@@ -18,13 +18,16 @@
  *    because SSR resolves the Node entry instead.) It also hangs forever in
  *    workbook.commit() under Vitest.
  *
- * This writer emits the four parts a valid single-sheet .xlsx needs, writes
- * every cell inline (numbers as <v>, booleans as t="b", everything else as
- * t="inlineStr" -- no sharedStrings/styles parts), and zips with JSZip, which
+ * This writer emits the parts a valid single-sheet .xlsx needs, writes every
+ * cell inline (numbers as <v>, booleans as t="b", ISO dates and date-times
+ * as real Excel date serials with a date format, everything else as
+ * t="inlineStr" -- no sharedStrings part), and zips with JSZip, which
  * runs identically in the browser, Node and Vitest. Measured at ~1.3s for
  * 100K rows and ~11.6s for 1M rows, round-trip verified with an independent
  * reader (openpyxl) for exact row count and cell values.
  */
+
+import { dateToExcelSerial, parseSharedDate } from './values';
 
 /** Excel's hard per-sheet row limit (including the header row). */
 export const EXCEL_MAX_ROWS = 1_048_576;
@@ -44,6 +47,7 @@ const CONTENT_TYPES =
   '<Default Extension="xml" ContentType="application/xml"/>' +
   '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
   '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+  '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
   '</Types>';
 
 const ROOT_RELS =
@@ -56,7 +60,42 @@ const WORKBOOK_RELS =
   XML_HEADER +
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
   '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+  '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
   '</Relationships>';
+
+// Cell styles: s="0" default, s="1" date (yyyy-mm-dd), s="2" date-time.
+// Dates were previously written as text, so Excel could not group, filter or
+// calculate on them without converting first.
+const STYLES =
+  XML_HEADER +
+  '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+  '<numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd hh:mm:ss"/></numFmts>' +
+  '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
+  '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+  '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+  '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+  '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+  '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>' +
+  '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+  '</styleSheet>';
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z?$/;
+
+/** An ISO date / date-time string as an Excel serial + style, else null. */
+function excelDateCell(text: string): { serial: number; style: 1 | 2 } | null {
+  const isDate = ISO_DATE.test(text);
+  if (!isDate && !ISO_DATETIME.test(text)) return null;
+  const d = parseSharedDate(text);
+  if (!d) return null;
+  // Whole days from the date part (dateToExcelSerial rounds, which would
+  // push an afternoon timestamp onto the next day), plus the time of day.
+  const dayOnly = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const serial = dateToExcelSerial(dayOnly) + (d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()) / 86400;
+  if (!(serial >= 1)) return null; // before 1900-01-01: Excel has no date for it, keep as text
+  return { serial, style: isDate ? 1 : 2 };
+}
 
 const escapeSheetName = (name: string) =>
   // Excel forbids : \ / ? * [ ] in sheet names and caps them at 31 chars.
@@ -105,6 +144,8 @@ const cellXml = (ref: string, v: unknown): string => {
   else if (typeof v === 'object') text = JSON.stringify(v);
   else text = String(v);
   if (text === '') return '';
+  const date = excelDateCell(text);
+  if (date) return `<c r="${ref}" s="${date.style}"><v>${date.serial}</v></c>`;
   return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`;
 };
 
@@ -174,6 +215,7 @@ export async function buildXlsx(
   zip.file('_rels/.rels', ROOT_RELS);
   zip.file('xl/workbook.xml', workbookXml(sheetName));
   zip.file('xl/_rels/workbook.xml.rels', WORKBOOK_RELS);
+  zip.file('xl/styles.xml', STYLES);
   zip.file('xl/worksheets/sheet1.xml', sheetBytes);
   // Level 1: the sheet XML is highly repetitive, so fast deflate already gets
   // most of the size win; higher levels cost noticeably more time at 1M rows.

@@ -181,13 +181,14 @@ describe('Step engine semantics (SPEC.md)', () => {
     expect(r.rows.length).toBe(2); // "Apple"/"apple" collapse, "apple " (trailing space) stays distinct
   });
 
-  it('window rank is a dense rank that shares ties and never reorders rows', async () => {
-    const r = await run(
-      [{ n: 'A', s: 90 }, { n: 'B', s: 100 }, { n: 'C', s: 100 }, { n: 'D', s: 80 }],
-      [{ type: 'window_calc', params: { calc_type: 'rank', target_column: 's', output_column: 'rk', order_by: 's', order_direction: 'desc' } }]
-    );
+  it('window rank matches Excel RANK.EQ (ties share a rank, the next skips) and never reorders rows', async () => {
+    const rows = [{ n: 'A', s: 90 }, { n: 'B', s: 100 }, { n: 'C', s: 100 }, { n: 'D', s: 80 }];
+    const r = await run(rows, [{ type: 'window_calc', params: { calc_type: 'rank', target_column: 's', output_column: 'rk', order_by: 's', order_direction: 'desc' } }]);
     expect(r.rows.map((x: any) => x.n)).toEqual(['A', 'B', 'C', 'D']); // order preserved
-    expect(r.rows.map((x: any) => x.rk)).toEqual([2, 1, 1, 3]);
+    expect(r.rows.map((x: any) => x.rk)).toEqual([3, 1, 1, 4]);
+    // dense ranking remains available on request
+    const d = await run(rows, [{ type: 'window_calc', params: { calc_type: 'rank', target_column: 's', output_column: 'rk', order_by: 's', order_direction: 'desc', rank_method: 'dense' } }]);
+    expect(d.rows.map((x: any) => x.rk)).toEqual([2, 1, 1, 3]);
   });
 
   it('group_by count/distinct_count ignore blanks and min/max work on real values', async () => {

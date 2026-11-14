@@ -12,6 +12,7 @@ import {
 import { GeneratedCode, StepDefinition, StepSummary } from '../types/steps';
 import { evaluateFormula, formulaResultToCell, isFxError } from '../engine/formula';
 import { buildXlsx } from '../engine/xlsxWriter';
+import { toCsv } from '../engine/csv';
 import {
   parseSharedNumber,
   looksNumericForImport,
@@ -623,6 +624,33 @@ function normalizeUniqueValueKey(val: any): string {
   return String(val);
 }
 
+// Ordering key shared by Sort and the window steps. Values are compared as
+// numbers when they read as numbers ("$1,234.50", "0012"), as dates when they
+// read as dates in any supported format ("05-Mar-2024", "2024-03-05"), and as
+// text otherwise. In a mixed column, numbers and dates come before stray text
+// such as "n/a", and blanks always sort last in either direction -- sorting
+// the raw text instead put "n/a" at the top of a price column and ordered
+// "17/05/2024" between June dates.
+type OrderKey = { kind: 0 | 1 | 2 | 3; n: number; s: string };
+function orderKey(v: any): OrderKey {
+  if (isBlank(v)) return { kind: 3, n: 0, s: '' };
+  const num = typeof v === 'boolean' ? null : parseSharedNumber(v);
+  if (num !== null) return { kind: 0, n: num, s: '' };
+  const d = parseSharedDate(v);
+  if (d) return { kind: 1, n: d.getTime(), s: '' };
+  return { kind: 2, n: 0, s: String(v) };
+}
+function compareOrderKeys(a: OrderKey, b: OrderKey, desc: boolean): number {
+  if (a.kind === 3 || b.kind === 3) return a.kind === b.kind ? 0 : a.kind === 3 ? 1 : -1;
+  if (a.kind !== b.kind) return a.kind - b.kind;
+  const cmp = a.kind === 2 ? a.s.localeCompare(b.s, undefined, { numeric: true }) : a.n - b.n;
+  return desc ? -cmp : cmp;
+}
+/** Grouping/partition key: trimmed and case-insensitive, like Group By and Join. */
+function groupKeyOf(v: any): string {
+  return String(v ?? '').trim().toLowerCase();
+}
+
 function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): boolean {
   if (operator === 'is_null') return rowVal === null || rowVal === undefined || rowVal === '';
   if (operator === 'is_not_null') return rowVal !== null && rowVal !== undefined && rowVal !== '';
@@ -653,6 +681,32 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
   const aOrd: number | string = orderNumeric ? aNum : aStr.toLowerCase();
   const bOrd: number | string = orderNumeric ? (emptyOrderCase ? 0 : bNum) : bStr.toLowerCase();
 
+  // A numeric threshold only ever matches numeric cells: comparing the text
+  // "n/a" with "500" alphabetically used to let every n/a row through a
+  // "price > 500" filter. A date threshold compares real dates (any format).
+  if (isOrderOp && !bBlank) {
+    let cmp: number | null = null;
+    if (bNumRaw !== null) {
+      if (aNumRaw === null) return false;
+      cmp = aNumRaw - bNumRaw;
+    } else {
+      const bDate = parseSharedDate(targetVal);
+      if (bDate) {
+        const aDate = aBlank ? null : parseSharedDate(rowVal);
+        if (!aDate) return false;
+        cmp = aDate.getTime() - bDate.getTime();
+      } else if (aBlank) {
+        return false;
+      }
+    }
+    if (cmp !== null) {
+      if (operator === 'gt' || operator === '>') return cmp > 0;
+      if (operator === 'gte' || operator === '>=') return cmp >= 0;
+      if (operator === 'lt' || operator === '<') return cmp < 0;
+      return cmp <= 0;
+    }
+  }
+
   switch (operator) {
     case 'eq':
     case '==':
@@ -682,13 +736,23 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
     case '<=':
       return emptyOrderCase && aNumRaw === null ? false : aOrd <= bOrd;
     case 'between': {
-      if (Array.isArray(targetVal)) {
-        const [low, high] = targetVal.map(Number);
-        return aNum >= Math.min(low, high) && aNum <= Math.max(low, high);
+      // Inclusive range on numbers (or dates). A blank or non-numeric cell is
+      // never "between" -- it used to count as 0 and pass any range spanning 0.
+      const parts: any[] = Array.isArray(targetVal) ? targetVal : String(targetVal ?? '').split(',').map((x) => x.trim());
+      if (parts.length < 2) return true;
+      const lo = parseSharedNumber(parts[0]);
+      const hi = parseSharedNumber(parts[1]);
+      if (lo !== null && hi !== null) {
+        if (aNumRaw === null) return false;
+        return aNumRaw >= Math.min(lo, hi) && aNumRaw <= Math.max(lo, hi);
       }
-      const parts = String(targetVal).split(',').map((x) => Number(x.trim()));
-      if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
-        return aNum >= Math.min(parts[0], parts[1]) && aNum <= Math.max(parts[0], parts[1]);
+      const dLo = parseSharedDate(parts[0]);
+      const dHi = parseSharedDate(parts[1]);
+      if (dLo && dHi) {
+        const aDate = aBlank ? null : parseSharedDate(rowVal);
+        if (!aDate) return false;
+        const t = aDate.getTime();
+        return t >= Math.min(dLo.getTime(), dHi.getTime()) && t <= Math.max(dLo.getTime(), dHi.getTime());
       }
       return true;
     }
@@ -1506,25 +1570,21 @@ function executePipelineSteps(
       }
 
       case 'sort_rows': {
-        const sorts: SortCondition[] = p.conditions || [
+        const sorts: SortCondition[] = (p.conditions || [
           { column: p.column, direction: p.direction || 'asc' },
-        ];
-        rows.sort((a, b) => {
-          for (const s of sorts) {
-            if (!s.column) continue;
-            const va = a[s.column];
-            const vb = b[s.column];
-            if (va === vb) continue;
-            if (va === null || va === undefined) return 1;
-            if (vb === null || vb === undefined) return -1;
-            const cmp =
-              typeof va === 'number' && typeof vb === 'number'
-                ? va - vb
-                : String(va).localeCompare(String(vb), undefined, { numeric: true });
-            return s.direction === 'desc' ? -cmp : cmp;
+        ]).filter((c: SortCondition) => c && c.column);
+        // Keys are computed once per row (not per comparison): parsing every
+        // value as a number/date inside the comparator would be O(n log n)
+        // parses on a 100K-row sort.
+        const keyed = rows.map((r, i) => ({ r, i, k: sorts.map((c) => orderKey(r[c.column])) }));
+        keyed.sort((a, b) => {
+          for (let j = 0; j < sorts.length; j++) {
+            const cmp = compareOrderKeys(a.k[j], b.k[j], sorts[j].direction === 'desc');
+            if (cmp !== 0) return cmp;
           }
-          return 0;
+          return a.i - b.i;
         });
+        rows = keyed.map((x) => x.r);
         break;
       }
 
@@ -1760,6 +1820,11 @@ function executePipelineSteps(
         const targetCol = p.output_column || p.target_column || col;
         if (col && targetCol) {
           rows = rows.map((r) => {
+            // A blank cell stays blank (null) through text clean-up steps;
+            // turning it into empty text made blanks sort to the top.
+            if ((r[col] === null || r[col] === undefined) && op !== 'length' && op !== 'concat') {
+              return { ...r, [targetCol]: null };
+            }
             const s = String(r[col] ?? '');
             let out: any = s;
             if (op === 'upper' || op === 'uppercase') out = s.toUpperCase();
@@ -1992,9 +2057,11 @@ function executePipelineSteps(
         // Partition original-index positions, preserving file order.
         const partitions = new Map<string, number[]>();
         rows.forEach((r, idx) => {
+          // Trimmed and case-insensitive, like Group By and Join: "c113" and
+          // "C113" are the same customer everywhere in a pipeline.
           const key =
             partitionCols.length > 0
-              ? partitionCols.map((c) => String(r[c] ?? '')).join('||')
+              ? partitionCols.map((c) => groupKeyOf(r[c])).join('||')
               : '__ALL__';
           if (!partitions.has(key)) partitions.set(key, []);
           partitions.get(key)!.push(idx);
@@ -2002,22 +2069,10 @@ function executePipelineSteps(
 
         const sortIndices = (indices: number[], byCol: string | undefined): number[] => {
           if (!byCol) return indices;
-          const withKey = indices.map((idx) => ({
-            idx,
-            num: parseSharedNumber(rows[idx][byCol]),
-            raw: rows[idx][byCol],
-          }));
-          withKey.sort((a, b) => {
-            const aBlank = isBlank(a.raw);
-            const bBlank = isBlank(b.raw);
-            if (aBlank && bBlank) return 0;
-            if (aBlank) return 1;
-            if (bBlank) return -1;
-            let cmp: number;
-            if (a.num !== null && b.num !== null) cmp = a.num - b.num;
-            else cmp = String(a.raw).localeCompare(String(b.raw), undefined, { numeric: true });
-            return orderDir === 'desc' ? -cmp : cmp;
-          });
+          // Same ordering as Sort: dates in any format order by date, so a
+          // running total over an unconverted date column is still in date order.
+          const withKey = indices.map((idx) => ({ idx, k: orderKey(rows[idx][byCol]) }));
+          withKey.sort((a, b) => compareOrderKeys(a.k, b.k, orderDir === 'desc') || a.idx - b.idx);
           return withKey.map((w) => w.idx);
         };
 
@@ -2025,29 +2080,24 @@ function executePipelineSteps(
           const evalOrder = sortIndices(originalIndices, orderCol);
 
           if (fn === 'rank') {
-            // Dense rank with ties sharing a rank; direction honoured;
-            // blank values get a blank rank.
-            const ranked = originalIndices
-              .filter((idx) => !isBlank(rows[idx][rankCol]))
-              .map((idx) => ({ idx, num: parseSharedNumber(rows[idx][rankCol]), raw: rows[idx][rankCol] }));
-            ranked.sort((a, b) => {
-              let cmp: number;
-              if (a.num !== null && b.num !== null) cmp = a.num - b.num;
-              else cmp = String(a.raw).localeCompare(String(b.raw), undefined, { numeric: true });
-              return orderDir === 'desc' ? -cmp : cmp;
-            });
+            // Excel RANK.EQ by default: ties share a rank and the next rank
+            // skips (1, 2, 2, 4). rank_method 'dense' gives 1, 2, 2, 3.
+            // Blank cells get a blank rank; in a column that holds numbers,
+            // non-numeric cells ("#VALUE!", "n/a") are not ranked either.
+            const dense = String(p.rank_method || '').toLowerCase() === 'dense';
+            const keyed = originalIndices.map((idx) => ({ idx, k: orderKey(rows[idx][rankCol]) }));
+            const hasNumbers = keyed.some((x) => x.k.kind === 0);
+            const ranked = keyed.filter((x) => x.k.kind !== 3 && (!hasNumbers || x.k.kind === 0));
+            ranked.sort((a, b) => compareOrderKeys(a.k, b.k, orderDir === 'desc') || a.idx - b.idx);
             let rank = 0;
-            let prevKey: string | null = null;
-            ranked.forEach(({ idx, num, raw }) => {
-              const key = num !== null ? String(num) : String(raw);
-              if (key !== prevKey) {
-                rank++;
-                prevKey = key;
-              }
-              nextRows[idx][outCol] = rank;
+            ranked.forEach((x, pos) => {
+              const tied = pos > 0 && compareOrderKeys(ranked[pos - 1].k, x.k, false) === 0;
+              if (!tied) rank = dense ? rank + 1 : pos + 1;
+              nextRows[x.idx][outCol] = rank;
             });
+            const rankedSet = new Set(ranked.map((x) => x.idx));
             originalIndices.forEach((idx) => {
-              if (isBlank(rows[idx][rankCol])) nextRows[idx][outCol] = null;
+              if (!rankedSet.has(idx)) nextRows[idx][outCol] = null;
             });
             return;
           }
@@ -2135,17 +2185,19 @@ function executePipelineSteps(
             return cleanFloat(sum);
           };
 
+          // Labels are matched trimmed and case-insensitively, like Group By
+          // and Excel PivotTables: "Completed" and "completed" are one column,
+          // shown with the first spelling seen. (Case-sensitive matching split
+          // one status into two columns and halved its totals.)
+          const pivotLabelOf = new Map<string, string>();
+          const pivotNorm = (v: any): string => {
+            if (v === null || v === undefined || String(v).trim() === '') return 'Blank';
+            const k = groupKeyOf(v);
+            if (!pivotLabelOf.has(k)) pivotLabelOf.set(k, String(v).trim());
+            return pivotLabelOf.get(k)!;
+          };
           const pivotValues = pivotCol
-            ? Array.from(
-                new Set(
-                  workingRows.map((r) => {
-                    const v = r[pivotCol];
-                    return v === null || v === undefined || String(v).trim() === ''
-                      ? 'Blank'
-                      : String(v);
-                  })
-                )
-              )
+            ? Array.from(new Set(workingRows.map((r) => pivotNorm(r[pivotCol]))))
             : [`${aggFn.toUpperCase()}_${valCol}`];
 
           // No silent column cap: fail clearly instead (SPEC.md).
@@ -2159,7 +2211,7 @@ function executePipelineSteps(
           workingRows.forEach((r) => {
             const k =
               idxCols.length > 0
-                ? idxCols.map((c) => String(r[c] ?? '')).join('||')
+                ? idxCols.map((c) => groupKeyOf(r[c])).join('||')
                 : '__ALL__';
             if (!groups.has(k)) groups.set(k, []);
             groups.get(k)!.push(r);
@@ -2178,12 +2230,7 @@ function executePipelineSteps(
 
             if (pivotCol) {
               pivotValues.forEach((pv) => {
-                const matching = gRows.filter((r) => {
-                  const v = r[pivotCol];
-                  const norm =
-                    v === null || v === undefined || String(v).trim() === '' ? 'Blank' : String(v);
-                  return norm === pv;
-                });
+                const matching = gRows.filter((r) => pivotNorm(r[pivotCol]) === pv);
                 outRow[pv] = computeAgg(matching);
               });
             } else {
@@ -2207,12 +2254,7 @@ function executePipelineSteps(
             }
             if (pivotCol) {
               pivotValues.forEach((pv) => {
-                const matching = workingRows.filter((r) => {
-                  const v = r[pivotCol];
-                  const norm =
-                    v === null || v === undefined || String(v).trim() === '' ? 'Blank' : String(v);
-                  return norm === pv;
-                });
+                const matching = workingRows.filter((r) => pivotNorm(r[pivotCol]) === pv);
                 totalRow[pv] = computeAgg(matching);
               });
             } else {
@@ -2889,12 +2931,17 @@ function executePipelineSteps(
         const col = p.column;
         const mode = p.mode || 'top';
         const n = Math.max(1, Number(p.n ?? 10));
-        rows.sort((a, b) => {
-          const va = Number(a[col]) || 0;
-          const vb = Number(b[col]) || 0;
-          return mode === 'bottom' ? va - vb : vb - va;
-        });
-        rows = rows.slice(0, n);
+        // Rank only real numbers: blank and non-numeric cells ("#VALUE!",
+        // "n/a") used to count as 0 and fill a "bottom 10" list.
+        const numeric = rows
+          .map((r, i) => ({ r, i, v: isBlank(r[col]) ? null : parseSharedNumber(r[col]) }))
+          .filter((x): x is { r: Record<string, any>; i: number; v: number } => x.v !== null);
+        if (numeric.length > 0) {
+          numeric.sort((a, b) => (mode === 'bottom' ? a.v - b.v : b.v - a.v) || a.i - b.i);
+          rows = numeric.slice(0, n).map((x) => x.r);
+        } else {
+          rows = rows.slice(0, n);
+        }
         break;
       }
 
@@ -3428,21 +3475,16 @@ export const localEngine = {
 
     if (params.sort && params.sort.length > 0) {
       const sorts = params.sort;
-      rows.sort((a, b) => {
-        for (const s of sorts) {
-          const va = a[s.column];
-          const vb = b[s.column];
-          if (va === vb) continue;
-          if (va === null || va === undefined) return 1;
-          if (vb === null || vb === undefined) return -1;
-          const cmp =
-            typeof va === 'number' && typeof vb === 'number'
-              ? va - vb
-              : String(va).localeCompare(String(vb), undefined, { numeric: true });
-          return s.direction === 'desc' ? -cmp : cmp;
+      // Grid sort uses the same number/date-aware ordering as the Sort step.
+      const keyed = rows.map((r: any, i: number) => ({ r, i, k: sorts.map((c: any) => orderKey(r[c.column])) }));
+      keyed.sort((a: any, b: any) => {
+        for (let j = 0; j < sorts.length; j++) {
+          const cmp = compareOrderKeys(a.k[j], b.k[j], sorts[j].direction === 'desc');
+          if (cmp !== 0) return cmp;
         }
-        return 0;
+        return a.i - b.i;
       });
+      rows = keyed.map((x: any) => x.r);
     }
 
     const filteredRows = rows.length;
@@ -3610,21 +3652,16 @@ export const localEngine = {
 
     if (params.sort && params.sort.length > 0) {
       const sorts = params.sort;
-      rows.sort((a, b) => {
-        for (const s of sorts) {
-          const va = a[s.column];
-          const vb = b[s.column];
-          if (va === vb) continue;
-          if (va === null || va === undefined) return 1;
-          if (vb === null || vb === undefined) return -1;
-          const cmp =
-            typeof va === 'number' && typeof vb === 'number'
-              ? va - vb
-              : String(va).localeCompare(String(vb), undefined, { numeric: true });
-          return s.direction === 'desc' ? -cmp : cmp;
+      // Grid sort uses the same number/date-aware ordering as the Sort step.
+      const keyed = rows.map((r: any, i: number) => ({ r, i, k: sorts.map((c: any) => orderKey(r[c.column])) }));
+      keyed.sort((a: any, b: any) => {
+        for (let j = 0; j < sorts.length; j++) {
+          const cmp = compareOrderKeys(a.k[j], b.k[j], sorts[j].direction === 'desc');
+          if (cmp !== 0) return cmp;
         }
-        return 0;
+        return a.i - b.i;
       });
+      rows = keyed.map((x: any) => x.r);
     }
 
     const offset = params.offset ?? 0;
@@ -4094,18 +4131,7 @@ export const localEngine = {
       if (r0 && Array.isArray(r0.sample_failing_rows) && r0.sample_failing_rows.length > 0) {
         const rows = r0.sample_failing_rows;
         const cols = Object.keys(rows[0]);
-        const escapeCsv = (val: any) => {
-          if (val === null || val === undefined) return '';
-          const s = String(val);
-          return s.includes(',') || s.includes('"') || s.includes('\n')
-            ? `"${s.replace(/"/g, '""')}"`
-            : s;
-        };
-        const csvLines = [
-          cols.join(','),
-          ...rows.map((r: any) => cols.map((c) => escapeCsv(r[c])).join(',')),
-        ];
-        return new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        return new Blob(['\uFEFF' + toCsv(cols, rows)], { type: 'text/csv;charset=utf-8;' });
       }
     }
     return this.exportCsv(datasetId, steps);
@@ -4116,19 +4142,9 @@ export const localEngine = {
     const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: Number.MAX_SAFE_INTEGER });
     const rows: Record<string, any>[] = preview.rows;
     const cols: string[] = preview.columns.map((c: any) => c.name);
-    const escapeCsv = (val: any) => {
-      if (val === null || val === undefined) return '';
-      const s = String(val);
-      return s.includes(',') || s.includes('"') || s.includes('\n')
-        ? `"${s.replace(/"/g, '""')}"`
-        : s;
-    };
-    const csvLines = [
-      cols.join(','),
-      ...rows.map((r) => cols.map((c) => escapeCsv(r[c])).join(',')),
-    ];
-    // UTF-8 BOM so Excel opens non-ASCII text correctly (SPEC.md).
-    return new Blob(['﻿' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    // UTF-8 BOM so Excel opens non-ASCII text correctly (SPEC.md); cells are
+    // quoted and guarded against formula injection by csvCell().
+    return new Blob(['\uFEFF' + toCsv(cols, rows)], { type: 'text/csv;charset=utf-8;' });
   },
 
   async exportExcel(datasetId: string, steps: any[]): Promise<Blob> {
@@ -5048,15 +5064,9 @@ export const localEngine = {
     // the categorical branch answering with a count that ignores the
     // threshold.
     // =========================================================================
-    const numericComparison = !byMatch ? parseNumericComparison(prompt) : null;
-    if (numericComparison && profile.measures.length > 0) {
-      const cmp = numericComparison;
-      const countCue =
-        pLower.includes('how many') ||
-        pLower.includes('number of') ||
-        pLower.includes('count of') ||
-        /\bcount\b/.test(pLower);
-      const statAggCue = /\b(average|avg|mean|median|sum|min|minimum|max|maximum)\b/.test(pLower);
+    // Which column does a numeric comparison apply to? Shared by the
+    // threshold branch (1b) and the percentage branch.
+    const resolveComparisonTarget = (cmp: NumericComparison) => {
       const STOP_WORDS = new Set(['in', 'on', 'at', 'and', 'or', 'the', 'for', 'with', 'from', 'of', 'per', 'each', 'this', 'that', 'last', 'next', 'year', 'month', 'week', 'day', 'days', 'today']);
       const UNIT_WORDS = /^(units?|items?|pieces?|pcs|qty)$/;
       const ENTITY_WORDS = /^(orders?|customers?|clients?|products?|transactions?|purchases?|invoices?|accounts?|users?|visits?|tickets?|records?|rows?)$/;
@@ -5121,6 +5131,252 @@ export const localEngine = {
           howResolved = 'default';
         }
       }
+
+      return { targetCol, howResolved, isPerEntityCount, ENTITY_WORDS };
+    };
+
+    // ---- shared helpers for the analytical branches below ----
+    type ChatAgg = 'sum' | 'avg' | 'median' | 'min' | 'max' | 'count';
+    const aggOfCue = (text: string): ChatAgg =>
+      /\bmedian\b/.test(text)
+        ? 'median'
+        : /\b(average|avg|mean)\b/.test(text)
+          ? 'avg'
+          : /\b(minimum|min)\b/.test(text)
+            ? 'min'
+            : /\b(maximum|max)\b/.test(text)
+              ? 'max'
+              : 'sum';
+    const aggregate = (nums: number[], fn: ChatAgg): number | null => {
+      if (fn === 'count') return nums.length;
+      if (nums.length === 0) return null;
+      if (fn === 'sum') return cleanFloat(nums.reduce((a, b) => a + b, 0));
+      if (fn === 'avg') return cleanFloat(nums.reduce((a, b) => a + b, 0) / nums.length);
+      if (fn === 'min') return arrayMin(nums);
+      if (fn === 'max') return arrayMax(nums);
+      const sorted = [...nums].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : cleanFloat((sorted[mid - 1] + sorted[mid]) / 2);
+    };
+    const AGG_LABEL: Record<ChatAgg, string> = { sum: 'Total', avg: 'Average', median: 'Median', min: 'Minimum', max: 'Maximum', count: 'Count' };
+    const AGG_SQL: Record<ChatAgg, string> = { sum: 'SUM', avg: 'AVG', median: 'MEDIAN', min: 'MIN', max: 'MAX', count: 'COUNT' };
+    const titleCase = (c: string) => c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+    const fmt2 = (n: number | null) => (n === null ? 'n/a' : (Math.round(n * 100) / 100).toLocaleString());
+    const chatResult = (o: { intent: string; explanation: string; method: string; columns: string[]; rows: any[]; chart: any; trace: string; select?: any[]; groupBy?: string[]; filters?: any[] }) => ({
+      plan: {
+        schema_version: '1.0',
+        intent: o.intent,
+        dataset_id: datasetId,
+        select: o.select || o.columns.map((c) => ({ column: c })),
+        filters: o.filters || [],
+        group_by: o.groupBy || [],
+        limit: o.rows.length,
+        chart: o.chart,
+        explanation: o.method,
+      },
+      explanation: o.explanation,
+      calculation_method: o.method,
+      columns: o.columns,
+      rows: o.rows,
+      row_count: o.rows.length,
+      chart: o.chart,
+      query_trace: o.trace,
+      latency_ms: 8.0,
+      provider: 'localEngine',
+      model: 'duckdb-in-browser',
+    });
+    // Time grain named in a phrase ("by month", "monthly", "per quarter").
+    const grainOf = (text: string): 'day' | 'week' | 'month' | 'quarter' | 'year' | null => {
+      if (/\b(monthly|months?)\b/.test(text)) return 'month';
+      if (/\b(quarterly|quarters?|qtr)\b/.test(text)) return 'quarter';
+      if (/\b(yearly|annual(ly)?|years?)\b/.test(text)) return 'year';
+      if (/\b(weekly|weeks?)\b/.test(text)) return 'week';
+      if (/\b(daily|days?|dates?)\b/.test(text)) return 'day';
+      return null;
+    };
+    const timeBucket = (v: any, grain: string): string | null => {
+      const d = parseSharedDate(v);
+      if (!d) return null;
+      const y = d.getUTCFullYear();
+      const m = d.getUTCMonth() + 1;
+      if (grain === 'year') return String(y);
+      if (grain === 'quarter') return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+      if (grain === 'month') return `${y}-${String(m).padStart(2, '0')}`;
+      if (grain === 'week') return `week of ${toISODate(new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000))}`;
+      return toISODate(d);
+    };
+    // Rows restricted to a categorical value named in the question
+    // ("completed orders", "in the north region"); null when none is named.
+    // Never a value of the column being grouped by.
+    const namedFilter = (excludeCol?: string) => {
+      const named = findNamedCategoricalValue();
+      if (!named || named.col === excludeCol) return null;
+      return {
+        named,
+        rows: rows.filter((r) => groupKeyOf(getRowVal(r, named.col)) === named.value),
+        text: ` for **${named.col.replace(/_/g, ' ')}** = **${named.value.replace(/\b\w/g, (l) => l.toUpperCase())}**`,
+        sql: ` WHERE LOWER("${named.col}") = '${named.value.replace(/'/g, "''")}'`,
+        filter: { column: named.col, operator: 'eq', value: named.value },
+      };
+    };
+    const countCueAll = /\bhow many\b|\bnumber of\b|\bcount\b/.test(pLower);
+
+    // Time series: one row per day/week/month/quarter/year, in date order.
+    const answerTimeSeries = (grain: string, measure: string, fn: ChatAgg, sourceRows: any[], filterText = '', filterSql = '', filters: any[] = []) => {
+      const dateCol = profile.dates[0];
+      const buckets = new Map<string, number[]>();
+      let undated = 0;
+      for (const r of sourceRows) {
+        const b = timeBucket(getRowVal(r, dateCol), grain);
+        if (b === null) {
+          undated++;
+          continue;
+        }
+        if (!buckets.has(b)) buckets.set(b, []);
+        if (fn === 'count') buckets.get(b)!.push(1);
+        else {
+          const n = parseNumericValue(getRowVal(r, measure));
+          if (n !== null) buckets.get(b)!.push(n);
+        }
+      }
+      const alias = fn === 'count' ? 'Count' : `${AGG_LABEL[fn]} ${titleCase(measure)}`;
+      const out = Array.from(buckets.entries())
+        .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+        .map(([k, nums]) => ({ [grain]: k, [alias]: aggregate(nums, fn) }));
+      const undatedNote = undated ? ` ${undated.toLocaleString()} rows with no valid ${dateCol.replace(/_/g, ' ')} are not included.` : '';
+      return chatResult({
+        intent: 'trend',
+        explanation: `${alias} by ${grain}${filterText}, ${out.length.toLocaleString()} ${grain}s in date order.${undatedNote}`,
+        method: `${AGG_SQL[fn]}(${fn === 'count' ? '*' : `"${measure}"`}) grouped by the ${grain} of "${dateCol}", sorted chronologically.`,
+        columns: [grain, alias],
+        rows: out,
+        chart: { type: 'line', x: grain, y: alias },
+        trace: `SELECT DATE_TRUNC('${grain}', "${dateCol}") AS "${grain}", ${AGG_SQL[fn]}(${fn === 'count' ? '*' : `"${measure}"`}) AS "${alias}" FROM "${datasetName}"${filterSql} GROUP BY 1 ORDER BY 1;`,
+        groupBy: [grain],
+        filters,
+      });
+    };
+
+    // =========================================================================
+    // 0a. PERCENTAGE OF ROWS ("what percentage of orders were cancelled?",
+    // "what share of orders are over $500?"). Previously fell through to an
+    // unrelated ranking table.
+    // =========================================================================
+    if (!byMatch && /\b(percent|percentage|share|proportion)\b/.test(pLower)) {
+      const pcCmp = parseNumericComparison(prompt);
+      const pcTarget = pcCmp ? resolveComparisonTarget(pcCmp) : null;
+      const named = findNamedCategoricalValue();
+      if ((pcCmp && pcTarget && pcTarget.targetCol) || named) {
+        let matching = rows;
+        const parts: string[] = [];
+        const sqlParts: string[] = [];
+        const filters: any[] = [];
+        if (named) {
+          matching = matching.filter((r) => groupKeyOf(getRowVal(r, named.col)) === named.value);
+          parts.push(`**${named.col.replace(/_/g, ' ')}** = **${named.value.replace(/\b\w/g, (l) => l.toUpperCase())}**`);
+          sqlParts.push(`LOWER("${named.col}") = '${named.value.replace(/'/g, "''")}'`);
+          filters.push({ column: named.col, operator: 'eq', value: named.value });
+        }
+        if (pcCmp && pcTarget && pcTarget.targetCol) {
+          const col = pcTarget.targetCol;
+          matching = matching.filter((r) => {
+            const n = parseNumericValue(getRowVal(r, col));
+            return n !== null && numericComparisonMatches(n, pcCmp);
+          });
+          const opText = pcCmp.op === 'between' ? `between ${pcCmp.value} and ${pcCmp.value2}` : `${{ gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=' }[pcCmp.op]} ${pcCmp.value}`;
+          parts.push(`**${col.replace(/_/g, ' ')}** ${opText}`);
+          sqlParts.push(`"${col}" ${pcCmp.op === 'between' ? `BETWEEN ${pcCmp.value} AND ${pcCmp.value2}` : opText}`);
+          filters.push({ column: col, operator: pcCmp.op, value: pcCmp.value });
+        }
+        const pct = rows.length ? Math.round((matching.length / rows.length) * 10000) / 100 : 0;
+        return chatResult({
+          intent: 'summary',
+          explanation: `**${pct}%** of rows (${matching.length.toLocaleString()} of ${rows.length.toLocaleString()}) match ${parts.join(' and ')}.`,
+          method: `COUNT(*) WHERE ${sqlParts.join(' AND ')} / COUNT(*) x 100.`,
+          columns: ['Percentage', 'Matching Rows', 'Total Rows'],
+          rows: [{ Percentage: pct, 'Matching Rows': matching.length, 'Total Rows': rows.length }],
+          chart: { type: 'table', x: 'Percentage', y: 'Percentage' },
+          trace: `SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE ${sqlParts.join(' AND ')}) / COUNT(*), 2) AS "Percentage" FROM "${datasetName}";`,
+          filters,
+        });
+      }
+    }
+
+    // =========================================================================
+    // 0b. WHICH <dimension> HAS THE HIGHEST/LOWEST <measure> ("which region
+    // has the highest revenue?", "which customer placed the most orders?",
+    // "which month had the lowest sales?"). Previously answered with the
+    // single largest row value (a scalar MAX), not the winning group.
+    // =========================================================================
+    // "at least"/"at most" are thresholds, not superlatives.
+    const superlative = pLower.replace(/\bat (least|most)\b/g, ' ').match(/\b(highest|most|largest|biggest|greatest|best|top|lowest|least|smallest|fewest|worst)\b/);
+    const whichMatch = pLower.match(/\bwhich\s+([a-z_]+)/) || pLower.match(/\bwhat\s+([a-z_]+)\s+(?:has|had|have|did|does|was|is|generated|made|sold|brought|placed)\b/);
+    const topNumber = pLower.match(/\b(?:top|bottom)\s+\d+/);
+    if (superlative && whichMatch && !topNumber && !byMatch) {
+      const word = whichMatch[1];
+      const low = /\b(lowest|least|smallest|fewest|worst)\b/.test(superlative[0]);
+      const rest = pLower.slice((whichMatch.index || 0) + whichMatch[0].length);
+      const grain = grainOf(word);
+      const dim = grain ? '' : resolveDimCol(word);
+      const restMeasure = resolveMeasureCol(rest.replace(/\b(highest|most|largest|biggest|greatest|best|top|lowest|least|smallest|fewest|worst|the|has|had|have|with|in|of|by)\b/g, ' ').trim());
+      const countMode = !restMeasure && /\b(orders?|transactions?|purchases?|rows?|records?|invoices?|tickets?|visits?)\b/.test(rest);
+      const measure = countMode ? '' : restMeasure || profile.primaryMeasure;
+      if ((dim || (grain && profile.dates.length > 0)) && (countMode || measure)) {
+        const fn: ChatAgg = countMode ? 'count' : aggOfCue(pLower) === 'sum' ? 'sum' : aggOfCue(pLower);
+        const groups = new Map<string, { label: string; nums: number[] }>();
+        for (const r of rows) {
+          let key: string | null;
+          let label: string;
+          if (grain) {
+            key = timeBucket(getRowVal(r, profile.dates[0]), grain);
+            label = key || '';
+          } else {
+            const raw = getRowVal(r, dim);
+            key = isBlank(raw) ? null : groupKeyOf(raw);
+            label = isBlank(raw) ? '' : String(raw).trim();
+          }
+          if (key === null) continue;
+          if (!groups.has(key)) groups.set(key, { label, nums: [] });
+          if (countMode) groups.get(key)!.nums.push(1);
+          else {
+            const n = parseNumericValue(getRowVal(r, measure));
+            if (n !== null) groups.get(key)!.nums.push(n);
+          }
+        }
+        const groupCol = grain || dim;
+        const alias = countMode ? 'Count' : `${AGG_LABEL[fn]} ${titleCase(measure)}`;
+        const ranked = Array.from(groups.values())
+          .map((g) => ({ [groupCol]: g.label, [alias]: aggregate(g.nums, fn) as number }))
+          .filter((r) => r[alias] !== null)
+          .sort((a, b) => (low ? (a[alias] as number) - (b[alias] as number) : (b[alias] as number) - (a[alias] as number)));
+        if (ranked.length > 0) {
+          const win = ranked[0];
+          const runner = ranked[1];
+          const what = countMode ? `the ${low ? 'fewest' : 'most'} rows` : `the ${low ? 'lowest' : 'highest'} ${alias.toLowerCase()}`;
+          return chatResult({
+            intent: 'ranking',
+            explanation: `**${win[groupCol]}** has ${what}: **${fmt2(win[alias] as number)}**${runner ? ` (next: ${runner[groupCol]}, ${fmt2(runner[alias] as number)})` : ''}.`,
+            method: `${AGG_SQL[fn]}(${countMode ? '*' : `"${measure}"`}) for each ${groupCol.replace(/_/g, ' ')}, ranked ${low ? 'lowest' : 'highest'} first.`,
+            columns: [groupCol, alias],
+            rows: ranked,
+            chart: { type: 'bar', x: groupCol, y: alias },
+            trace: `SELECT "${groupCol}", ${AGG_SQL[fn]}(${countMode ? '*' : `"${measure}"`}) AS "${alias}" FROM "${datasetName}" GROUP BY 1 ORDER BY 2 ${low ? 'ASC' : 'DESC'};`,
+            groupBy: [groupCol],
+          });
+        }
+      }
+    }
+
+    const numericComparison = !byMatch ? parseNumericComparison(prompt) : null;
+    if (numericComparison && profile.measures.length > 0) {
+      const cmp = numericComparison;
+      const countCue =
+        pLower.includes('how many') ||
+        pLower.includes('number of') ||
+        pLower.includes('count of') ||
+        /\bcount\b/.test(pLower);
+      const statAggCue = /\b(average|avg|mean|median|sum|min|minimum|max|maximum)\b/.test(pLower);
+      const { targetCol, howResolved, isPerEntityCount, ENTITY_WORDS } = resolveComparisonTarget(cmp);
 
       const listCue = !countCue && !statAggCue;
       // The function-wide isAscending flag fires on "least", which here is
@@ -5211,6 +5467,42 @@ export const localEngine = {
           };
         }
       }
+      // "average revenue for orders over 500", "total quantity of orders above
+      // $1k": aggregate a measure over the rows that pass the threshold
+      // (previously these were answered over ALL rows, or listed rows).
+      const leftOfCmp = pLower.slice(0, cmp.start);
+      const aggWordsStripped = leftOfCmp
+        .replace(/\b(what|whats|is|are|was|were|the|of|for|on|in|orders?|rows?|records?|with|where|which|that|average|avg|mean|median|sum|total|minimum|min|maximum|max|show|me|give|find|tell)\b/g, ' ')
+        .replace(/[^a-z0-9_ ]/g, ' ')
+        .trim();
+      const sumCue = !countCue && /\b(total|sum)\b/.test(leftOfCmp) && aggWordsStripped.length > 0 && !!resolveMeasureCol(aggWordsStripped);
+      if (targetCol && !countCue && (statAggCue || sumCue)) {
+        const fn = aggOfCue(pLower);
+        const aggMeasure = (aggWordsStripped && resolveMeasureCol(aggWordsStripped)) || targetCol;
+        const named = findNamedCategoricalValue();
+        const matching = rows.filter((r) => {
+          const num = parseNumericValue(getRowVal(r, targetCol));
+          if (num === null || !numericComparisonMatches(num, cmp)) return false;
+          if (named && groupKeyOf(getRowVal(r, named.col)) !== named.value) return false;
+          return true;
+        });
+        const nums = matching.map((r) => parseNumericValue(getRowVal(r, aggMeasure))).filter((n): n is number => n !== null);
+        const value = aggregate(nums, fn);
+        const alias = `${AGG_LABEL[fn]} ${titleCase(aggMeasure)}`;
+        const condSql = cmp.op === 'between' ? `"${targetCol}" BETWEEN ${cmp.value} AND ${cmp.value2}` : `"${targetCol}" ${{ gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=' }[cmp.op]} ${cmp.value}`;
+        const whereSql = named ? `${condSql} AND LOWER("${named.col}") = '${named.value.replace(/'/g, "''")}'` : condSql;
+        return chatResult({
+          intent: 'summary',
+          explanation: `${alias} over the **${matching.length.toLocaleString()}** rows where ${whereSql.replace(/"/g, '')} is **${fmt2(value)}**.`,
+          method: `${AGG_SQL[fn]}("${aggMeasure}") WHERE ${whereSql}.`,
+          columns: [alias],
+          rows: [{ [alias]: value }],
+          chart: { type: 'table', x: alias, y: alias },
+          trace: `SELECT ${AGG_SQL[fn]}("${aggMeasure}") AS "${alias}" FROM "${datasetName}" WHERE ${whereSql};`,
+          filters: [{ column: targetCol, operator: cmp.op, value: cmp.value }],
+        });
+      }
+
       if (targetCol && (countCue || listCue)) {
         const category = findNamedCategoricalValue();
         const opSymbol: Record<NumericComparisonOp, string> = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=', between: 'BETWEEN' };
@@ -5385,7 +5677,8 @@ export const localEngine = {
         const hasNumericComparisonCue =
           !!numericComparison ||
           /\b(over|above|under|below|at least|at most|greater than|less than|more than|fewer than|exceeding)\b/i.test(pLower);
-        if (!hasNumericComparisonCue) {
+        // "how many distinct customers" is a distinct count (branch 3), not the row count.
+        if (!hasNumericComparisonCue && !isDistinct) {
           const colAlias = 'Total Records';
           const sqlTraceTotal = `SELECT COUNT(*) AS "${colAlias}" FROM "${datasetName}";`;
           return {
@@ -5421,6 +5714,18 @@ export const localEngine = {
       const groupCandidate = byMatch[1].trim();
       const subjectPart = pLower.substring(0, byMatch.index).trim();
 
+      // "revenue by month", "orders per quarter": bucket the date column by
+      // that grain, in date order. ("by month" used to fall back to the
+      // primary dimension and group by category instead.)
+      const byGrain = grainOf(groupCandidate.split(/\s+/)[0] || '');
+      if (byGrain && profile.dates.length > 0 && !resolveDimCol(groupCandidate.split(/\s+/)[0]).toLowerCase().includes(groupCandidate.split(/\s+/)[0])) {
+        const subjMeasure = subjectPart ? resolveMeasureCol(subjectPart.replace(/\b(show|me|what|is|the|total|average|avg|median|sum|of|trend|how|many|number|count)\b/g, ' ').trim() || '__none__') : '';
+        const countMode = countCueAll && !subjMeasure;
+        const measure = countMode ? '' : subjMeasure || profile.primaryMeasure;
+        const nf = namedFilter();
+        return answerTimeSeries(byGrain, measure, countMode ? 'count' : aggOfCue(pLower), nf ? nf.rows : rows, nf ? nf.text : '', nf ? nf.sql : '', nf ? [nf.filter] : []);
+      }
+
       const candAsMeasure = resolveMeasureCol(groupCandidate);
       const candAsDim = resolveDimCol(groupCandidate);
 
@@ -5434,8 +5739,9 @@ export const localEngine = {
         else if (pLower.includes('profit')) alias = 'Total Profit';
         else if (pLower.includes('amount')) alias = 'Total Amount';
 
+        const nfA = namedFilter(dimCol);
         const groupSums: Record<string, number> = {};
-        for (const r of rows) {
+        for (const r of nfA ? nfA.rows : rows) {
           let k = String(getRowVal(r, dimCol) ?? '(Blank)').trim();
           if (!k) k = '(Blank)';
           const num = parseNumericValue(getRowVal(r, targetMeasure));
@@ -5462,9 +5768,9 @@ export const localEngine = {
             sort: [{ column: alias, direction: isAscending ? 'asc' : 'desc' }],
             limit,
             chart: { type: 'bar', x: dimCol, y: alias },
-            explanation: `Top ${limit} ${dimCol} ranked by ${alias}.`,
+            explanation: `${isAscending ? 'Bottom' : 'Top'} ${limit} ${dimCol} ranked by ${alias}.`,
           },
-          explanation: `Top ${groupedRows.length} **${dimCol}** by **${alias}** (${groupedRows.length} results).`,
+          explanation: `${isAscending ? 'Bottom' : 'Top'} ${groupedRows.length} **${dimCol}** by **${alias}**${nfA ? nfA.text : ''} (${groupedRows.length} results).`,
           calculation_method: `SUM("${targetMeasure}") grouped by "${dimCol}" ORDER BY 2 DESC LIMIT ${limit}.`,
           columns: [dimCol, alias],
           rows: groupedRows,
@@ -5591,8 +5897,9 @@ export const localEngine = {
 
       // Numeric Measure Grouped (e.g. "sales by region", "average discount by status")
       let targetMeasure = resolveMeasureCol(subjectPart) || resolveMeasureCol(pLower) || profile.primaryMeasure;
-      let aggFunc: 'sum' | 'avg' | 'min' | 'max' = 'sum';
-      if (pLower.includes('average') || pLower.includes('mean') || pLower.includes('avg')) aggFunc = 'avg';
+      let aggFunc: 'sum' | 'avg' | 'min' | 'max' | 'median' = 'sum';
+      if (/\bmedian\b/.test(pLower)) aggFunc = 'median';
+      else if (pLower.includes('average') || pLower.includes('mean') || pLower.includes('avg')) aggFunc = 'avg';
       else if (pLower.includes('minimum') || pLower.includes('lowest') || pLower.includes('min ')) aggFunc = 'min';
       else if (pLower.includes('maximum') || pLower.includes('highest') || pLower.includes('max ')) aggFunc = 'max';
 
@@ -5605,8 +5912,9 @@ export const localEngine = {
         else if (pLower.includes('quantity')) metricAlias = 'Total Quantity';
       }
 
+      const nfG = namedFilter(groupDim);
       const groupValues: Record<string, number[]> = {};
-      for (const r of rows) {
+      for (const r of nfG ? nfG.rows : rows) {
         let k = String(getRowVal(r, groupDim) ?? '(Blank)').trim();
         if (!k) k = '(Blank)';
         const parsedNum = parseNumericValue(getRowVal(r, targetMeasure));
@@ -5623,6 +5931,7 @@ export const localEngine = {
           else if (aggFunc === 'avg') aggVal = vals.reduce((a, b) => a + b, 0) / vals.length;
           else if (aggFunc === 'min') aggVal = arrayMin(vals);
           else if (aggFunc === 'max') aggVal = arrayMax(vals);
+          else if (aggFunc === 'median') aggVal = aggregate(vals, 'median') as number;
         }
         return {
           [groupDim]: key,
@@ -5648,7 +5957,7 @@ export const localEngine = {
           chart: { type: chartType, x: groupDim, y: metricAlias },
           explanation: `Calculated ${metricAlias} grouped by ${groupDim}.`,
         },
-        explanation: `${topMatch ? `Top ${limit} ` : 'Calculated total '}${metricAlias} grouped by ${groupDim} (${groupedRows.length} results).`,
+        explanation: `${topMatch ? `${isAscending ? 'Bottom' : 'Top'} ${limit} ` : 'Calculated total '}${metricAlias} grouped by ${groupDim}${nfG ? nfG.text : ''} (${groupedRows.length} results).`,
         calculation_method: `${aggFunc.toUpperCase()}("${targetMeasure}") grouped by "${groupDim}".`,
         columns: [groupDim, metricAlias],
         rows: groupedRows,
@@ -5665,8 +5974,20 @@ export const localEngine = {
     // 3. SCALAR DISTINCT COUNT (e.g. "what is the total number unique orders")
     // =========================================================================
     if (isDistinct) {
+      // Match words singularised, so "categories" finds the category column
+      // and "regions" finds region (plurals used to fall through to the ID
+      // column and count every order instead).
+      const pSing = pLower.replace(/\b(\w+)ies\b/g, '$1y').replace(/\b(\w+s)es\b/g, '$1').replace(/\b(\w{2,}[^su\W])s\b/g, '$1');
       let targetCol = '';
-      if (pLower.includes('order') || pLower.includes('orders')) {
+      for (const c of profile.colNames) {
+        const clean = c.toLowerCase().replace(/_/g, ' ');
+        const colRe = new RegExp(`\\b${clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        if (colRe.test(pLower) || colRe.test(pSing)) {
+          targetCol = c;
+          break;
+        }
+      }
+      if (!targetCol && (pLower.includes('order') || pLower.includes('orders'))) {
         targetCol = profile.colNames.find((c) => c.toLowerCase().includes('order')) || '';
       }
       if (!targetCol && (pLower.includes('customer') || pLower.includes('client'))) {
@@ -5675,7 +5996,7 @@ export const localEngine = {
       if (!targetCol && (pLower.includes('product') || pLower.includes('item'))) {
         targetCol = profile.colNames.find((c) => c.toLowerCase().includes('product') || c.toLowerCase().includes('item')) || '';
       }
-      if (!targetCol && (pLower.includes('category') || pLower.includes('type') || pLower.includes('segment'))) {
+      if (!targetCol && (pSing.includes('category') || pLower.includes('type') || pLower.includes('segment'))) {
         targetCol = profile.colNames.find((c) => c.toLowerCase().includes('category') || c.toLowerCase().includes('segment')) || '';
       }
       if (!targetCol) {
@@ -5777,13 +6098,19 @@ export const localEngine = {
       // Scalar aggregation for numeric measure (sum, avg, min, max)
       const targetMeasure = resolveMeasureCol(pLower) || (pLower.includes('total') || pLower.includes('average') || pLower.includes('revenue') || pLower.includes('sales') ? profile.primaryMeasure : '');
       if (targetMeasure) {
-        let scalarAgg: 'sum' | 'avg' | 'min' | 'max' = 'sum';
-        if (pLower.includes('average') || pLower.includes('mean') || pLower.includes('avg')) scalarAgg = 'avg';
+        let scalarAgg: 'sum' | 'avg' | 'min' | 'max' | 'median' = 'sum';
+        if (/\bmedian\b/.test(pLower)) scalarAgg = 'median';
+        else if (pLower.includes('average') || pLower.includes('mean') || pLower.includes('avg')) scalarAgg = 'avg';
         else if (pLower.includes('min') || pLower.includes('lowest')) scalarAgg = 'min';
         else if (pLower.includes('max') || pLower.includes('highest') || pLower.includes('peak')) scalarAgg = 'max';
 
+        // "total revenue for completed orders", "total quantity in the north
+        // region": restrict to the named category value (previously ignored,
+        // so the answer was the all-rows total).
+        const nfS = namedFilter();
+        const scalarRows = nfS ? nfS.rows : rows;
         const validNums: number[] = [];
-        for (const r of rows) {
+        for (const r of scalarRows) {
           const parsed = parseNumericValue(getRowVal(r, targetMeasure));
           if (parsed !== null) validNums.push(parsed);
         }
@@ -5793,6 +6120,7 @@ export const localEngine = {
           else if (scalarAgg === 'avg') scalarVal = validNums.reduce((a, b) => a + b, 0) / validNums.length;
           else if (scalarAgg === 'min') scalarVal = arrayMin(validNums);
           else if (scalarAgg === 'max') scalarVal = arrayMax(validNums);
+          else if (scalarAgg === 'median') scalarVal = aggregate(validNums, 'median') as number;
         }
         scalarVal = Math.round(scalarVal * 100) / 100;
 
@@ -5806,10 +6134,12 @@ export const localEngine = {
           else if (pLower.includes('discount')) alias = 'Total Discount';
         } else if (scalarAgg === 'avg') {
           alias = `Average ${targetMeasure}`;
+        } else if (scalarAgg === 'median') {
+          alias = `Median ${targetMeasure}`;
         }
 
         const formattedVal = scalarVal.toLocaleString();
-        const sqlTrace = `SELECT ${scalarAgg.toUpperCase()}("${targetMeasure}") AS "${alias}" FROM "${datasetName}";`;
+        const sqlTrace = `SELECT ${scalarAgg.toUpperCase()}("${targetMeasure}") AS "${alias}" FROM "${datasetName}"${nfS ? nfS.sql : ''};`;
         return {
           plan: {
             schema_version: '1.0',
@@ -5821,7 +6151,9 @@ export const localEngine = {
             chart: { type: 'table', x: alias, y: alias },
             explanation: `${alias} across the entire dataset.`,
           },
-          explanation: `${alias} across all ${rows.length.toLocaleString()} records is **${formattedVal}**.`,
+          explanation: nfS
+            ? `${alias}${nfS.text} (${scalarRows.length.toLocaleString()} of ${rows.length.toLocaleString()} records) is **${formattedVal}**.`
+            : `${alias} across all ${rows.length.toLocaleString()} records is **${formattedVal}**.`,
           calculation_method: `${scalarAgg.toUpperCase()}("${targetMeasure}") across all ${validNums.length} valid numeric values.`,
           columns: [alias],
           rows: [{ [alias]: scalarVal }],
@@ -5838,8 +6170,14 @@ export const localEngine = {
     // =========================================================================
     // 5. TIME TREND OR DEFAULT RANKING
     // =========================================================================
-    const groupKey = isTrend && profile.dates[0] ? profile.dates[0] : (resolveDimCol(pLower) || profile.primaryDim);
     const targetMeasure = resolveMeasureCol(pLower) || profile.primaryMeasure;
+    if (isTrend) {
+      // A trend is a time series in date order, bucketed by the grain asked
+      // for (monthly by default) -- not one row per raw date sorted by value.
+      const nfT = namedFilter();
+      return answerTimeSeries(grainOf(pLower) || 'month', targetMeasure, aggOfCue(pLower), nfT ? nfT.rows : rows, nfT ? nfT.text : '', nfT ? nfT.sql : '', nfT ? [nfT.filter] : []);
+    }
+    const groupKey = resolveDimCol(pLower) || profile.primaryDim;
 
     const groupSums: Record<string, number> = {};
     for (const r of rows) {
@@ -5874,7 +6212,7 @@ export const localEngine = {
         chart: { type: chartType, x: groupKey, y: metricAlias },
         explanation: `${metricAlias} grouped by ${groupKey}.`,
       },
-      explanation: `${topMatch ? `Top ${limit} ` : 'Calculated total '}${metricAlias} grouped by ${groupKey} (${groupedRows.length} results).`,
+      explanation: `${topMatch ? `${isAscending ? 'Bottom' : 'Top'} ${limit} ` : 'Calculated total '}${metricAlias} grouped by ${groupKey} (${groupedRows.length} results).`,
       calculation_method: `SUM("${targetMeasure}") grouped by "${groupKey}".`,
       columns: [groupKey, metricAlias],
       rows: groupedRows,

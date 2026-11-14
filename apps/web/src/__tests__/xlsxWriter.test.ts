@@ -31,7 +31,7 @@ describe('xlsxWriter', () => {
     }
   });
 
-  it('types cells: numbers, booleans, strings; blanks omitted; non-finite and dates as text', async () => {
+  it('types cells: numbers, booleans, strings, real date cells; blanks omitted; non-finite as text', async () => {
     const xml = await sheetXml(
       await buildXlsx(['n', 'b', 's', 'z', 'inf', 'd'], [
         { n: -12.5, b: true, s: 'Tom & <Jerry>', z: null, inf: Infinity, d: new Date(Date.UTC(2024, 0, 2)) },
@@ -43,7 +43,9 @@ describe('xlsxWriter', () => {
     expect(xml).toContain('<c r="C2" t="inlineStr"><is><t xml:space="preserve">Tom &amp; &lt;Jerry&gt;</t></is></c>');
     expect(xml).not.toContain('r="D2"');
     expect(xml).toContain('<t xml:space="preserve">Infinity</t>');
-    expect(xml).toContain('<t xml:space="preserve">2024-01-02T00:00:00.000Z</t>');
+    // Dates are real Excel date cells (serial + a date style), not text:
+    // 2024-01-02 is serial 45293.
+    expect(xml).toContain('<c r="F2" s="2"><v>45293</v></c>');
     expect(xml).toContain('<c r="A3"><v>0</v></c>');
     expect(xml).toContain('<c r="B3" t="b"><v>0</v></c>');
     expect(xml).not.toContain('r="C3"');

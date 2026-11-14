@@ -1,3 +1,4 @@
+import { toCsv } from '../engine/csv';
 import { storage } from '../utils/storage';
 import { StepDefinition } from '../types/steps';
 import { localEngine } from './localEngine';
@@ -2091,7 +2092,9 @@ ${safeDataJson}
       ].concat(rows.map(function(r) {
         return cols.map(function(c) {
           var val = String(r[c] != null ? r[c] : '');
-          return val.includes(',') || val.includes('"') || val.includes('\\n') ? '"' + val.replace(/"/g, '""') + '"' : val;
+          // CSV formula-injection guard (same rule as engine/csv.ts csvCell)
+          if (typeof r[c] === 'string' && /^[=+@\\t\\r-]/.test(val) && isNaN(Number(val.replace(/[$,%\\s]/g, '')))) val = "'" + val;
+          return val.includes(',') || val.includes('"') || val.includes('\\n') || val.includes('\\r') ? '"' + val.replace(/"/g, '""') + '"' : val;
         }).join(',');
       })).join('\\n');
 
@@ -2573,37 +2576,13 @@ export const exportShareApi = {
       filename = `${safeTitle}_data.json`;
     } else if (format === 'csv') {
       const csvLines = [
-        data.columns.join(','),
-        ...data.rows.map((r) =>
-          data.columns
-            .map((c) => {
-              const val = r[c];
-              if (val === null || val === undefined) return '';
-              const s = String(val);
-              return s.includes(',') || s.includes('"') || s.includes('\n')
-                ? `"${s.replace(/"/g, '""')}"`
-                : s;
-            })
-            .join(',')
-        ),
+        ...toCsv(data.columns, data.rows).split('\n'),
       ];
       blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
       filename = `${safeTitle}_data.csv`;
     } else if (format === 'powerbi_starter') {
       const csvLines = [
-        data.columns.join(','),
-        ...data.rows.map((r) =>
-          data.columns
-            .map((c) => {
-              const val = r[c];
-              if (val === null || val === undefined) return '';
-              const s = String(val);
-              return s.includes(',') || s.includes('"') || s.includes('\n')
-                ? `"${s.replace(/"/g, '""')}"`
-                : s;
-            })
-            .join(',')
-        ),
+        ...toCsv(data.columns, data.rows).split('\n'),
       ].join('\n');
       const mScript = [
         `let`,

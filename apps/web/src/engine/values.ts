@@ -192,6 +192,20 @@ export function dateToExcelSerial(d: Date): number {
  * `asDateStep` allows plain numeric values in the Excel-serial range to be
  * treated as dates (only used by date-typed steps, per SPEC.md).
  */
+/** Build a UTC date only if every component is in range for that month. */
+function validDate(y: number, mo: number, d: number, hh = 0, mi = 0, se = 0): Date | null {
+  if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo)) return null;
+  if (hh > 23 || mi > 59 || se > 59) return null;
+  return new Date(Date.UTC(y, mo - 1, d, hh, mi, se));
+}
+
+function to24h(h: number, ampm?: string): number {
+  if (!ampm) return h;
+  const pm = ampm.toLowerCase() === 'pm';
+  if (h === 12) return pm ? 12 : 0;
+  return pm ? h + 12 : h;
+}
+
 export function parseSharedDate(raw: any, opts: { asDateStep?: boolean } = {}): Date | null {
   if (raw === null || raw === undefined || raw === '') return null;
   if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
@@ -210,35 +224,49 @@ export function parseSharedDate(raw: any, opts: { asDateStep?: boolean } = {}): 
     if (n >= 1 && n <= 2958465) return excelSerialToDate(n);
   }
 
-  // ISO yyyy-mm-dd (optional time)
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  // Every branch builds its date through validDate(), which rejects
+  // impossible calendar dates instead of letting Date.UTC roll them into the
+  // next month ("31/02/2024" used to become 2 March, "2024-02-30" 1 March --
+  // silently shifting rows between months in every date step and formula).
+  // A string that names an impossible date is simply not a date.
+
+  // ISO yyyy-mm-dd (optional time, optional seconds)
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(am|pm)?)?/i);
   if (m) {
-    const [, y, mo, d, hh, mi, se] = m;
-    return new Date(Date.UTC(+y, +mo - 1, +d, hh ? +hh : 0, mi ? +mi : 0, se ? +se : 0));
+    const [, y, mo, d, hh, mi, se, ap] = m;
+    return validDate(+y, +mo, +d, hh ? to24h(+hh, ap) : 0, mi ? +mi : 0, se ? +se : 0);
   }
 
   // yyyy/mm/dd
   m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
   if (m) {
     const [, y, mo, d] = m;
-    if (+mo <= 12 && +d <= 31) return new Date(Date.UTC(+y, +mo - 1, +d));
+    return validDate(+y, +mo, +d);
   }
 
-  // d-MMM-yyyy (e.g. 31-Jan-2024)
-  m = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3,})[-\s](\d{4})$/);
+  // d-MMM-yyyy / d MMM yyyy / d Month yyyy (e.g. 31-Jan-2024, 5 March 2024)
+  m = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3,})[-\s,]*(\d{4})$/);
   if (m) {
     const [, d, monStr, y] = m;
     const mon = MONTH_NAMES[monStr.toLowerCase()];
-    if (mon) return new Date(Date.UTC(+y, mon - 1, +d));
+    if (mon) return validDate(+y, mon, +d);
+  }
+
+  // Month d, yyyy / Mon d yyyy (e.g. March 5, 2024; Mar 5 2024)
+  m = s.match(/^([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/);
+  if (m) {
+    const [, monStr, d, y] = m;
+    const mon = MONTH_NAMES[monStr.toLowerCase()];
+    if (mon) return validDate(+y, mon, +d);
   }
 
   // dd/mm/yyyy or dd-mm-yyyy (day-first by default; swap to mm/dd if the
   // "month" slot would otherwise be invalid)
   m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (m) {
-    let [, aStr, bStr, yStr] = m;
-    let a = +aStr;
-    let b = +bStr;
+    const [, aStr, bStr, yStr] = m;
+    const a = +aStr;
+    const b = +bStr;
     const y = +yStr;
     let day: number, month: number;
     if (a > 12) {
@@ -251,10 +279,17 @@ export function parseSharedDate(raw: any, opts: { asDateStep?: boolean } = {}): 
       day = a;
       month = b;
     }
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return new Date(Date.UTC(y, month - 1, day));
-    }
-    return null;
+    return validDate(y, month, day);
+  }
+
+  // A bare time of day ("14:30", "2:30 PM", "2:30:15 pm"): Excel stores it as
+  // a fraction of a day on its 1899-12-30 epoch, so HOUR/MINUTE/SECOND work.
+  m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (m) {
+    const [, hh, mi, se, ap] = m;
+    const h = to24h(+hh, ap);
+    if (h > 23 || +mi > 59 || (se !== undefined && +se > 59)) return null;
+    return new Date(Date.UTC(1899, 11, 30, h, +mi, se ? +se : 0));
   }
 
   // Fall back to native parsing for things like full ISO timestamps with Z,

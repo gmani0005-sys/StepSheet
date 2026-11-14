@@ -46,6 +46,17 @@ import { ExportShareModal } from '../export_share/ExportShareModal';
 import { AiDashboardPromptBar } from './AiDashboardPromptBar';
 import { LocalAiSetupModal } from '../ai/LocalAiSetupModal';
 import {
+  dashGet,
+  dashMetric,
+  dashMetricOrNull,
+  dashItems,
+  dashHistogram,
+  dashSeriesKeys,
+  makeLabeler,
+  sameCategory,
+  cellInPeriod,
+} from '../../engine/dashboardData';
+import {
   exportShareApi,
   DashboardExportData,
   DashboardExportKpi,
@@ -385,30 +396,13 @@ const DEFAULT_TILE_GAP = 16;
 const CANVAS_GRID_SIZE = 8;
 const SNAP_GUIDE_THRESHOLD = 6;
 
+/** A row's value for a column: exact name, then case/space/underscore-insensitive
+ * (never a substring match -- see engine/dashboardData). */
 export function getRowVal(
   row: Record<string, any> | undefined | null,
   colName: string | undefined | null
 ): any {
-  if (!row || !colName) return undefined;
-  if (row[colName] !== undefined) return row[colName];
-
-  const colLower = colName.toLowerCase().trim();
-  const colClean = colLower.replace(/[\s_\-]/g, '');
-
-  const keys = Object.keys(row);
-  for (const k of keys) {
-    if (k.toLowerCase().trim() === colLower) return row[k];
-  }
-  for (const k of keys) {
-    if (k.toLowerCase().replace(/[\s_\-]/g, '') === colClean) return row[k];
-  }
-  for (const k of keys) {
-    const kClean = k.toLowerCase().replace(/[\s_\-]/g, '');
-    if (kClean.includes(colClean) || colClean.includes(kClean)) {
-      return row[k];
-    }
-  }
-  return undefined;
+  return dashGet(row, colName);
 }
 
 export const layoutVisualsFlow = (
@@ -1604,14 +1598,10 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
   const getDistinctValuesForColumn = (col: string): string[] => {
     if (!col) return [];
+    const label = makeLabeler();
     const set = new Set<string>();
-    sourceRows.forEach((r) => {
-      const v = getRowVal(r, col);
-      const norm =
-        v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
-      set.add(norm);
-    });
-    return Array.from(set).sort();
+    sourceRows.forEach((r) => set.add(label(getRowVal(r, col))));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   };
 
   const toggleSlicerValue = (col: string, val: string) => {
@@ -1662,46 +1652,18 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   };
 
   const filteredRows = useMemo(() => {
+    // Slicers and cross-filters match the way categories are grouped: case- and
+    // space-insensitive, and dates by their UTC period (not the browser's zone).
     return sourceRows.filter((r) => {
       for (const [col, selectedVals] of Object.entries(multiSlicerSelections)) {
         if (Array.isArray(selectedVals) && selectedVals.length > 0) {
           const cell = getRowVal(r, col);
-          const norm =
-            cell === null || cell === undefined || String(cell).trim() === ''
-              ? '(Blank)'
-              : String(cell);
-          if (!selectedVals.includes(norm)) return false;
+          if (!selectedVals.some((v) => sameCategory(cell, v))) return false;
         }
       }
       if (crossFilter) {
         const cell = getRowVal(r, crossFilter.column);
-        const norm =
-          cell === null || cell === undefined || String(cell).trim() === ''
-            ? '(Blank)'
-            : String(cell);
-        if (norm !== crossFilter.value) {
-          // If crossFilter.value is a month or quarter (e.g. 2023-01 or 2023-Q1), match the row date to the period
-          let matchesPeriod = false;
-          if (/^\d{4}-\d{2}$/.test(crossFilter.value)) {
-            const d = new Date(cell);
-            if (!isNaN(d.getTime())) {
-              const p = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-              matchesPeriod = p === crossFilter.value;
-            }
-          } else if (/^\d{4}-Q[1-4]$/.test(crossFilter.value)) {
-            const d = new Date(cell);
-            if (!isNaN(d.getTime())) {
-              const q = `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
-              matchesPeriod = q === crossFilter.value;
-            }
-          } else if (/^\d{4}$/.test(crossFilter.value)) {
-            const d = new Date(cell);
-            if (!isNaN(d.getTime())) {
-              matchesPeriod = String(d.getFullYear()) === crossFilter.value;
-            }
-          }
-          if (!matchesPeriod) return false;
-        }
+        if (!sameCategory(cell, crossFilter.value) && !cellInPeriod(cell, crossFilter.value)) return false;
       }
       return true;
     });
@@ -1866,48 +1828,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
   };
 
-  const computeMetric = (subset: Record<string, any>[], col: string, fn: VisualAggType | string): number => {
-    if (!subset || subset.length === 0) return 0;
-    const lowerFn = String(fn || 'sum').toLowerCase().trim();
-    if (lowerFn === 'count') {
-      if (!col) return subset.length;
-      const valid = subset.filter((r) => {
-        const val = getRowVal(r, col);
-        return val !== null && val !== undefined && String(val).trim() !== '';
-      });
-      return valid.length > 0 ? valid.length : subset.length;
-    }
-    if (lowerFn === 'distinct' || lowerFn === 'distinct_count' || lowerFn === 'unique') {
-      const set = new Set<string>();
-      for (const r of subset) {
-        const val = getRowVal(r, col);
-        if (val !== null && val !== undefined && String(val).trim() !== '') {
-          set.add(String(val).trim());
-        }
-      }
-      return set.size;
-    }
-    const nums: number[] = [];
-    for (const r of subset) {
-      const val = getRowVal(r, col);
-      if (typeof val === 'number') {
-        if (!Number.isNaN(val)) nums.push(val);
-      } else if (typeof val === 'string') {
-        const cleaned = val.replace(/[$€£¥, %]/g, '').trim();
-        if (cleaned) {
-          const num = Number(cleaned);
-          if (!Number.isNaN(num)) nums.push(num);
-        }
-      }
-    }
-    if (nums.length === 0) return 0;
-    const sum = nums.reduce((a, b) => a + b, 0);
-    if (lowerFn === 'sum') return Number(sum.toFixed(2));
-    if (lowerFn === 'avg' || lowerFn === 'mean') return Number((sum / nums.length).toFixed(2));
-    if (lowerFn === 'min') return Math.min(...nums);
-    if (lowerFn === 'max') return Math.max(...nums);
-    return Number(sum.toFixed(2));
-  };
+  // One implementation for screen, export and insights (engine/dashboardData).
+  const computeMetric = (subset: Record<string, any>[], col: string, fn: VisualAggType | string): number =>
+    dashMetric(subset, col, fn);
 
   const getDashboardExportData = (): DashboardExportData => {
     const dsName = selectedDataset?.name || 'Executive';
@@ -1924,31 +1847,12 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       };
     });
 
+    // The export shows exactly what the screen shows: same grouping, date
+    // buckets, top N, "Other" slice and shares (engine/dashboardData).
     const exportVisuals: DashboardExportVisual[] = visuals.map((vis) => {
       if (vis.type === 'histogram') {
-        const nums = filteredRows
-          .map((r) => Number(getRowVal(r, vis.valueCol)))
-          .filter((n) => !Number.isNaN(n));
-        const minVal = nums.length > 0 ? Math.min(...nums) : 0;
-        const maxVal = nums.length > 0 ? Math.max(...nums) : 1;
-        const binCount = Math.max(3, Math.min(25, vis.bins || 8));
-        const span = maxVal === minVal ? 1 : maxVal - minVal;
-        const step = span / binCount;
-        const buckets = Array.from({ length: binCount }, (_, idx) => {
-          const low = minVal + idx * step;
-          const high = idx === binCount - 1 ? maxVal : minVal + (idx + 1) * step;
-          return {
-            category: `${formatNum(low)}–${formatNum(high)}`,
-            value: 0,
-            count: 0,
-          };
-        });
-        nums.forEach((n) => {
-          const idx = Math.min(binCount - 1, Math.max(0, Math.floor((n - minVal) / step)));
-          buckets[idx].count += 1;
-          buckets[idx].value += 1;
-        });
-        const total = nums.length || 1;
+        const buckets = dashHistogram(filteredRows, vis, formatNum);
+        const total = buckets.reduce((a, b) => a + b.count, 0) || 1;
         return {
           id: vis.id,
           title: vis.title,
@@ -1958,37 +1862,27 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
           aggFunc: 'count',
           insight: vis.insight,
           items: buckets.map((b) => ({
-            category: b.category,
-            value: b.value,
+            category: b.label,
+            value: b.count,
             percentage: `${((b.count / total) * 100).toFixed(1)}%`,
             count: b.count,
           })),
         };
       }
-
-      // Group rows for standard visuals
-      const catMap = new Map<string, Record<string, any>[]>();
-      filteredRows.forEach((r) => {
-        const raw = getRowVal(r, vis.categoryCol);
-        const key =
-          raw === null || raw === undefined || String(raw).trim() === '' ? '(Blank)' : String(raw);
-        if (!catMap.has(key)) catMap.set(key, []);
-        catMap.get(key)!.push(r);
-      });
-
-      let items = Array.from(catMap.entries()).map(([category, groupRows]) => ({
-        category,
-        value: computeMetric(groupRows, vis.valueCol, vis.aggFunc),
-        count: groupRows.length,
+      const grouped = dashItems(filteredRows, vis, columns as any);
+      const items: Array<{ category: string; value: number; count: number; share: number }> = grouped.items.map((x) => ({
+        category: x.category,
+        value: x.value,
+        count: x.count,
+        share: x.share,
       }));
-
-      if (vis.sortBy === 'value_desc') items.sort((a, b) => b.value - a.value);
-      else if (vis.sortBy === 'value_asc') items.sort((a, b) => a.value - b.value);
-      else items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
-
-      items = items.slice(0, vis.topN || 12);
-      const sumVal = items.reduce((acc, x) => acc + Math.max(0, x.value), 0) || 1;
-
+      if ((vis.type === 'donut' || vis.type === 'pie') && grouped.hidden > 0) {
+        const shownRows = new Set<Record<string, any>>();
+        for (const it of grouped.items) for (const r of it.rows) shownRows.add(r);
+        const otherRows = filteredRows.filter((r) => !shownRows.has(r));
+        const v = computeMetric(otherRows, vis.valueCol, vis.aggFunc);
+        items.push({ category: `Other (${grouped.hidden})`, value: v, count: otherRows.length, share: grouped.total > 0 ? Math.round((Math.max(0, v) / grouped.total) * 1000) / 10 : 0 });
+      }
       return {
         id: vis.id,
         title: vis.title,
@@ -2000,7 +1894,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
         items: items.map((it) => ({
           category: it.category,
           value: it.value,
-          percentage: `${((Math.max(0, it.value) / sumVal) * 100).toFixed(1)}%`,
+          percentage: `${it.share.toFixed(1)}%`,
           count: it.count,
         })),
       };
@@ -2929,41 +2823,22 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
 
     // 1. HISTOGRAM VISUAL
     if (vis.type === 'histogram') {
-      const nums = filteredRows
-        .map((r) => Number(getRowVal(r, vis.valueCol)))
-        .filter((n) => !Number.isNaN(n));
-      if (nums.length === 0) {
+      // Same number reader as everywhere else; min/max by loop (no spread).
+      const histBuckets = dashHistogram(filteredRows, vis, formatNum);
+      if (histBuckets.length === 0) {
         return (
           <div className="h-56 flex items-center justify-center text-xs text-[#605E5C]">
             Select a numeric column in Values to render a Histogram distribution.
           </div>
         );
       }
-      const minVal = Math.min(...nums);
-      const maxVal = Math.max(...nums);
-      const binCount = Math.max(3, Math.min(25, vis.bins || 8));
-      const span = maxVal === minVal ? 1 : maxVal - minVal;
-      const step = span / binCount;
-
-      const buckets = Array.from({ length: binCount }, (_, idx) => {
-        const low = minVal + idx * step;
-        const high = idx === binCount - 1 ? maxVal : minVal + (idx + 1) * step;
-        return {
-          label: `${formatNum(low)}–${formatNum(high)}`,
-          low,
-          high,
-          count: 0,
-        };
-      });
-
-      nums.forEach((n) => {
-        const idx = Math.min(binCount - 1, Math.max(0, Math.floor((n - minVal) / step)));
-        buckets[idx].count += 1;
-      });
-
+      const buckets = histBuckets;
       const maxCount = Math.max(1, ...buckets.map((b) => b.count));
       const minCount = Math.min(...buckets.map((b) => b.count));
-      const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+      const minVal = buckets[0].low;
+      const maxVal = buckets[buckets.length - 1].high;
+      const sampleCount = buckets.reduce((a, b) => a + b.count, 0);
+      const mean = computeMetric(filteredRows, vis.valueCol, 'avg');
 
       const histLegendEntries = buckets.map((b, i) => {
         const cfStyle = getConditionalFormatStyle(vis, b.count, minCount, maxCount);
@@ -2985,7 +2860,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
             </span>
             <span>
               Mean: <strong className="text-[#217346] font-mono">{formatNum(mean)}</strong> •{' '}
-              {nums.length} samples
+              {sampleCount} samples
             </span>
           </div>
           <div className="h-48 flex items-end gap-1.5 pt-6 pb-2 px-2 border-b border-[#D4D4D4]">
@@ -2993,7 +2868,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               const heightPct = Math.max(12, Math.round((b.count / maxCount) * 100));
               const cfStyle = getConditionalFormatStyle(vis, b.count, minCount, maxCount);
               const barColor = cfStyle.text || visPalette[i % visPalette.length];
-              const lblText = formatDataLabel(vis, b.count, nums.length);
+              const lblText = formatDataLabel(vis, b.count, sampleCount);
               return (
                 <div
                   key={i}
@@ -3041,96 +2916,36 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       return wrapWithLegend(vis, histChart, histLegendEntries);
     }
 
-    // Check if category is a date or timestamp column
-    const isCategoryDate =
-      Boolean(vis.categoryCol && /date|time|timestamp|order_date|created_at|updated_at/i.test(vis.categoryCol)) ||
-      columns.some(
-        (c) =>
-          c.name === vis.categoryCol &&
-          ['date', 'timestamp'].includes(String(c.data_type || '').toLowerCase())
-      );
-
-    const isTrendOrDate =
-      vis.type === 'line_area' ||
-      vis.type === 'stacked_area' ||
-      isCategoryDate;
-
-    // Determine calendar date aggregation interval (Year, Quarter, Month)
-    let dateInterval: 'month' | 'quarter' | 'year' = 'month';
-    if (isCategoryDate) {
-      let minYear = 9999;
-      let maxYear = 0;
-      let validDateCount = 0;
-      for (const r of filteredRows) {
-        const raw = getRowVal(r, vis.categoryCol);
-        if (!raw) continue;
-        const d = new Date(raw);
-        if (!isNaN(d.getTime())) {
-          const y = d.getFullYear();
-          if (y >= 1990 && y <= 2100) {
-            if (y < minYear) minYear = y;
-            if (y > maxYear) maxYear = y;
-            validDateCount++;
-          }
-        }
-      }
-      if (validDateCount > 0 && maxYear - minYear > 3) {
-        dateInterval = maxYear - minYear > 6 ? 'year' : 'quarter';
-      } else {
-        dateInterval = 'month';
-      }
+    // Grouping, date buckets, top N and shares all come from the shared
+    // dashboard data module, so the export and insights see the same numbers.
+    const grouped = dashItems(filteredRows, vis, columns as any);
+    const isTrendOrDate = vis.type === 'line_area' || vis.type === 'stacked_area' || grouped.isDate;
+    let items = grouped.items;
+    if ((vis.type === 'donut' || vis.type === 'pie') && grouped.hidden > 0) {
+      // Slices must add up to the whole: fold the categories not shown into "Other".
+      const shownRows = new Set<Record<string, any>>();
+      for (const it of items) for (const r of it.rows) shownRows.add(r);
+      const otherRows = filteredRows.filter((r) => !shownRows.has(r));
+      const otherVal = computeMetric(otherRows, vis.valueCol, vis.aggFunc);
+      items = [
+        ...items,
+        {
+          category: `Other (${grouped.hidden})`,
+          value: otherVal,
+          count: otherRows.length,
+          share: grouped.total > 0 ? Math.round((Math.max(0, otherVal) / grouped.total) * 1000) / 10 : 0,
+          rows: otherRows,
+        },
+      ];
     }
-
-    // Group rows by categoryCol for standard, table, matrix & multi-series visuals
-    const catMap = new Map<string, Record<string, any>[]>();
-    filteredRows.forEach((r) => {
-      const raw = getRowVal(r, vis.categoryCol);
-      let key: string;
-      if (raw === null || raw === undefined || String(raw).trim() === '') {
-        key = '(Blank)';
-      } else if (isCategoryDate) {
-        const d = new Date(raw);
-        if (!isNaN(d.getTime()) && d.getFullYear() >= 1990 && d.getFullYear() <= 2100) {
-          const y = d.getFullYear();
-          const m = d.getMonth() + 1;
-          if (dateInterval === 'year') {
-            key = String(y);
-          } else if (dateInterval === 'quarter') {
-            key = `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
-          } else {
-            key = `${y}-${String(m).padStart(2, '0')}`;
-          }
-        } else {
-          key = String(raw);
-        }
-      } else {
-        key = String(raw);
-      }
-      if (!catMap.has(key)) catMap.set(key, []);
-      catMap.get(key)!.push(r);
-    });
-
-    let items = Array.from(catMap.entries()).map(([category, groupRows]) => ({
-      category,
-      value: computeMetric(groupRows, vis.valueCol, vis.aggFunc),
-      count: groupRows.length,
-      rows: groupRows,
-    }));
-
-    if (isTrendOrDate && vis.sortBy !== 'value_desc' && vis.sortBy !== 'value_asc') {
-      items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
-    } else if (vis.sortBy === 'value_desc') {
-      items.sort((a, b) => b.value - a.value);
-    } else if (vis.sortBy === 'value_asc') {
-      items.sort((a, b) => a.value - b.value);
-    } else {
-      items.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }));
+    let maxVal = 1;
+    let minVal = items.length > 0 ? items[0].value : 0;
+    for (const x of items) {
+      if (Math.abs(x.value) > maxVal) maxVal = Math.abs(x.value);
+      if (x.value < minVal) minVal = x.value;
     }
-
-    items = items.slice(0, isTrendOrDate ? Math.max(36, vis.topN || 36) : (vis.topN || 10));
-    const maxVal = Math.max(1, ...items.map((x) => Math.abs(x.value)));
-    const minVal = items.length > 0 ? Math.min(...items.map((x) => x.value)) : 0;
-    const totalVal = items.reduce((acc, x) => acc + Math.max(0, x.value), 0) || 1;
+    // Percentages are of the WHOLE (every category), not just the bars shown.
+    const totalVal = grouped.total || 1;
 
     if (items.length === 0) {
       return (
@@ -3263,26 +3078,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     // 3. MATRIX TABLE VISUAL (ROWS × COLUMNS CROSS-TAB WITH CONDITIONAL FORMATTING)
     if (vis.type === 'matrix') {
       const seriesCol = vis.seriesCol || vis.categoryCol;
-      const colHeaders = Array.from(
-        new Set(
-          filteredRows.map((r) => {
-            const v = getRowVal(r, seriesCol);
-            return v === null || v === undefined || String(v).trim() === ''
-              ? '(Blank)'
-              : String(v);
-          })
-        )
-      ).slice(0, 8);
+      // The largest series by this visual's metric (was: the first 8 seen).
+      const colHeaders = dashSeriesKeys(filteredRows, seriesCol, vis, 8).keys;
 
       const matrixRows = items.map((item) => {
-        const cells: Record<string, number> = {};
+        const cells: Record<string, number> = Object.create(null);
         colHeaders.forEach((ch) => {
-          const matching = item.rows.filter((r) => {
-            const v = getRowVal(r, seriesCol);
-            const norm =
-              v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
-            return norm === ch;
-          });
+          const matching = item.rows.filter((r) => sameCategory(getRowVal(r, seriesCol), ch));
           cells[ch] = computeMetric(matching, vis.valueCol, vis.aggFunc);
         });
         const rowTotal = computeMetric(item.rows, vis.valueCol, vis.aggFunc);
@@ -3293,14 +3095,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       const cellMin = allCellVals.length > 0 ? Math.min(...allCellVals) : 0;
       const cellMax = allCellVals.length > 0 ? Math.max(...allCellVals) : 1;
 
-      const colTotals: Record<string, number> = {};
+      const colTotals: Record<string, number> = Object.create(null);
       colHeaders.forEach((ch) => {
-        const matching = filteredRows.filter((r) => {
-          const v = getRowVal(r, seriesCol);
-          const norm =
-            v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
-          return norm === ch;
-        });
+        const matching = filteredRows.filter((r) => sameCategory(getRowVal(r, seriesCol), ch));
         colTotals[ch] = computeMetric(matching, vis.valueCol, vis.aggFunc);
       });
       const grandTotal = computeMetric(filteredRows, vis.valueCol, vis.aggFunc);
@@ -3405,26 +3202,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
       vis.type === 'stacked_column'
     ) {
       const seriesCol = vis.seriesCol || vis.categoryCol;
-      const seriesKeys = Array.from(
-        new Set(
-          filteredRows.map((r) => {
-            const v = getRowVal(r, seriesCol);
-            return v === null || v === undefined || String(v).trim() === ''
-              ? '(Blank)'
-              : String(v);
-          })
-        )
-      ).slice(0, 6);
+      // The largest series by this visual's metric (was: the first 6 seen).
+      const seriesKeys = dashSeriesKeys(filteredRows, seriesCol, vis, 6).keys;
 
       const matrix = items.map((item) => {
-        const seriesVals: Record<string, number> = {};
+        const seriesVals: Record<string, number> = Object.create(null);
         seriesKeys.forEach((sk) => {
-          const matching = item.rows.filter((r) => {
-            const v = getRowVal(r, seriesCol);
-            const norm =
-              v === null || v === undefined || String(v).trim() === '' ? '(Blank)' : String(v);
-            return norm === sk;
-          });
+          const matching = item.rows.filter((r) => sameCategory(getRowVal(r, seriesCol), sk));
           seriesVals[sk] = computeMetric(matching, vis.valueCol, vis.aggFunc);
         });
         const rowSum = Object.values(seriesVals).reduce((a, b) => a + b, 0);
@@ -5155,42 +4939,27 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               let topEntitySum = 0;
 
               if (primaryMeas) {
-                const catMap = new Map<string, number>();
-                const geoMap = new Map<string, number>();
-                const entityMap = new Map<string, number>();
-                for (const r of filteredRows) {
-                  const v = Number(r[primaryMeas]) || 0;
-                  totalMeasSum += v;
-                  if (primaryD) {
-                    const ck = String(r[primaryD] ?? 'Other');
-                    catMap.set(ck, (catMap.get(ck) || 0) + v);
-                  }
-                  if (geoD) {
-                    const gk = String(r[geoD] ?? 'General');
-                    geoMap.set(gk, (geoMap.get(gk) || 0) + 1);
-                  }
-                  if (entityD) {
-                    const ek = String(r[entityD] ?? 'Other');
-                    entityMap.set(ek, (entityMap.get(ek) || 0) + v);
-                  }
+                // Same numbers as the charts (engine/dashboardData): regional
+                // formats read, categories case/space-insensitive.
+                totalMeasSum = computeMetric(filteredRows, primaryMeas, 'sum');
+                const topOf = (dim: string | undefined | null, fn: string) => {
+                  if (!dim) return null;
+                  return dashItems(filteredRows, { type: 'bar', categoryCol: dim, valueCol: primaryMeas, aggFunc: fn, sortBy: 'value_desc', topN: 1 }, columns as any).items[0] || null;
+                };
+                const cat = topOf(primaryD, 'sum');
+                if (cat) {
+                  topCatName = cat.category;
+                  topCatSum = cat.value;
                 }
-                for (const [k, v] of catMap.entries()) {
-                  if (v > topCatSum) {
-                    topCatSum = v;
-                    topCatName = k;
-                  }
+                const geo = topOf(geoD, 'count');
+                if (geo) {
+                  topGeoName = geo.category;
+                  topGeoCount = geo.value;
                 }
-                for (const [k, v] of geoMap.entries()) {
-                  if (v > topGeoCount) {
-                    topGeoCount = v;
-                    topGeoName = k;
-                  }
-                }
-                for (const [k, v] of entityMap.entries()) {
-                  if (v > topEntitySum) {
-                    topEntitySum = v;
-                    topEntityName = k;
-                  }
+                const ent = topOf(entityD, 'sum');
+                if (ent) {
+                  topEntityName = ent.category;
+                  topEntitySum = ent.value;
                 }
               }
 
@@ -5329,10 +5098,11 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                             className="text-2xl font-black font-sans my-1 tracking-tight"
                           >
                             {(() => {
-                              const colLower = (kpi.column || '').toLowerCase();
-                              const isCurr = ['amount', 'revenue', 'sales', 'price', 'cost', 'discount', 'spend', 'budget', 'profit'].some((c) => colLower.includes(c));
-                              const prefix = isCurr && (kpi.aggFunc as string) !== 'distinct_count' && (kpi.aggFunc as string) !== 'distinct' && kpi.aggFunc !== 'count' ? '$' : '';
-                              return `${prefix}${formatNum(val)}`;
+                              // No currency symbol is guessed from the column name: a
+                              // "revenue" column in rupees or euros is not dollars.
+                              // An average/min/max of no values shows a dash, not 0.
+                              const v = dashMetricOrNull(filteredRows, kpi.column, kpi.aggFunc);
+                              return v === null ? '—' : formatNum(v);
                             })()}
                           </div>
                         </div>

@@ -89,7 +89,8 @@ describe('AI Analytics Suite (Chat with Data, Native Julius Dashboard, Local AI)
     expect(patchRes).toBeDefined();
     expect(patchRes.patch.operation).toBe('add_slicer');
     expect(patchRes.updated_dashboard.visuals.length).toBe(initialVisualCount);
-    expect(patchRes.updated_dashboard.slicer_columns).toContain('Region');
+    // The slicer holds the dataset's real column name (here 'region'), whatever casing the prompt used.
+    expect(patchRes.updated_dashboard.slicer_columns.map((c: string) => c.toLowerCase())).toContain('region');
   });
 
   it('renders LocalAiSetupModal and displays hardware diagnostics and models', async () => {

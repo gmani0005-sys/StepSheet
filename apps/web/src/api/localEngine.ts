@@ -40,6 +40,7 @@ import {
   RunningSum,
 } from '../engine/values';
 import { planChatQuery } from '../engine/chatPlanner';
+import { dashDateParts, dashItems, dashMetric, makeLabeler, monthlyTotals } from '../engine/dashboardData';
 
 const LOCAL_DATASETS_KEY = 'stepsheet_local_datasets_v1';
 const LOCAL_TEMPLATES_KEY = 'stepsheet_local_templates_v2';
@@ -6798,477 +6799,248 @@ export const localEngine = {
       else if (bestIdDim) primaryDim = bestIdDim.col;
     }
 
-    // A dataset with no genuine numeric column (profile.measures is empty)
-    // still falls back to colNames[0] for primaryMeasure/secondaryMeasure —
-    // usually an ID or text field. Summing an ID column produces a
-    // meaningless chart, so detect that case once up front and pivot every
-    // measure-based KPI/visual to a row-count basis instead.
-    const hasRealMeasure = profile.measures.length > 0;
-    const fallbackCountCol =
-      profile.colNames.find((c) => c.toLowerCase().endsWith('id')) || primaryDim || profile.colNames[0] || 'id';
-    if (!hasRealMeasure) {
-      primaryMeasure = '';
-      secondaryMeasure = '';
+    // ---- Measures: never an ID column (summing order numbers is meaningless) ----
+    const isIdLike = (c: string) => /(^|[_\s-])(id|no|num|number|code|key|zip|pin|phone)$|^id$|id$/i.test(c || '');
+    const realMeasures = profile.measures.filter((m) => !isIdLike(m));
+    const hasRealMeasure = realMeasures.length > 0;
+    if (!realMeasures.includes(primaryMeasure)) primaryMeasure = realMeasures[0] || '';
+    if (!realMeasures.includes(secondaryMeasure) || secondaryMeasure === primaryMeasure) {
+      secondaryMeasure = realMeasures.find((m) => m !== primaryMeasure) || '';
     }
+    const fallbackCountCol =
+      profile.colNames.find((c) => isIdLike(c)) || primaryDim || profile.colNames[0] || 'id';
     const vMeasureCol = hasRealMeasure ? primaryMeasure : fallbackCountCol;
     const vAggFunc: 'sum' | 'count' = hasRealMeasure ? 'sum' : 'count';
+    const colsMeta = cols as Array<{ name: string; data_type?: string }>;
 
-    // 1. Build 4 Glassmorphism V22 KPI Stat Cards with genuine data-backed context
-    // Never fabricate fake percentage comparisons: a percentage requires a real target column or multiple calendar periods (MoM/YoY).
-    const dateCol = profile.dates[0];
+    // The date axis: the first date column whose values actually parse.
+    const dateCol =
+      profile.dates.find((d) => rows.slice(0, 200).some((r: any) => dashDateParts(getRowVal(r, d)))) || '';
     const targetCol = profile.colNames.find((c) =>
       ['target', 'budget', 'goal', 'quota'].some((k) => c.toLowerCase().includes(k))
     );
 
-    // Compact number formatter for embedding the actual compared figures
-    // into a KPI's MoM subtitle, so the calculation basis (not just the
-    // resulting %) is visible without digging into the data yourself.
     const fmtCompact = (n: number): string => {
       if (!Number.isFinite(n)) return '0';
       if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
       if (Math.abs(n) >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
-      return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+      return n.toLocaleString('en-US', { maximumFractionDigits: 1 });
     };
-
-    let primarySubtitle = Array.isArray(rows) && rows.length > 0 ? `Across ${rows.length} records` : 'Cumulative total';
-    let avgSubtitle = Array.isArray(rows) && rows.length > 0 ? `Mean across ${rows.length} records` : 'Per-record mean';
-
-    if (targetCol && Array.isArray(rows) && rows.length > 0 && primaryMeasure) {
-      // 1A. Genuine Target / Budget variance
-      const totalActual = rows.reduce((acc, r) => acc + (Number(getRowVal(r, primaryMeasure)) || 0), 0);
-      const totalTarget = rows.reduce((acc, r) => acc + (Number(getRowVal(r, targetCol)) || 0), 0);
-      if (totalTarget > 0) {
-        const pct = ((totalActual - totalTarget) / totalTarget) * 100;
-        const sign = pct >= 0 ? '+' : '';
-        primarySubtitle = `${sign}${pct.toFixed(1)}% vs ${targetCol}`;
-      }
-    } else if (dateCol && Array.isArray(rows) && rows.length >= 2 && primaryMeasure) {
-      // 1B. Genuine Month-over-Month (MoM) comparison when dataset spans >= 2 calendar months
-      try {
-        const monthMap = new Map<string, { sum: number; count: number }>();
-        for (const r of rows) {
-          const dVal = getRowVal(r, dateCol);
-          if (!dVal) continue;
-          const d = new Date(dVal);
-          if (isNaN(d.getTime())) continue;
-          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-          const cur = monthMap.get(key) || { sum: 0, count: 0 };
-          cur.sum += Number(getRowVal(r, primaryMeasure)) || 0;
-          cur.count += 1;
-          monthMap.set(key, cur);
-        }
-
-        const sortedMonths = Array.from(monthMap.keys()).sort();
-        if (sortedMonths.length >= 2) {
-          const latestMonth = sortedMonths[sortedMonths.length - 1];
-          const prevMonth = sortedMonths[sortedMonths.length - 2];
-          const latestStats = monthMap.get(latestMonth)!;
-          const prevStats = monthMap.get(prevMonth)!;
-
-          if (prevStats.sum > 0) {
-            const pct = ((latestStats.sum - prevStats.sum) / prevStats.sum) * 100;
-            const sign = pct >= 0 ? '+' : '';
-            // Embed the actual totals and row counts behind the %, not just
-            // the two month labels, so a big swing (e.g. from a sparsely
-            // populated latest month) is self-explanatory on hover.
-            primarySubtitle = `${sign}${pct.toFixed(1)}% MoM: ${fmtCompact(latestStats.sum)} in ${latestMonth} (${latestStats.count} rows) vs ${fmtCompact(prevStats.sum)} in ${prevMonth} (${prevStats.count} rows)`;
-          }
-
-          const latestAvg = latestStats.sum / (latestStats.count || 1);
-          const prevAvg = prevStats.sum / (prevStats.count || 1);
-          if (prevAvg > 0) {
-            const pctAvg = ((latestAvg - prevAvg) / prevAvg) * 100;
-            const signAvg = pctAvg >= 0 ? '+' : '';
-            avgSubtitle = `${signAvg}${pctAvg.toFixed(1)}% MoM avg: ${fmtCompact(latestAvg)} in ${latestMonth} vs ${fmtCompact(prevAvg)} in ${prevMonth}`;
-          }
-        }
-      } catch {
-        // keep factual fallback
-      }
-    }
-
-    // Raw column names (snake_case / camelCase) read fine in a <select> but
-    // look like code on a KPI card ("customer_id"); humanize them for
-    // display while the `column` field keeps the real, queryable name.
     const humanizeField = (name: string): string => {
       if (!name) return '';
-      const spaced = name
-        .replace(/[_-]+/g, ' ')
-        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-        .trim();
-      return spaced
-        .split(/\s+/)
-        .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
-        .join(' ');
+      const spaced = name.replace(/[_-]+/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').trim();
+      return spaced.split(/\s+/).map((w) => (w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w)).join(' ');
     };
+
+    // ---- KPI subtitles from the same numbers the cards show (dashboardData) ----
+    let primarySubtitle = rows.length > 0 ? `Across ${rows.length.toLocaleString('en-US')} records` : 'Cumulative total';
+    let avgSubtitle = rows.length > 0 ? `Mean across ${rows.length.toLocaleString('en-US')} records` : 'Per-record mean';
+    let heroTrendInsight: string | null = null;
+    if (targetCol && rows.length > 0 && primaryMeasure && targetCol !== primaryMeasure) {
+      const totalActual = dashMetric(rows, primaryMeasure, 'sum');
+      const totalTarget = dashMetric(rows, targetCol, 'sum');
+      if (totalTarget > 0) {
+        const pct = ((totalActual - totalTarget) / totalTarget) * 100;
+        primarySubtitle = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% vs ${humanizeField(targetCol)}`;
+      }
+    } else if (dateCol && rows.length >= 2 && primaryMeasure) {
+      // Month over month by UTC calendar month (offsets honoured; the
+      // browser's own time zone no longer moves rows between months).
+      const months = monthlyTotals(rows, dateCol, primaryMeasure);
+      const keys = Array.from(months.keys()).sort();
+      if (keys.length >= 2) {
+        const a = keys[keys.length - 1];
+        const b = keys[keys.length - 2];
+        const A = months.get(a)!;
+        const B = months.get(b)!;
+        if (B.sum > 0) {
+          const pct = ((A.sum - B.sum) / B.sum) * 100;
+          primarySubtitle = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% MoM: ${fmtCompact(A.sum)} in ${a} (${A.count} rows) vs ${fmtCompact(B.sum)} in ${b} (${B.count} rows)`;
+          heroTrendInsight = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% in ${a} vs ${b}`;
+        }
+        const avgA = A.sum / (A.count || 1);
+        const avgB = B.sum / (B.count || 1);
+        if (avgB > 0) {
+          const p2 = ((avgA - avgB) / avgB) * 100;
+          avgSubtitle = `${p2 >= 0 ? '+' : ''}${p2.toFixed(1)}% MoM avg: ${fmtCompact(avgA)} in ${a} vs ${fmtCompact(avgB)} in ${b}`;
+        }
+      }
+    }
 
     const kpis: any[] = [];
     if (primaryMeasure) {
-      kpis.push({
-        id: `kpi_total_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Total ${humanizeField(primaryMeasure)}`,
-        column: primaryMeasure,
-        aggFunc: 'sum',
-        subtitle: primarySubtitle,
-        accentColor: '#10B981',
-      });
-      kpis.push({
-        id: `kpi_avg_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Average ${humanizeField(primaryMeasure)}`,
-        column: primaryMeasure,
-        aggFunc: 'avg',
-        subtitle: avgSubtitle,
-        accentColor: '#0D9488',
-      });
+      kpis.push({ id: `kpi_total_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: `Total ${humanizeField(primaryMeasure)}`, column: primaryMeasure, aggFunc: 'sum', subtitle: primarySubtitle, accentColor: '#10B981' });
+      kpis.push({ id: `kpi_avg_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: `Average ${humanizeField(primaryMeasure)}`, column: primaryMeasure, aggFunc: 'avg', subtitle: avgSubtitle, accentColor: '#0D9488' });
     }
-
-    if (secondaryMeasure && secondaryMeasure !== primaryMeasure) {
-      kpis.push({
-        id: `kpi_total_${secondaryMeasure.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Total ${humanizeField(secondaryMeasure)}`,
-        column: secondaryMeasure,
-        aggFunc: 'sum',
-        subtitle: `Sum of ${humanizeField(secondaryMeasure)} across filtered rows`,
-        accentColor: '#FB923C',
-      });
+    if (secondaryMeasure) {
+      kpis.push({ id: `kpi_total_${secondaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: `Total ${humanizeField(secondaryMeasure)}`, column: secondaryMeasure, aggFunc: 'sum', subtitle: `Sum of ${humanizeField(secondaryMeasure)} across filtered rows`, accentColor: '#FB923C' });
     } else {
-      kpis.push({
-        id: 'kpi_total_records',
-        title: 'Total Records',
-        column: primaryDim || cols[0]?.name || 'id',
-        aggFunc: 'count',
-        subtitle: 'Row count across active filters',
-        accentColor: '#FB923C',
-      });
+      kpis.push({ id: 'kpi_total_records', title: 'Total Records', column: primaryDim || cols[0]?.name || 'id', aggFunc: 'count', subtitle: 'Row count across active filters', accentColor: '#FB923C' });
     }
-
-    const entityIdCol = profile.colNames.find((c) => c.toLowerCase().endsWith('_id') || c.toLowerCase().endsWith('id'));
+    const entityIdCol = profile.colNames.find((c) => isIdLike(c));
     const distinctTargetCol = entityIdCol || primaryDim;
     if (distinctTargetCol) {
-      kpis.push({
-        id: `kpi_distinct_${distinctTargetCol.replace(/\s+/g, '_').toLowerCase()}`,
-        title: `Distinct ${humanizeField(distinctTargetCol)}`,
-        column: distinctTargetCol,
-        aggFunc: 'distinct_count',
-        subtitle: `Unique ${humanizeField(distinctTargetCol)} values across filtered rows`,
-        accentColor: '#0284C7',
-      });
+      kpis.push({ id: `kpi_distinct_${distinctTargetCol.replace(/\s+/g, '_').toLowerCase()}`, title: `Distinct ${humanizeField(distinctTargetCol)}`, column: distinctTargetCol, aggFunc: 'distinct_count', subtitle: `Unique ${humanizeField(distinctTargetCol)} values across filtered rows`, accentColor: '#0284C7' });
     }
 
-
-    // 2. Resolve Multi-Tier Dimensions for Cohesive Dashboard Experience
-    const nonIdDims = profile.dimensions.filter((d) => !d.toLowerCase().endsWith('_id') && !d.toLowerCase().endsWith('id'));
-    const compDim = secondaryDim && secondaryDim !== primaryDim ? secondaryDim : primaryDim;
-    const granularDim = nonIdDims.find((d) => /customer|client|product|item|sku|account|user|sub_category/i.test(d)) || compDim;
-    const geoDim = nonIdDims.find((d) => /region|country|state|city|channel|territory|location|market/i.test(d)) || compDim;
-    const statusDim = profile.dimensions.find((d) => /status|stage|priority|fulfillment|state|tier|payment/i.test(d)) || null;
-
-    // Reusable group-by-and-sum, so each visual's caption can state a real
-    // finding ("West leads with 38.2% of revenue") computed from the exact
-    // same aggregation the chart itself shows, rather than generic text.
-    const groupByDim = (dim: string | null | undefined, measureCol: string, useCount: boolean): { key: string; value: number }[] => {
-      if (!dim || !Array.isArray(rows) || rows.length === 0) return [];
-      const map = new Map<string, number>();
-      for (const r of rows) {
-        const rawKey = getRowVal(r, dim);
-        const key = rawKey === null || rawKey === undefined || String(rawKey).trim() === '' ? '(Blank)' : String(rawKey);
-        const val = useCount ? 1 : Number(getRowVal(r, measureCol)) || 0;
-        map.set(key, (map.get(key) || 0) + val);
+    // ---- Dimensions: each visual gets its own, so no two show the same numbers ----
+    const cardinality = new Map<string, number>();
+    const cardOf = (d: string) => {
+      if (!cardinality.has(d)) {
+        const label = makeLabeler();
+        const seen = new Set<string>();
+        // A sample is enough to tell 4 regions from 400 customers.
+        const sample = rows.length > 20000 ? rows.slice(0, 20000) : rows;
+        for (const r of sample) seen.add(label(getRowVal(r, d)));
+        cardinality.set(d, seen.size);
       }
-      return Array.from(map.entries())
-        .map(([key, value]) => ({ key, value }))
-        .sort((a, b) => b.value - a.value);
+      return cardinality.get(d)!;
+    };
+    const dims = profile.dimensions.filter((d) => d !== dateCol && cardOf(d) > 1);
+    const nonIdDims = dims.filter((d) => !isIdLike(d));
+    const used = new Set<string>();
+    const pick = (...prefs: Array<string | null | undefined>): string => {
+      for (const d of prefs) if (d && dims.includes(d) && !used.has(d)) return d;
+      return '';
+    };
+    const byPattern = (re: RegExp) => nonIdDims.find((d) => re.test(d)) || dims.find((d) => re.test(d));
+    // "top 5 customers": the noun after the number names the leaderboard's dimension.
+    const topNoun = pLower.match(/top\s*\d{1,3}\s+([a-z_]+)/)?.[1] || '';
+    const nounDim = topNoun
+      ? dims.find((d) => {
+          const w = d.toLowerCase().replace(/[_-]+/g, ' ');
+          const stem = topNoun.replace(/(ies)$/, 'y').replace(/s$/, '');
+          return w.split(' ').some((part) => part === stem || part === topNoun);
+        })
+      : undefined;
+    // The dimension the prompt ranks ("top 5 customers") belongs to the leaderboard.
+    if (nounDim) used.add(nounDim);
+    const contribDim = pick(primaryDim, nonIdDims[0], dims[0]);
+    if (contribDim) used.add(contribDim);
+    if (nounDim) used.delete(nounDim);
+    const granularPref = nounDim || byPattern(/customer|client|product|item|sku|account|user|agent|sub_category/i);
+    const leaderDim = pick(granularPref, ...nonIdDims.slice().sort((a, b) => cardOf(b) - cardOf(a)), ...dims);
+    if (leaderDim) used.add(leaderDim);
+    const geoDim = pick(byPattern(/region|country|state|city|channel|territory|location|market/i), secondaryDim, ...nonIdDims);
+    if (geoDim) used.add(geoDim);
+    const statusDim = pick(byPattern(/status|stage|priority|fulfillment|tier|payment/i));
+    if (statusDim) used.add(statusDim);
+    const compDim = (geoDim || statusDim || nonIdDims.find((d) => d !== contribDim) || '') as string;
+
+    const slicerColumns = Array.from(new Set([contribDim, geoDim, statusDim].filter(Boolean))) as string[];
+
+    // Every insight sentence is computed from the exact items its chart draws.
+    const measureLabel = hasRealMeasure ? humanizeField(vMeasureCol) : 'records';
+    const fullItems = (spec: any) => dashItems(rows, { ...spec, topN: 1_000_000 }, colsMeta).items;
+    const leadInsight = (spec: any, noun: string) => {
+      const it = fullItems(spec);
+      if (!it.length) return undefined;
+      const top = it.reduce((m: any, x: any) => (x.value > m.value ? x : m), it[0]);
+      const tied = it.filter((x: any) => x.value === top.value).length;
+      if (tied > 1) return `${tied} ${it.length === tied ? 'values are level' : 'values tie for the lead'} at ${top.share.toFixed(1)}% of ${noun} each`;
+      return `${top.category} leads with ${top.share.toFixed(1)}% of ${noun}`;
     };
 
-    // Slicers: Cohesively include [primaryDim, geoDim, granularDim] so highlighted customers & categories are filterable
-    const slicerCandidates = Array.from(new Set([primaryDim, geoDim, granularDim].filter(Boolean)));
-    const slicerColumns = slicerCandidates.length > 0 ? slicerCandidates : (cols.slice(0, 2).map((c: any) => c.name));
-
-    // 3. Domain Awareness & Dynamic Narrative Insight Calculation
-    const isSales = profile.colNames.some((c) => /sales|order|revenue|amount|customer|product|price|deal/i.test(c)) || /sales|order|revenue/i.test(datasetName);
-    const isFinance = profile.colNames.some((c) => /balance|credit_limit|debit|spend|budget|expense|invoice/i.test(c));
-    const isHR = profile.colNames.some((c) => /salary|employee|headcount|department|tenure|staff/i.test(c));
-
-    // Dynamic data insight aggregation
-    let topCategory = 'Primary Segment';
-    let topCategorySum = 0;
-    let topCategoryPct = '0.0%';
-    let totalPrimarySum = 0;
-    let topGeo = 'Primary Region';
-    let topGeoCount = 0;
-
-    if (Array.isArray(rows) && rows.length > 0) {
-      const catMap = new Map<string, number>();
-      const geoMap = new Map<string, number>();
-
-      for (const r of rows) {
-        // With no real numeric measure, fall back to a plain row count per
-        // category so the narrative and "top category" insight still reads
-        // correctly for purely categorical/text datasets instead of
-        // silently staying stuck on the "Primary Segment" placeholder.
-        const val = hasRealMeasure ? Number(getRowVal(r, primaryMeasure)) || 0 : 1;
-        totalPrimarySum += val;
-
-        const catKey = String(getRowVal(r, primaryDim) || 'Other');
-        catMap.set(catKey, (catMap.get(catKey) || 0) + val);
-
-        const geoKey = String(getRowVal(r, geoDim) || 'General');
-        geoMap.set(geoKey, (geoMap.get(geoKey) || 0) + 1);
-      }
-
-      let maxCatVal = -Infinity;
-      for (const [k, v] of catMap.entries()) {
-        if (v > maxCatVal) {
-          maxCatVal = v;
-          topCategory = k;
-          topCategorySum = v;
-        }
-      }
-
-      if (totalPrimarySum > 0) {
-        topCategoryPct = `${((topCategorySum / totalPrimarySum) * 100).toFixed(1)}%`;
-      }
-
-      let maxGeoVal = -Infinity;
-      for (const [k, v] of geoMap.entries()) {
-        if (v > maxGeoVal) {
-          maxGeoVal = v;
-          topGeo = k;
-          topGeoCount = v;
-        }
-      }
-    }
-
-    const avgValNum = Array.isArray(rows) && rows.length > 0 ? (totalPrimarySum / rows.length).toFixed(2) : '0';
-    const topPctNum = totalPrimarySum > 0 ? (topCategorySum / totalPrimarySum) * 100 : 0;
-    const driverSentence = topPctNum >= 15
-      ? `${topCategory} is the leading ${hasRealMeasure ? 'driver' : 'segment'} generating ${topCategoryPct} of total volume.`
-      : `Volume is distributed across ${humanizeField(primaryDim)}, led by ${topCategory} (${topCategoryPct}).`;
-    const narrativeInsight = hasRealMeasure
-      ? `${driverSentence} Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions. Across all ${rows ? rows.length : 0} records, the per-record benchmark stands at ${avgValNum}.`
-      : `${driverSentence} Regional activity is concentrated in ${topGeo} with ${topGeoCount} logged transactions, across ${rows ? rows.length : 0} total records.`;
-
-    // 4. Build 6 Multi-Tier Complementary Visuals (Executive Grid V22)
     const visuals: any[] = [];
-    const measureLabel = hasRealMeasure ? humanizeField(vMeasureCol) : 'records';
-    const fmtShare = (value: number, total: number) => (total > 0 ? `${((value / total) * 100).toFixed(1)}%` : '0%');
-
-    // Hero trend insight: the actual latest-vs-previous-period comparison
-    // when the dashboard has a date axis, computed once above for the KPI
-    // subtitle — reuse it so the chart and the KPI card never disagree.
-    const heroTrendInsight = profile.dates.length > 0 && /MoM/.test(primarySubtitle)
-      ? primarySubtitle.replace(/^([+-]?[\d.]+%)\s*MoM.*$/, (full, pct) => `${pct} change vs. the prior month`)
-      : null;
-
-    // Visual 1: Hero Visual (Span 2, 976px wide x 340px high at x=16, y=16)
-    if (profile.dates.length > 0) {
+    if (dateCol) {
+      visuals.push({ id: 'vis_hero_trend', title: `${humanizeField(measureLabel)} Over Time`, type: 'line_area', categoryCol: dateCol, valueCol: vMeasureCol, aggFunc: vAggFunc, bins: 8, span: 2, customWidth: 976, customHeight: 340, x: 16, y: 16, w: 12, h: 4, sortBy: 'category_asc', legendPosition: 'hide', insight: heroTrendInsight || `${hasRealMeasure ? fmtCompact(dashMetric(rows, vMeasureCol, 'sum')) : rows.length.toLocaleString('en-US')} total across ${rows.length.toLocaleString('en-US')} records` });
+    }
+    if (contribDim) {
+      const nCats = cardOf(contribDim);
+      const asBar = nCats > 8 || !dateCol; // without a trend, the first visual is a ranked column
+      const spec = { categoryCol: contribDim, valueCol: vMeasureCol, aggFunc: vAggFunc, sortBy: 'value_desc' };
       visuals.push({
-        id: 'vis_hero_trend',
-        title: `${humanizeField(vMeasureCol)} Trajectory & Monthly Run-Rate`,
-        type: 'line_area',
-        categoryCol: profile.dates[0],
-        valueCol: vMeasureCol,
-        aggFunc: vAggFunc,
+        id: 'vis_share_donut',
+        title: asBar ? `${humanizeField(measureLabel)} by ${humanizeField(contribDim)}` : `${humanizeField(measureLabel)} Share by ${humanizeField(contribDim)}`,
+        type: asBar ? (dateCol ? 'bar' : 'column') : 'donut',
+        ...spec,
         bins: 8,
-        span: 2,
-        customWidth: 976,
-        customHeight: 340,
-        x: 16,
-        y: 16,
-        w: 12,
-        h: 4,
-        sortBy: 'category_asc',
-        legendPosition: 'hide',
-        insight: heroTrendInsight || (hasRealMeasure
-          ? `${fmtCompact(totalPrimarySum)} total across ${rows ? rows.length : 0} records`
-          : `${rows ? rows.length : 0} records tracked over time`),
-      });
-    } else {
-      visuals.push({
-        id: 'vis_hero_trend',
-        title: `${humanizeField(vMeasureCol)} Strategic Performance by ${humanizeField(primaryDim)}`,
-        type: 'column',
-        categoryCol: primaryDim,
-        valueCol: vMeasureCol,
-        aggFunc: vAggFunc,
-        bins: 8,
-        span: 2,
-        customWidth: 976,
-        customHeight: 340,
-        x: 16,
-        y: 16,
-        w: 12,
-        h: 4,
-        sortBy: 'value_desc',
-        insight: `${topCategory} leads with ${topCategoryPct} of total ${measureLabel}`,
+        topN: nCats > 8 ? 8 : undefined,
+        span: dateCol ? 1 : 2,
+        customWidth: dateCol ? 480 : 976,
+        customHeight: dateCol ? 320 : 340,
+        insight: leadInsight(spec, `total ${measureLabel.toLowerCase()}`),
       });
     }
-
-    // Visual 2: Category Contribution — a donut only reads cleanly up to
-    // ~8 slices; past that it becomes an unreadable rainbow, so a dataset
-    // with more categories than that gets a ranked bar instead. This is a
-    // genuine data-driven choice, not a fixed chart-per-slot template.
-    const primaryDimBreakdown = groupByDim(primaryDim, vMeasureCol, !hasRealMeasure);
-    const primaryDimCardinality = primaryDimBreakdown.length;
-    const useBarForContribution = primaryDimCardinality > 8;
-    const contributionTop = primaryDimBreakdown[0];
-    const contributionInsight = contributionTop
-      ? `${contributionTop.key} leads with ${fmtShare(contributionTop.value, totalPrimarySum)} of total ${measureLabel}${primaryDimCardinality > 8 ? ` across ${primaryDimCardinality} ${humanizeField(primaryDim).toLowerCase()} values` : ''}`
-      : undefined;
-    visuals.push({
-      id: 'vis_share_donut',
-      title: useBarForContribution
-        ? `Top ${Math.min(8, primaryDimCardinality)} ${humanizeField(primaryDim)} by Contribution`
-        : (isSales ? `Revenue Contribution by ${humanizeField(primaryDim)}` : `${humanizeField(primaryDim)} Distribution Share`),
-      type: useBarForContribution ? 'bar' : 'donut',
-      categoryCol: primaryDim,
-      valueCol: vMeasureCol,
-      aggFunc: vAggFunc,
-      bins: useBarForContribution ? 8 : 6,
-      topN: useBarForContribution ? 8 : undefined,
-      span: 1,
-      customWidth: 480,
-      customHeight: 320,
-      x: 16,
-      y: 372,
-      w: 6,
-      h: 4,
-      sortBy: 'value_desc',
-      insight: contributionInsight,
-    });
-
-    // Visual 3: Ranked Performance Leaderboard Bar (Mid-Tier Right at x=512, y=372)
-    const leaderboardTopN = requestedTopN || 10;
-    const granularBreakdown = groupByDim(granularDim, vMeasureCol, !hasRealMeasure);
-    const granularTop = granularBreakdown[0];
-    visuals.push({
-      id: 'vis_leaderboard_bar',
-      title: `Top ${leaderboardTopN} High-Performing ${humanizeField(granularDim)} Leaderboard`,
-      type: 'bar',
-      categoryCol: granularDim,
-      valueCol: vMeasureCol,
-      aggFunc: vAggFunc,
-      bins: leaderboardTopN,
-      topN: leaderboardTopN,
-      span: 1,
-      customWidth: 480,
-      customHeight: 320,
-      x: 512,
-      y: 372,
-      w: 6,
-      h: 4,
-      sortBy: 'value_desc',
-      insight: granularTop ? `${granularTop.key} tops the list at ${fmtCompact(granularTop.value)}` : undefined,
-    });
-
-    // Visual 4: Geographic / Channel Breakdown (Deep Dive Left at x=16, y=708)
-    const geoBreakdown = groupByDim(geoDim, vMeasureCol, !hasRealMeasure);
-    const geoTop = geoBreakdown[0];
-    visuals.push({
-      id: 'vis_geo_column',
-      title: `${humanizeField(vMeasureCol)} Breakdown by ${humanizeField(geoDim)}`,
-      type: 'column',
-      categoryCol: geoDim,
-      valueCol: vMeasureCol,
-      aggFunc: vAggFunc,
-      bins: 8,
-      span: 1,
-      customWidth: 480,
-      customHeight: 320,
-      x: 16,
-      y: 708,
-      w: 6,
-      h: 4,
-      sortBy: 'value_desc',
-      insight: geoTop ? `${geoTop.key} leads ${humanizeField(geoDim)} with ${fmtShare(geoTop.value, geoBreakdown.reduce((a, b) => a + b.value, 0))} of ${measureLabel}` : undefined,
-    });
-
-    // Visual 5: Operational Pipeline Funnel / Secondary Comparison (Deep Dive Right at x=512, y=708)
-    if (statusDim) {
-      const statusBreakdown = groupByDim(statusDim, vMeasureCol, true);
-      const statusTotal = statusBreakdown.reduce((a, b) => a + b.value, 0);
-      const statusTop = statusBreakdown[0];
+    if (leaderDim) {
+      const nCats = cardOf(leaderDim);
+      const n = requestedTopN || 10;
+      const isTop = nCats > n;
+      const spec = { categoryCol: leaderDim, valueCol: vMeasureCol, aggFunc: vAggFunc, sortBy: 'value_desc' };
+      const it = fullItems(spec);
       visuals.push({
-        id: 'vis_pipeline_funnel',
-        title: `Fulfillment Pipeline & ${humanizeField(statusDim)} Status`,
-        type: 'funnel',
-        categoryCol: statusDim,
-        valueCol: vMeasureCol,
-        aggFunc: 'count',
-        bins: 6,
-        span: 1,
-        customWidth: 480,
-        customHeight: 320,
-        x: 512,
-        y: 708,
-        w: 6,
-        h: 4,
-        sortBy: 'value_desc',
-        insight: statusTop ? `${statusTop.key} represents ${fmtShare(statusTop.value, statusTotal)} of all records` : undefined,
-      });
-    } else if (secondaryMeasure && secondaryMeasure !== primaryMeasure) {
-      const secondaryBreakdown = groupByDim(primaryDim, secondaryMeasure, false);
-      const secondaryTop = secondaryBreakdown[0];
-      const secondaryTotal = secondaryBreakdown.reduce((a, b) => a + b.value, 0);
-      visuals.push({
-        id: 'vis_pipeline_funnel',
-        title: `${humanizeField(secondaryMeasure)} Distribution by ${humanizeField(primaryDim)}`,
-        type: 'column',
-        categoryCol: primaryDim,
-        valueCol: secondaryMeasure,
-        aggFunc: 'sum',
-        bins: 6,
-        span: 1,
-        customWidth: 480,
-        customHeight: 320,
-        x: 512,
-        y: 708,
-        w: 6,
-        h: 4,
-        sortBy: 'value_desc',
-        insight: secondaryTop ? `${secondaryTop.key} leads with ${fmtShare(secondaryTop.value, secondaryTotal)} of total ${humanizeField(secondaryMeasure)}` : undefined,
-      });
-    } else {
-      visuals.push({
-        id: 'vis_pipeline_funnel',
-        title: `${humanizeField(vMeasureCol)} by ${humanizeField(primaryDim)} split by ${humanizeField(compDim)}`,
-        type: 'clustered_bar',
-        categoryCol: primaryDim,
-        seriesCol: compDim !== primaryDim ? compDim : '',
-        valueCol: vMeasureCol,
-        aggFunc: vAggFunc,
-        bins: 6,
-        span: 1,
-        customWidth: 480,
-        customHeight: 320,
-        x: 512,
-        y: 708,
-        w: 6,
-        h: 4,
-        sortBy: 'value_desc',
-        insight: contributionTop ? `${contributionTop.key} leads ${humanizeField(primaryDim)} at ${fmtCompact(contributionTop.value)}` : undefined,
+        id: 'vis_leaderboard_bar',
+        title: isTop ? `Top ${n} ${humanizeField(leaderDim)} by ${humanizeField(measureLabel)}` : `${humanizeField(leaderDim)} Ranking by ${humanizeField(measureLabel)}`,
+        type: 'bar',
+        ...spec,
+        bins: n,
+        topN: isTop ? n : undefined,
+        span: 1, customWidth: 480, customHeight: 320,
+        insight: it.length ? `${it[0].category} tops the list at ${fmtCompact(it[0].value)}` : undefined,
       });
     }
-
-    // Visual 6: Executive Operational Ledger Table (Span 2 / 976px at x=16, y=1044)
-    visuals.push({
-      id: 'vis_ledger_table',
-      title: `Executive Operational Ledger: ${humanizeField(primaryDim)} & ${humanizeField(compDim)} Matrix`,
-      type: 'table',
-      categoryCol: primaryDim,
-      seriesCol: compDim !== primaryDim ? compDim : '',
-      valueCol: vMeasureCol,
-      aggFunc: vAggFunc,
-      span: 2,
-      customWidth: 976,
-      customHeight: 340,
-      x: 16,
-      y: 1044,
-      w: 12,
-      h: 4,
-      sortBy: 'value_desc',
-      insight: `${primaryDimCardinality} ${humanizeField(primaryDim).toLowerCase()} values × ${humanizeField(compDim).toLowerCase()} breakdown, ${rows ? rows.length : 0} records`,
+    if (geoDim) {
+      const spec = { categoryCol: geoDim, valueCol: vMeasureCol, aggFunc: vAggFunc, sortBy: 'value_desc' };
+      visuals.push({ id: 'vis_geo_column', title: `${humanizeField(measureLabel)} by ${humanizeField(geoDim)}`, type: 'column', ...spec, bins: 8, span: 1, customWidth: 480, customHeight: 320, insight: leadInsight(spec, measureLabel.toLowerCase()) });
+    }
+    if (statusDim && hasRealMeasure) {
+      const spec = { categoryCol: statusDim, valueCol: vMeasureCol, aggFunc: 'count', sortBy: 'value_desc' };
+      const it = fullItems(spec);
+      const top = it[0];
+      visuals.push({ id: 'vis_pipeline_funnel', title: `Records by ${humanizeField(statusDim)}`, type: 'funnel', ...spec, bins: 6, span: 1, customWidth: 480, customHeight: 320, insight: top ? `${top.category} represents ${top.share.toFixed(1)}% of all records` : undefined });
+    } else if (secondaryMeasure && contribDim) {
+      const spec = { categoryCol: contribDim, valueCol: secondaryMeasure, aggFunc: 'sum', sortBy: 'value_desc' };
+      visuals.push({ id: 'vis_pipeline_funnel', title: `${humanizeField(secondaryMeasure)} by ${humanizeField(contribDim)}`, type: 'column', ...spec, bins: 6, span: 1, customWidth: 480, customHeight: 320, insight: leadInsight(spec, `total ${humanizeField(secondaryMeasure).toLowerCase()}`) });
+    }
+    if (contribDim) {
+      const series = compDim && compDim !== contribDim ? compDim : '';
+      visuals.push({
+        id: 'vis_ledger_table',
+        title: series ? `${humanizeField(contribDim)} × ${humanizeField(series)} Ledger` : `${humanizeField(contribDim)} Ledger`,
+        type: 'table', categoryCol: contribDim, seriesCol: series, valueCol: vMeasureCol, aggFunc: vAggFunc,
+        span: 2, customWidth: 976, customHeight: 340, sortBy: 'value_desc',
+        insight: `${cardOf(contribDim)} ${humanizeField(contribDim).toLowerCase()} values${series ? ` × ${humanizeField(series).toLowerCase()}` : ''}, ${rows.length.toLocaleString('en-US')} records`,
+      });
+    }
+    // Drop any visual that would repeat another's numbers, then lay them out
+    // in a simple two-column flow (wide visuals take a full row).
+    const seen = new Set<string>();
+    const unique = visuals.filter((v) => {
+      const sig = [v.categoryCol, v.aggFunc === 'count' ? '*' : v.valueCol, v.aggFunc, v.seriesCol || ''].join('|');
+      if (seen.has(sig)) return false;
+      seen.add(sig);
+      return true;
     });
+    let y = 16;
+    let col = 0;
+    let rowH = 0;
+    for (const v of unique) {
+      if (v.span === 2) {
+        if (col === 1) { y += rowH + 16; col = 0; rowH = 0; }
+        Object.assign(v, { x: 16, y, w: 12, h: 4 });
+        y += (v.customHeight || 340) + 16;
+      } else {
+        Object.assign(v, { x: col === 0 ? 16 : 512, y, w: 6, h: 4 });
+        rowH = Math.max(rowH, v.customHeight || 320);
+        if (col === 1) { y += rowH + 16; col = 0; rowH = 0; } else col = 1;
+      }
+    }
+    visuals.length = 0;
+    visuals.push(...unique);
+
+    // Narrative from the same items.
+    const isSales = /revenue|sales/i.test(vMeasureCol) || /sales|order|revenue/i.test(datasetName);
+    const contribItems = contribDim ? fullItems({ categoryCol: contribDim, valueCol: vMeasureCol, aggFunc: vAggFunc, sortBy: 'value_desc' }) : [];
+    const geoItems = geoDim ? fullItems({ categoryCol: geoDim, valueCol: vMeasureCol, aggFunc: 'count', sortBy: 'value_desc' }) : [];
+    const topC = contribItems[0];
+    const topG = geoItems[0];
+    const avgVal = hasRealMeasure ? dashMetric(rows, vMeasureCol, 'avg') : 0;
+    const driverSentence = topC
+      ? topC.share >= 15
+        ? `${topC.category} is the leading ${hasRealMeasure ? 'driver' : 'segment'}, with ${topC.share.toFixed(1)}% of total ${measureLabel.toLowerCase()}.`
+        : `${humanizeField(measureLabel)} is spread across ${humanizeField(contribDim)}, led by ${topC.category} (${topC.share.toFixed(1)}%).`
+      : `${rows.length.toLocaleString('en-US')} records.`;
+    const narrativeInsight = `${driverSentence}${topG ? ` ${topG.category} has the most records in ${humanizeField(geoDim).toLowerCase()} (${topG.value.toLocaleString('en-US')}).` : ''}${hasRealMeasure ? ` Across ${rows.length.toLocaleString('en-US')} records the average ${measureLabel.toLowerCase()} is ${fmtCompact(avgVal)}.` : ''}`;
 
     const titlePrefix = datasetName.replace(/\.[^/.]+$/, '');
     return {
@@ -7300,21 +7072,12 @@ export const localEngine = {
     const profile = profileDatasetFields(cols, rows);
 
     // 0. CREATE NEW DASHBOARD: Detect intent to build a brand new dashboard from dataset
+    // Rebuilding throws away the user's dashboard, so only an explicit ask
+    // does it ("build a new dashboard", "regenerate the dashboard") -- "make
+    // the dashboard pop" used to replace everything.
     const isCreateIntent =
-      (pLower.includes('dashboard') &&
-        (pLower.includes('create') ||
-          pLower.includes('generate') ||
-          pLower.includes('build') ||
-          pLower.includes('make') ||
-          pLower.includes('rebuild') ||
-          pLower.includes('new') ||
-          pLower.includes('fresh') ||
-          pLower.includes('interactive') ||
-          pLower.includes('executive') ||
-          pLower.includes('scratch'))) ||
-      pLower.startsWith('create ') ||
-      pLower.startsWith('build ') ||
-      pLower.startsWith('generate ');
+      /\b(create|build|generate|regenerate|rebuild)\b.*\bdashboard\b/.test(pLower) ||
+      /\b(new|fresh)\s+dashboard\b|\bfrom scratch\b/.test(pLower);
 
     if (isCreateIntent) {
       const full = await this.generateAiDashboard(datasetId, prompt, context);
@@ -7382,171 +7145,201 @@ export const localEngine = {
       return profile.primaryDim;
     };
 
-    // 1. Change title
-    if (pLower.includes('change title') || pLower.includes('rename dashboard') || pLower.includes('set title')) {
-      const titleClean = prompt.replace(/(change title to|rename dashboard to|set title to|title:)/i, '').trim().replace(/^['"]|['"]$/g, '');
-      if (titleClean) {
-        updated.dashboardTitle = titleClean;
-        updated.dashboard_title = titleClean;
-        patchOp = 'set_title';
-        summary = `Renamed dashboard to '${titleClean}'`;
-      }
-    }
-
-    // 2. Add Slicer
-    else if ((pLower.includes('add') || pLower.includes('create')) && (pLower.includes('slicer') || pLower.includes('filter'))) {
-      let matchedDim = profile.dimensions.find((d) => pLower.includes(d.toLowerCase())) || resolveDim(pLower);
-      if (matchedDim) {
-        const promptWord = prompt.split(/\s+/).find((w) => w.toLowerCase() === matchedDim.toLowerCase());
-        if (promptWord) matchedDim = promptWord;
-        const existingIdx = updated.slicerColumns.findIndex((s: string) => s.toLowerCase() === matchedDim.toLowerCase());
-        if (existingIdx >= 0) {
-          updated.slicerColumns[existingIdx] = matchedDim;
-        } else {
-          updated.slicerColumns.push(matchedDim);
+    // ---- Word-level understanding: whole words only ("country" is not "count",
+    // "summary" is not "sum", "online" is not "line"), and strict column
+    // resolution -- a column the data does not have is refused, never replaced
+    // by a default column.
+    const words = ` ${pLower.replace(/[^a-z0-9_\s-]/g, ' ').replace(/\s+/g, ' ')} `;
+    const hasWord = (...ws: string[]) => ws.some((w) => words.includes(` ${w} `));
+    const allCols: string[] = profile.colNames;
+    const colWords = (c: string) => c.toLowerCase().replace(/[_-]+/g, ' ').trim();
+    const SYN: Record<string, string[]> = {
+      revenue: ['revenue', 'sales', 'amount', 'turnover'], sales: ['sales', 'revenue', 'amount'], amount: ['amount', 'revenue', 'sales', 'value'],
+      customer: ['customer', 'customer_id', 'customer_name', 'client'], customers: ['customer', 'customer_id', 'customer_name', 'client'],
+      product: ['product', 'product_name', 'item', 'sku'], products: ['product', 'product_name', 'item', 'sku'],
+      region: ['region', 'territory'], regions: ['region', 'territory'], quantity: ['quantity', 'qty', 'units'], units: ['units', 'quantity', 'qty'],
+    };
+    /** Columns named in a piece of text, longest name first, as whole words (or a known synonym). */
+    const namedColumns = (text: string, pool: string[] = allCols): string[] => {
+      const t = ` ${text.toLowerCase().replace(/[^a-z0-9_\s-]/g, ' ').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')} `;
+      const hits: Array<{ c: string; at: number }> = [];
+      for (const c of [...pool].sort((a, b) => colWords(b).length - colWords(a).length)) {
+        const cw = colWords(c);
+        let at = t.indexOf(` ${cw} `);
+        if (at < 0 && !cw.endsWith('s')) at = t.indexOf(` ${cw}s `);
+        if (at < 0) {
+          for (const [k, syns] of Object.entries(SYN)) {
+            if (t.includes(` ${k} `) && syns.some((sy) => cw === sy || cw.replace(/ /g, '_') === sy)) { at = t.indexOf(` ${k} `); break; }
+          }
         }
+        if (at >= 0 && !hits.some((h) => h.c === c)) hits.push({ c, at });
+      }
+      return hits.sort((a, b) => a.at - b.at).map((h) => h.c);
+    };
+    const TYPE_WORDS: Array<[string[], string]> = [
+      [['donut', 'doughnut'], 'donut'], [['pie'], 'pie'], [['line', 'trend', 'area'], 'line_area'], [['column', 'columns'], 'column'],
+      [['bar', 'bars'], 'bar'], [['table'], 'table'], [['matrix'], 'matrix'], [['funnel'], 'funnel'], [['histogram'], 'histogram'],
+    ];
+    const typeWordsIn = (text: string) => {
+      const t = ` ${text.replace(/[^a-z0-9\s]/g, ' ')} `;
+      return TYPE_WORDS.filter(([ws]) => ws.some((w) => t.includes(` ${w} `))).map(([, ty]) => ty);
+    };
+    const AGG_WORDS: Array<[string[], string]> = [
+      [['average', 'avg', 'mean'], 'avg'], [['minimum', 'min', 'lowest', 'smallest'], 'min'], [['maximum', 'max', 'highest', 'largest', 'peak'], 'max'],
+      [['count', 'number of', 'how many'], 'count'], [['sum', 'total'], 'sum'],
+    ];
+    const aggIn = (): string | null => {
+      for (const [ws, a] of AGG_WORDS) if (hasWord(...ws)) return a;
+      return null;
+    };
+    const decline = (why: string) => ({
+      patch: { operation: 'none', patch_summary: `I couldn't apply that: ${why}. Nothing was changed.`, declined: true },
+      updated_dashboard: { ...updated, dashboard_title: updated.dashboardTitle || updated.dashboard_title, slicer_columns: updated.slicerColumns, kpis: updated.kpiCards, palette_id: updated.paletteId || updated.palette_id || 'v22' },
+      latency_ms: 2.0,
+      provider: 'localEngine',
+      model: 'in-browser-patcher',
+    });
+    const typeOf = (v: any) => (v.type === 'pie' ? 'donut' : v.type);
+    /** The visual a request is about: the selected one, else one named by its chart type or columns. */
+    const findTarget = (namedTypes: string[]): any => {
+      if (context?.targetId) return updated.visuals.find((v: any) => v.id === context.targetId) || null;
+      for (const ty of namedTypes) {
+        const v = updated.visuals.find((x: any) => typeOf(x) === (ty === 'pie' ? 'donut' : ty));
+        if (v) return v;
+      }
+      return null;
+    };
+    const unresolvedBy = (): string | null => {
+      const m = pLower.match(/\bby\s+([a-z0-9_]+(?:\s+[a-z0-9_]+)?)/);
+      if (!m) return null;
+      return namedColumns(m[1]).length ? null : m[1].split(' ')[0];
+    };
+
+    // 1. Title
+    const titleM = prompt.match(/(?:change|set|rename)\s+(?:the\s+)?(?:dashboard\s+)?title\s+(?:to|as)\s+(.+)$|rename\s+(?:the\s+)?dashboard\s+(?:to|as)\s+(.+)$|title:\s*(.+)$/i);
+    if (titleM) {
+      const t = (titleM[1] || titleM[2] || titleM[3] || '').trim().replace(/^['"]|['"]$/g, '');
+      if (!t) return decline('the new title was empty');
+      updated.dashboardTitle = t;
+      updated.dashboard_title = t;
+      patchOp = 'set_title';
+      summary = `Renamed dashboard to '${t}'`;
+    }
+    // 2/3. Slicers
+    else if (hasWord('slicer', 'slicers', 'filter', 'filters')) {
+      const removing = hasWord('remove', 'delete', 'drop', 'clear');
+      if (removing) {
+        if (hasWord('all') || hasWord('clear')) {
+          if (!updated.slicerColumns.length) return decline('there are no slicers');
+          updated.slicerColumns = [];
+          patchOp = 'remove_slicer';
+          summary = 'Removed all slicers';
+        } else {
+          const named = namedColumns(pLower, updated.slicerColumns);
+          if (!named.length) {
+            const other = namedColumns(pLower);
+            return decline(other.length ? `there is no slicer for '${other[0]}' (slicers: ${updated.slicerColumns.join(', ') || 'none'})` : 'say which slicer to remove');
+          }
+          updated.slicerColumns = updated.slicerColumns.filter((s: string) => !named.includes(s));
+          patchOp = 'remove_slicer';
+          summary = `Removed slicer for '${named.join("', '")}'`;
+        }
+      } else {
+        const named = namedColumns(pLower.replace(/\b(slicers?|filters?|add|create|a|an|for|on|by|the)\b/g, ' '));
+        if (!named.length) return decline('that column is not in this dataset');
+        for (const c of named) if (!updated.slicerColumns.some((s: string) => s.toLowerCase() === c.toLowerCase())) updated.slicerColumns.push(c);
         patchOp = 'add_slicer';
-        summary = `Added slicer for '${matchedDim}'`;
+        summary = `Added slicer for '${named.join("', '")}'`;
       }
     }
-
-    // 3. Remove Slicer
-    else if ((pLower.includes('remove') || pLower.includes('delete')) && (pLower.includes('slicer') || pLower.includes('filter'))) {
-      const matchedDim = updated.slicerColumns.find((s: string) => pLower.includes(s.toLowerCase()));
-      if (matchedDim) {
-        updated.slicerColumns = updated.slicerColumns.filter((s: string) => s !== matchedDim);
-        patchOp = 'remove_slicer';
-        summary = `Removed slicer for '${matchedDim}'`;
-      } else if (updated.slicerColumns.length > 0) {
-        const removed = updated.slicerColumns.pop();
-        patchOp = 'remove_slicer';
-        summary = `Removed slicer for '${removed}'`;
-      }
+    // 4. Remove a visual
+    else if (hasWord('remove', 'delete', 'drop')) {
+      const target = findTarget(typeWordsIn(pLower));
+      if (!target) return decline('say which chart to remove (select it, or name its type, e.g. "remove the donut")');
+      updated.visuals = updated.visuals.filter((v: any) => v.id !== target.id);
+      patchOp = 'remove_visual';
+      summary = `Removed visual '${target.title}'`;
     }
-
-    // 4. Remove Visual
-    else if ((pLower.includes('remove') || pLower.includes('delete')) && (pLower.includes('chart') || pLower.includes('visual') || pLower.includes('table'))) {
-      const targetId = context?.targetId;
-      const targetVis = targetId ? updated.visuals.find((v: any) => v.id === targetId) : updated.visuals[updated.visuals.length - 1];
-      if (targetVis) {
-        updated.visuals = updated.visuals.filter((v: any) => v.id !== targetVis.id);
-        patchOp = 'remove_visual';
-        summary = `Removed visual '${targetVis.title}'`;
-      }
-    }
-
-    // 5. Change Theme / Palette
-    else if (pLower.includes('theme') || pLower.includes('palette') || pLower.includes('glassmorphism') || pLower.includes('v22')) {
-      let nextPalette = 'v22';
-      if (pLower.includes('ocean')) nextPalette = 'ocean';
-      else if (pLower.includes('forest')) nextPalette = 'forest';
-      else if (pLower.includes('sunset')) nextPalette = 'sunset';
-      else if (pLower.includes('classic')) nextPalette = 'classic';
-      else if (pLower.includes('vibrant')) nextPalette = 'vibrant';
-      updated.paletteId = nextPalette;
-      updated.palette_id = nextPalette;
+    // 5. Theme
+    else if (hasWord('theme', 'palette', 'colours', 'colors', 'glassmorphism', 'v22')) {
+      const pal = ['ocean', 'forest', 'sunset', 'classic', 'vibrant'].find((p) => hasWord(p)) || (hasWord('v22', 'glassmorphism') ? 'v22' : '');
+      if (!pal) return decline('available themes are ocean, forest, sunset, classic, vibrant and v22');
+      updated.paletteId = pal;
+      updated.palette_id = pal;
       patchOp = 'set_palette';
-      summary = `Changed theme palette to '${nextPalette}'`;
+      summary = `Changed theme palette to '${pal}'`;
     }
-
-    // 6. Edit Existing Visual (Type, aggregation, or measures)
-    else if (
-      pLower.includes('change') ||
-      pLower.includes('switch') ||
-      pLower.includes('convert') ||
-      pLower.includes('make it') ||
-      pLower.includes('edit')
-    ) {
-      const targetId = context?.targetId;
-      const targetVis = (targetId ? updated.visuals.find((v: any) => v.id === targetId) : updated.visuals[0]) || updated.visuals[0];
-
-      if (targetVis) {
-        let changed = false;
-        if (pLower.includes('donut')) { targetVis.type = 'donut'; changed = true; }
-        else if (pLower.includes('pie')) { targetVis.type = 'pie'; changed = true; }
-        else if (pLower.includes('line') || pLower.includes('area') || pLower.includes('trend')) { targetVis.type = 'line_area'; changed = true; }
-        else if (pLower.includes('column')) { targetVis.type = 'column'; changed = true; }
-        else if (pLower.includes('bar')) { targetVis.type = 'bar'; changed = true; }
-        else if (pLower.includes('table')) { targetVis.type = 'table'; changed = true; }
-
-        if (pLower.includes('average') || pLower.includes('avg')) { targetVis.aggFunc = 'avg'; changed = true; }
-        else if (pLower.includes('sum') || pLower.includes('total')) { targetVis.aggFunc = 'sum'; changed = true; }
-        else if (pLower.includes('count')) { targetVis.aggFunc = 'count'; changed = true; }
-        else if (pLower.includes('min')) { targetVis.aggFunc = 'min'; changed = true; }
-        else if (pLower.includes('max')) { targetVis.aggFunc = 'max'; changed = true; }
-
-        const matchedM = profile.measures.find((m) => pLower.includes(m.toLowerCase()));
-        if (matchedM) { targetVis.valueCol = matchedM; changed = true; }
-
-        const matchedD = profile.dimensions.find((d) => pLower.includes(d.toLowerCase()));
-        if (matchedD) { targetVis.categoryCol = matchedD; changed = true; }
-
-        if (changed) {
-          summary = `Updated visual '${targetVis.title}' (${targetVis.type}, ${targetVis.aggFunc} of ${targetVis.valueCol})`;
-        }
-      }
-    }
-
-    // 7. Add Visual
-    else if (pLower.startsWith('add') || pLower.includes('add visual') || pLower.includes('add chart') || pLower.includes('add metric')) {
-      let targetType = 'column';
-      if (pLower.includes('donut')) targetType = 'donut';
-      else if (pLower.includes('pie')) targetType = 'pie';
-      else if (pLower.includes('line') || pLower.includes('trend')) targetType = 'line_area';
-      else if (pLower.includes('bar')) targetType = 'bar';
-      else if (pLower.includes('table')) targetType = 'table';
-
-      const targetDim = profile.dimensions.find((d) => pLower.includes(d.toLowerCase())) || resolveDim(pLower);
-      const targetMeas = profile.measures.find((m) => pLower.includes(m.toLowerCase())) || resolveMeasure(pLower);
-
-      let aggFunc = 'sum';
-      if (pLower.includes('average') || pLower.includes('avg')) aggFunc = 'avg';
-      else if (pLower.includes('count')) aggFunc = 'count';
-
-      const isSpan2 = targetType === 'table' || targetType === 'matrix';
-      const customWidth = isSpan2 ? 976 : 480;
-      const customHeight = isSpan2 ? 340 : 320;
+    // 7. Add a visual (before "edit": "add a bar chart of ..." also says "chart")
+    else if (/^(add|insert|create|new)\b/.test(pLower) || /^add visual:/.test(pLower)) {
+      const body = pLower.replace(/^add visual:\s*/, '');
+      const types = typeWordsIn(body);
+      const targetType = types[0] || 'column';
+      const byM = body.match(/\b(?:by|per|over|across)\s+(.+)$/);
+      const head = byM ? body.slice(0, byM.index) : body;
+      const dimsNamed = byM ? namedColumns(byM[1]) : [];
+      if (byM && !dimsNamed.length) return decline(`'${byM[1].trim().split(' ')[0]}' is not a column in this dataset`);
+      const countOnly = /\b(tickets?|orders?|rows?|records?|transactions?|count|number of)\b/.test(head) && !namedColumns(head, profile.measures).length;
+      const meas = namedColumns(head, profile.measures)[0] || '';
+      if (!countOnly && !meas) return decline('name the number to show, e.g. "revenue" or "tickets"');
+      if (!dimsNamed.length) return decline('say what to group by, e.g. "by region"');
+      const aggFunc = countOnly ? 'count' : aggIn() || 'sum';
+      const cat = dimsNamed[0];
+      const series = dimsNamed[1] || '';
+      const valueCol = countOnly ? cat : meas;
+      const isSpan2 = targetType === 'table' || targetType === 'matrix' || targetType === 'line_area';
+      const label = (c: string) => colWords(c).replace(/\b\w/g, (ch) => ch.toUpperCase());
+      const what = countOnly ? 'Records' : `${aggFunc === 'avg' ? 'Average ' : aggFunc === 'sum' ? '' : `${aggFunc[0].toUpperCase()}${aggFunc.slice(1)} `}${label(meas)}`;
       const lastVis = updated.visuals[updated.visuals.length - 1];
-      let newX = 16;
-      let newY = 16;
-      if (lastVis) {
-        const lastIsSpan2 = lastVis.span === 2 || (lastVis.customWidth && lastVis.customWidth > 600);
-        if (!lastIsSpan2 && lastVis.x === 16 && !isSpan2) {
-          newX = 512;
-          newY = lastVis.y || 16;
-        } else {
-          newX = 16;
-          newY = (lastVis.y || 16) + (lastVis.customHeight || 320) + 16;
-        }
-      }
-
-      let cleanTitle = `${aggFunc.toUpperCase()} of ${targetMeas} by ${targetDim}`;
-      if (targetType === 'donut') cleanTitle = `Distribution Share of ${targetMeas} by ${targetDim}`;
-      else if (targetType === 'line_area') cleanTitle = `${targetMeas} Trend over ${targetDim}`;
-      else if (targetType === 'bar') cleanTitle = `Top ${targetDim} Leaderboard by ${targetMeas}`;
-      else if (targetType === 'table') cleanTitle = `Detailed ${targetDim} Ledger Matrix`;
-
       const newVis = {
         id: `vis_patch_${Date.now()}`,
-        title: cleanTitle,
+        title: `${what} by ${label(cat)}${series ? ` and ${label(series)}` : ''}`,
         type: targetType,
-        categoryCol: targetDim,
-        valueCol: targetMeas,
-        seriesCol: '',
+        categoryCol: cat,
+        valueCol,
+        seriesCol: series,
         aggFunc,
         bins: 5,
         span: isSpan2 ? 2 : 1,
-        customWidth,
-        customHeight,
-        x: newX,
-        y: newY,
+        customWidth: isSpan2 ? 976 : 480,
+        customHeight: isSpan2 ? 340 : 320,
+        x: 16,
+        y: lastVis ? (lastVis.y || 16) + (lastVis.customHeight || 320) + 16 : 16,
         w: isSpan2 ? 12 : 6,
         h: 4,
+        sortBy: targetType === 'line_area' ? 'category_asc' : 'value_desc',
         customTitle: true,
       };
       updated.visuals.push(newVis);
       patchOp = 'add_visual';
       summary = `Added '${newVis.title}' (${targetType})`;
+    }
+    // 6. Edit a visual
+    else if (hasWord('change', 'switch', 'convert', 'make', 'edit', 'show', 'use', 'turn', 'set') || context?.targetId) {
+      // "change the trend to a column chart": the type before "to" names the
+      // target, the one after it is the new type.
+      const toM = pLower.match(/\b(?:to|into|as)\s+(?:an?\s+)?(.*)$/);
+      const before = toM ? pLower.slice(0, toM.index) : pLower;
+      const after = toM ? toM[1] : pLower;
+      const target = findTarget(typeWordsIn(before));
+      if (!target) return decline('select the chart to change, or name it (e.g. "change the donut to a bar chart")');
+      const missing = unresolvedBy();
+      if (missing) return decline(`'${missing}' is not a column in this dataset`);
+      let changed = false;
+      const newType = typeWordsIn(after).find((t) => t !== typeOf(target)) || (toM ? undefined : typeWordsIn(pLower).find((t) => t !== typeOf(target)));
+      if (newType) { target.type = newType; changed = true; }
+      const agg = aggIn();
+      if (agg && agg !== target.aggFunc) { target.aggFunc = agg; changed = true; }
+      const meas = namedColumns(pLower, profile.measures)[0];
+      if (meas && agg !== 'count') { target.valueCol = meas; changed = true; }
+      const byM2 = pLower.match(/\b(?:by|per|over|across)\s+(.+)$/);
+      const dim = byM2 ? namedColumns(byM2[1])[0] : undefined;
+      if (dim) { target.categoryCol = dim; changed = true; }
+      if (!changed) return decline('I could not tell what to change on that chart');
+      target.customTitle = false;
+      patchOp = 'update_visual';
+      summary = `Updated visual '${target.title}' (${target.type}, ${target.aggFunc} of ${target.valueCol} by ${target.categoryCol})`;
+    } else {
+      return decline(`I didn't understand "${prompt.trim()}" as a dashboard change`);
     }
 
     return {

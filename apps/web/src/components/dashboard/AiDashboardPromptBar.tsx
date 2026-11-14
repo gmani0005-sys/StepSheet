@@ -237,7 +237,10 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         datasetName,
       });
 
-      if (res && res.updated_dashboard) {
+      if (res?.patch?.declined) {
+        // The request could not be mapped to the data: say why, change nothing.
+        setErrorMsg(res.patch.patch_summary);
+      } else if (res && res.updated_dashboard) {
         applyUpdatedDashboard(res.updated_dashboard, res.patch?.patch_summary || `Added visual '${textToRun}'`);
         setPrompt('');
       }
@@ -290,7 +293,10 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         targetId: targetVisId,
       });
 
-      if (res && res.updated_dashboard) {
+      if (res?.patch?.declined) {
+        // The request could not be mapped to the data: say why, change nothing.
+        setErrorMsg(res.patch.patch_summary);
+      } else if (res && res.updated_dashboard) {
         applyUpdatedDashboard(res.updated_dashboard, res.patch?.patch_summary || `Updated visual: '${textToRun}'`);
         setPrompt('');
       }

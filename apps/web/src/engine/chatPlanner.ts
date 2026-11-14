@@ -73,7 +73,7 @@ const ENTITY_DIM_WORDS: Array<[RegExp, string[]]> = [
   [/\b(channels?)\b/, ['channel']],
   [/\b(tiers?)\b/, ['tier', 'account_tier']],
 ];
-const ROW_ENTITY = /\b(orders?|transactions?|purchases?|invoices?|records?|rows?|sales|deals?|tickets?)\b/;
+const ROW_ENTITY = /\b(orders?|transactions?|purchases?|invoices?|records?|rows?|sales|deals?|tickets?|calls?|visits?|bookings?|requests?|cases?|claims?|entries)\b/;
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const fmt = (n: number | null) =>
@@ -180,10 +180,12 @@ export function needsPlanner(q: string): boolean {
     /\b(?:in|for|during|from|of)\s+(?:the\s+)?(?:jan(?:uary)?|feb(?:ruary)?|march|april|june|july|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/.test(q) ||
     /\bq[1-4]\b|\b(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter\b/.test(q) ||
     /\b(second|third|fourth|fifth|2nd|3rd|4th|5th)\s+(highest|lowest|largest|smallest|biggest|most|least|top|best|worst)\b/.test(q) ||
-    /\b\d+\s+(smallest|largest|biggest|lowest|highest|cheapest|most expensive)\s+\w+/.test(q) ||
+    /\b\d+\s+(smallest|largest|biggest|lowest|highest|cheapest|most expensive|longest|shortest)\s+\w+/.test(q) ||
     /\bday of (?:the )?week\b|\bweekdays?\b/.test(q) ||
     /\bby (?:number|count) of\b/.test(q) ||
-    /\b(percent(?:age)?|share|%)\s+of\s+(?:the\s+|total\s+)?(revenue|sales|amount|profit|quantity|units|spend|turnover)\b/.test(q) ||
+    // share of a quantity ("% of refund amount"), not of a row count ("% of orders")
+    (/\b(percent(?:age)?|share|%)\s+of\s+(?:the\s+|total\s+|all\s+)?([a-z_]+)/.test(q) && !ROW_ENTITY.test(q.match(/\b(?:percent(?:age)?|share|%)\s+of\s+(?:the\s+|total\s+|all\s+)?([a-z_]+)/)![1])) ||
+    FREQ_ENTITY.test(q) ||
     // a condition on a group total; "customers with more than 3 orders" stays with the
     // keyword branch, which counts distinct order ids
     /\bhow many\s+\w+\s+(?:have|has|with|had)\s+(?:a\s+|an\s+)?(?:total|average|avg|sum|combined|overall)\b/.test(q) ||
@@ -194,6 +196,8 @@ export function needsPlanner(q: string): boolean {
     /\b(customer|client|order|invoice|product|sku|account)\s+(?:id\s+|#|no\.?\s*)?[a-z]{0,4}-?\d+\b/.test(q)
   );
 }
+// "how many agents have more than 170 tickets", "customers who placed at least 3 orders"
+const FREQ_ENTITY = /\bhow many\s+([a-z_]+)\s+(?:have|has|had|with|placed|made|got|received|handled|raised|opened|submitted|logged|bought)\s+(more than|over|at least|fewer than|less than|under|exactly|at most)\s+(\d+)\s+(orders?|tickets?|transactions?|purchases?|invoices?|records?|rows?|sales|deals?|calls?|visits?|bookings?|requests?|cases?|claims?)\b/;
 const NEGATION_WORDS = /\b(not|excluding|exclude|except|other than|non-?\w+|without|isn't|aren't|wasn't|weren't|apart from|besides)\b/;
 
 export function planChatQuery(prompt: string, rows: Record<string, any>[], profile: PlannerProfile): PlannerResult {
@@ -215,7 +219,20 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
       if (new RegExp(`\\b${esc(m.toLowerCase())}\\b|\\b${esc(human(m.toLowerCase()))}\\b`).test(text)) return m;
     }
     for (const [re, cands] of MEASURE_WORDS) if (re.test(text)) { const c = pickColumn(cands, measures); if (c) return c; }
-    return '';
+    // A distinctive word of the column's name: "resolution time" -> resolution_hours,
+    // "24 hours" -> resolution_hours, "refund" -> refund_amount.
+    let best = '';
+    let bestLen = 0;
+    for (const m of measures) {
+      for (const tok of m.toLowerCase().split(/[_\s-]+/)) {
+        if (tok.length < 4 || /^(amount|value|total|count|number|price)$/.test(tok)) continue;
+        if (new RegExp(`\\b${esc(tok)}s?\\b`).test(text) && tok.length > bestLen) {
+          best = m;
+          bestLen = tok.length;
+        }
+      }
+    }
+    return best;
   };
   const allDims = profile.colNames.filter((c) => !measures.includes(c) && c !== dateCol);
   const dimFor = (word: string): string => {
@@ -245,7 +262,8 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
   // Numeric threshold on rows -- unless it is a group condition (HAVING) or a frequency ("more than once").
   const havingMatch = q.match(/\bhow many\s+([a-z_ ]+?)\s+(?:have|has|had|with|where|whose)\b/);
   const freqMatch = q.match(/\b(?:more than|at least|exactly|only)\s+(once|twice|\d+\s+times)\b/);
-  const thr = parseThreshold(q);
+  const freqEntity = q.match(FREQ_ENTITY);
+  const thr = freqEntity ? null : parseThreshold(q);
   let havingThreshold: ReturnType<typeof parseThreshold> = null;
   if (thr) {
     const entityWord = havingMatch?.[1]?.trim().split(' ').pop() || '';
@@ -253,10 +271,13 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
     if (groupEntity && /\b(total|sum|combined|average|avg|mean|overall)\b/.test(q.slice(0, thr.start))) {
       havingThreshold = thr;
     } else {
-      // The measure the threshold is about: named nearest before it, else after it, else units / money.
+      // The measure the threshold is about: a unit word right after the number
+      // ("more than 24 hours"), else the measure named nearest before it, else
+      // one after it, else the main money measure.
       const before = q.slice(0, thr.start);
-      let col = '';
-      let best = -1;
+      const unitAfter = q.slice(thr.end).match(/^\s*([a-z_]+)/)?.[1] || '';
+      let col = unitAfter && !ROW_ENTITY.test(unitAfter) ? measureIn(unitAfter) : '';
+      let best = col ? Infinity : -1;
       for (const m of measures) {
         for (const re of [new RegExp(`\\b${esc(m.toLowerCase())}\\b`, 'g'), new RegExp(`\\b${esc(human(m.toLowerCase()))}\\b`, 'g')]) {
           let mm: RegExpExecArray | null;
@@ -494,6 +515,33 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
     });
   }
 
+  // HAVING on a row count per entity: "how many agents have more than 170 tickets".
+  if (freqEntity) {
+    const entity = dimFor(freqEntity[1]);
+    if (!entity) return decline(`which column "${freqEntity[1]}" refers to`);
+    const noun = freqEntity[4].replace(/s$/, '');
+    // Count distinct ids when the noun has its own id column (an order with
+    // several lines is one order), else rows.
+    const idCol = allDims.find((c) => c.toLowerCase() === `${noun}_id` || c.toLowerCase() === `${noun}id` || c.toLowerCase() === `${noun}_no`) || '';
+    const opMap: Record<string, NumOp> = { 'more than': 'gt', over: 'gt', 'at least': 'gte', 'fewer than': 'lt', 'less than': 'lt', under: 'lt', exactly: 'eq', 'at most': 'lte' };
+    const op = opMap[freqEntity[2]];
+    const n = parseInt(freqEntity[3], 10);
+    const g = groupOf((r) => (r[entity] === null || r[entity] === undefined || String(r[entity]).trim() === '' ? null : String(r[entity]).trim().toLowerCase()), matched);
+    const counts = [...g.entries()].map(([k, rs]) => [k, idCol ? new Set(rs.map((r) => String(r[idCol] ?? '').trim().toLowerCase()).filter(Boolean)).size : rs.length] as const);
+    const hits = counts.filter(([, c]) => cmp(op, c, n));
+    const sqlOp = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=', between: 'BETWEEN' }[op];
+    return answer({
+      intent: 'having_count',
+      explanation: `**${hits.length.toLocaleString('en-US')}** ${human(entity)} values have ${OP_TEXT[op]} ${n} ${idCol ? `distinct ${human(idCol)}s` : 'rows'}${whereText} (out of ${g.size.toLocaleString('en-US')}).`,
+      method: `${idCol ? `COUNT(DISTINCT ${idCol})` : 'COUNT(*)'} per ${entity}, keep those ${OP_TEXT[op]} ${n}, then count them.`,
+      columns: [`${entity}_count`],
+      rows: [{ [`${entity}_count`]: hits.length }],
+      chart: null,
+      trace: `SELECT COUNT(*) FROM (SELECT "${entity}" FROM dataset ${where} GROUP BY "${entity}" HAVING ${idCol ? `COUNT(DISTINCT "${idCol}")` : 'COUNT(*)'} ${sqlOp} ${n});`,
+      groupBy: [entity],
+    });
+  }
+
   // HAVING on a group frequency: "how many customers ordered more than once".
   if (freqMatch && /\bhow many\b/.test(q)) {
     const entityWord = (q.match(/\bhow many\s+([a-z_]+)/)?.[1] || '').trim();
@@ -563,14 +611,14 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
   const nthM = q.match(/\b(second|third|fourth|fifth|2nd|3rd|4th|5th)\s+(highest|lowest|largest|smallest|biggest|most|least|top|best|worst)\b/);
   const topNByCount = q.match(/\b(?:top|bottom)\s+(\d+)\s+([a-z_]+?)\s+by\s+(?:the\s+)?(?:number|count)\s+of\b/);
   const topN = q.match(/\b(top|bottom)\s+(\d+)\s+([a-z_]+)\b/);
-  const listN = q.match(/\b(\d+)\s+(smallest|largest|biggest|lowest|highest|cheapest|most expensive)\s+([a-z_]+)/);
+  const listN = q.match(/\b(\d+)\s+(smallest|largest|biggest|lowest|highest|cheapest|most expensive|longest|shortest)\s+([a-z_]+)/);
   const dowAsked = /\bday of (?:the )?week\b|\bweekdays?\b/.test(q);
   const byM = q.match(/\b(?:by|per|for each|across)\s+([a-z_]+(?:\s+[a-z_]+)?)/);
 
   // Row listing: "list the 5 smallest orders by revenue".
   if (listN && ROW_ENTITY.test(listN[3])) {
     const n = Math.min(500, parseInt(listN[1], 10));
-    const asc = /smallest|lowest|cheapest/.test(listN[2]);
+    const asc = /smallest|lowest|cheapest|shortest/.test(listN[2]);
     const by = measureIn(q.slice((listN.index ?? 0) + listN[0].length)) || measure || primaryMeasure;
     if (!by) return decline('which number column to rank the rows by');
     const ranked = matched
@@ -707,7 +755,12 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
     explanation:
       agg === 'count'
         ? `There are **${fmt(value as number)}** rows${whereText} (out of ${rows.length.toLocaleString('en-US')} total).`
-        : `${AGG_LABEL[agg]}${['std', 'var', 'median'].includes(agg) ? ' of' : ''} ${human(measure)}${whereText} (${matched.length.toLocaleString('en-US')} of ${rows.length.toLocaleString('en-US')} records) is **${fmt(value as number)}**.`,
+        : `${AGG_LABEL[agg]}${['std', 'var', 'median'].includes(agg) ? ' of' : ''} ${human(measure)}${whereText} is **${fmt(value as number)}** (${(() => {
+            const used = valuesOf(matched).length;
+            return used === matched.length
+              ? `${matched.length.toLocaleString('en-US')} of ${rows.length.toLocaleString('en-US')} records`
+              : `${used.toLocaleString('en-US')} values from ${matched.length.toLocaleString('en-US')} of ${rows.length.toLocaleString('en-US')} records; ${(matched.length - used).toLocaleString('en-US')} blank or non-numeric ignored`;
+          })()}).`,
     method: `${AGG_SQL[agg]}(${agg === 'count' ? '*' : measure})${whereText.replace(/\*\*/g, '')}${agg === 'std' || agg === 'var' ? ' (sample, n - 1, like Excel STDEV.S / VAR.S)' : ''}.`,
     columns: [outName],
     rows: [{ [outName]: value }],

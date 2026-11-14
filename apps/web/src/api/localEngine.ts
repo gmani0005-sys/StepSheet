@@ -741,10 +741,13 @@ function orderKey(v: any): OrderKey {
   if (d) return { kind: 1, n: d.getTime(), s: '' };
   return { kind: 2, n: 0, s: String(v) };
 }
+// One collator for every text comparison: String#localeCompare with options
+// builds a new collator per call, which made a 500K-row text sort take ~30 s.
+const TEXT_COLLATOR = new Intl.Collator(undefined, { numeric: true });
 function compareOrderKeys(a: OrderKey, b: OrderKey, desc: boolean): number {
   if (a.kind === 3 || b.kind === 3) return a.kind === b.kind ? 0 : a.kind === 3 ? 1 : -1;
   if (a.kind !== b.kind) return a.kind - b.kind;
-  const cmp = a.kind === 2 ? a.s.localeCompare(b.s, undefined, { numeric: true }) : a.n - b.n;
+  const cmp = a.kind === 2 ? TEXT_COLLATOR.compare(a.s, b.s) : a.n - b.n;
   return desc ? -cmp : cmp;
 }
 /** Grouping/partition key: trimmed and case-insensitive, like Group By and Join. */
@@ -886,7 +889,7 @@ function legacyEvaluateFormulaForRow(expression: string, row: Record<string, any
   const sandbox: Record<string, any> = {
     // Row column accessor
     _get: (colName: string) => {
-      if (colName in row) return row[colName];
+      if (Object.prototype.hasOwnProperty.call(row, colName)) return row[colName];
       const foundKey = Object.keys(row).find(
         (k) => k.toLowerCase() === colName.toLowerCase()
       );
@@ -1574,6 +1577,112 @@ function generateStepCode(step: StepDefinition): GeneratedCode {
   }
 }
 
+const has = (v: any) => (Array.isArray(v) ? v.filter((x) => x !== null && x !== undefined && x !== '').length > 0 : v !== null && v !== undefined && String(v).trim() !== '');
+const needColumn = (p: any) => (has(p.column) || has(p.columns) ? '' : 'which column');
+/** For each step type, '' when the settings are usable, else what is missing. */
+const STEP_REQUIREMENTS: Record<string, (p: any) => string> = {
+  change_type: needColumn,
+  rename_column: (p) => (!has(p.old_name || p.column) ? 'which column' : !has(p.new_name) ? 'the new name' : ''),
+  filter_rows: (p) => (Array.isArray(p.conditions) ? (p.conditions.some((c: any) => c && has(c.column)) ? '' : 'a condition') : has(p.column) ? '' : 'a condition'),
+  sort_rows: (p) => (Array.isArray(p.conditions) ? (p.conditions.some((c: any) => c && has(c.column)) ? '' : 'a sort column') : has(p.column) ? '' : 'a sort column'),
+  remove_duplicates: () => '',
+  remove_column: needColumn,
+  reorder_columns: (p) => (has(p.column_order) ? '' : 'the column order'),
+  custom_column: (p) => (has(p.expression) || has(p.formula) || p.value !== undefined ? '' : 'a formula or value'),
+  conditional: (p) => (has(p.clauses) || has(p.rules) || has(p.column) ? '' : 'a rule'),
+  group_by: (p) => (has(p.group_by_columns) || has(p.group_columns) || has(p.group_by) || has(p.aggregations) || has(p.agg_column) ? '' : 'group columns or a calculation'),
+  pivot: (p) => (has(p.value_column) ? '' : 'the value column'),
+  unpivot: (p) => (has(p.value_columns) || has(p.id_columns) ? '' : 'which columns to unpivot'),
+  window_calc: (p) => (has(p.value_column) || has(p.target_column) || has(p.column) || p.calc_type === 'row_number' || p.function === 'row_number' ? '' : 'the value column'),
+  join: (p) => (has(p.right_dataset_id) || has(p.lookup_dataset_id) ? '' : 'the dataset to join'),
+  vlookup: (p) => (has(p.right_dataset_id) || has(p.lookup_dataset_id) ? '' : 'the lookup dataset'),
+  xlookup: (p) => (has(p.right_dataset_id) || has(p.lookup_dataset_id) ? '' : 'the lookup dataset'),
+  append: (p) => (has(p.dataset_ids) || has(p.append_dataset_id) || has(p.right_dataset_id) ? '' : 'the dataset to append'),
+  split_column: needColumn,
+  text_transform: (p) => (has(p.column) || has(p.concat_columns) ? '' : 'which column'),
+  math_transform: (p) => (has(p.column) || has(p.column1) || has(p.expression) ? '' : 'which column'),
+  date_transform: needColumn,
+  replace_values: (p) => (!has(p.column) && !has(p.columns) ? 'which column' : [p.find_value, p.old_value, p.search_value].some((v) => v !== undefined) ? '' : 'the value to find'),
+  standardize_values: needColumn,
+  fill_down: needColumn,
+  impute_missing: needColumn,
+  flag_outliers: needColumn,
+  top_bottom_n: needColumn,
+  promote_headers: () => '',
+  transpose: () => '',
+  remove_rows: () => '',
+};
+
+/** "__proto__" cannot be a key of a plain object (assigning it changes the
+ * object's prototype and the column silently disappears). */
+const UNSAFE_KEY = '__proto__';
+const safeKey = (name: string) => (name === UNSAFE_KEY ? '_proto_' : name);
+function safeOutputNames(p: any, warn: (m: string) => void): any {
+  const OUT = ['new_name', 'new_column', 'output_column', 'target_column', 'custom_column_name', 'name_column', 'alias'];
+  let out = p;
+  const fix = (v: any) => {
+    warn(`"${UNSAFE_KEY}" cannot be used as a column name; "_proto_" was used instead.`);
+    return safeKey(v);
+  };
+  for (const k of OUT) if (p[k] === UNSAFE_KEY) out = { ...out, [k]: fix(p[k]) };
+  if (p.value_column === UNSAFE_KEY) out = { ...out, value_column: fix(p.value_column) };
+  if (Array.isArray(p.new_column_names) && p.new_column_names.includes(UNSAFE_KEY)) out = { ...out, new_column_names: p.new_column_names.map((n: string) => (n === UNSAFE_KEY ? fix(n) : n)) };
+  if (Array.isArray(p.aggregations) && p.aggregations.some((a: any) => a?.alias === UNSAFE_KEY)) out = { ...out, aggregations: p.aggregations.map((a: any) => (a?.alias === UNSAFE_KEY ? { ...a, alias: fix(a.alias) } : a)) };
+  return out;
+}
+
+/** Column names a step's settings refer to in the CURRENT rows (not join/append right-hand sides or new output names). */
+function referencedColumns(type: string, p: any): string[] {
+  const out: string[] = [];
+  const add = (v: any) => {
+    if (typeof v === 'string' && v.trim()) out.push(v);
+    else if (Array.isArray(v)) v.forEach((x) => (typeof x === 'string' ? add(x) : x && typeof x === 'object' && add(x.column)));
+  };
+  if (['append', 'custom_column', 'conditional', 'promote_headers', 'transpose'].includes(type)) return out;
+  add(p.column);
+  add(p.columns);
+  add(p.group_by_columns);
+  add(p.group_columns);
+  add(p.index_columns);
+  add(p.pivot_column);
+  if (type !== 'unpivot') add(p.value_column); // unpivot's value_column is the NEW column's name
+  add(p.partition_by);
+  add(p.order_by);
+  add(p.date_column);
+  add(p.source_column);
+  if (type === 'rename_column') add(p.old_name);
+  if (type === 'join' || type === 'vlookup' || type === 'xlookup') add(p.left_key || p.left_key_col);
+  if (Array.isArray(p.conditions)) p.conditions.forEach((c: any) => c && add(c.column));
+  if (Array.isArray(p.aggregations)) p.aggregations.forEach((a: any) => a && a.function !== 'count' && add(a.column));
+  return [...new Set(out)];
+}
+
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+        i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1] ? d[i - 2][j - 2] + 1 : Infinity);
+  return d[a.length][b.length];
+}
+
+/** A step pointed at a column that is not there (a typo, or the feed dropped
+ * or renamed it) used to run silently: a filter matched 0 rows, a Group By
+ * made one blank group. Say so, and suggest the likely column. */
+function warnMissingColumns(type: string, p: any, rows: Record<string, any>[], warn: (m: string) => void) {
+  if (rows.length === 0) return;
+  const present = new Set<string>();
+  for (const r of rows.length > 400 ? [...rows.slice(0, 200), ...rows.slice(-200)] : rows) for (const k of Object.keys(r)) present.add(k);
+  for (const col of referencedColumns(type, p)) {
+    if (present.has(col)) continue;
+    const lower = col.trim().toLowerCase();
+    const guess = [...present].find((k) => k.trim().toLowerCase() === lower) || [...present].find((k) => editDistance(k.toLowerCase(), lower) <= 2);
+    warn(`Column "${col}" was not found${guess ? ` -- did you mean "${guess}"?` : ''} The step treats it as blank.`);
+  }
+}
+
 function executePipelineSteps(
   initialRows: Record<string, any>[],
   steps: StepDefinition[],
@@ -1613,7 +1722,32 @@ function executePipelineSteps(
     sqlParts.push(`${cteName} AS (\n  ${code.sql.replace(/prev_step/g, prevCte)}\n)`);
     prevCte = cteName;
 
-    const p = step.params || {};
+    const p = safeOutputNames(step.params || {}, warn);
+    // Never run a step silently wrong: an unknown type, or a step saved
+    // without its settings, is skipped and reported (a Group By with no
+    // settings used to collapse the data into one row).
+    if (!STEP_REQUIREMENTS[step.type]) {
+      warn(`Unknown step type "${step.type}" -- this step was skipped.`);
+      return;
+    }
+    const missingSetting = STEP_REQUIREMENTS[step.type](p);
+    if (missingSetting) {
+      warn(`This step is missing its settings (${missingSetting}) and was skipped.`);
+      return;
+    }
+    const otherDs = p.right_dataset_id || p.lookup_dataset_id;
+    if (['join', 'vlookup', 'xlookup'].includes(step.type) && otherDs && !allDatasets.some((d) => d.meta.id === otherDs)) {
+      warn(`The dataset to ${step.type === 'join' ? 'join' : 'look up'} ("${otherDs}") could not be found -- this step was skipped.`);
+      return;
+    }
+    warnMissingColumns(step.type, p, rows, warn);
+    if ((step.type === 'custom_column' || step.type === 'math_transform') && typeof (p.expression || p.formula) === 'string' && rows.length) {
+      const present = new Set(Object.keys(rows[0]));
+      const missingRefs = [...new Set([...String(p.expression || p.formula).matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]))].filter(
+        (c) => !present.has(c) && ![...present].some((k) => k.toLowerCase() === c.toLowerCase())
+      );
+      if (missingRefs.length) warn(`The formula refers to ${missingRefs.map((c) => `[${c}]`).join(', ')}, which ${missingRefs.length === 1 ? 'is' : 'are'} not a column; ${missingRefs.length === 1 ? 'it is' : 'they are'} treated as blank.`);
+    }
 
     switch (step.type) {
       case 'change_type': {
@@ -1769,7 +1903,7 @@ function executePipelineSteps(
             ? [p.column]
             : [];
         const direction = p.direction || 'down';
-        const lastVal: Record<string, any> = {};
+        const lastVal: Record<string, any> = Object.create(null); // keyed by data values: no inherited keys
         if (direction === 'up') {
           const cloned = rows.map((r) => ({ ...r }));
           for (let i = cloned.length - 1; i >= 0; i--) {
@@ -2325,7 +2459,7 @@ function executePipelineSteps(
           const pivotNorm = (v: any): string => {
             if (v === null || v === undefined || String(v).trim() === '') return 'Blank';
             const k = groupKeyOf(v);
-            if (!pivotLabelOf.has(k)) pivotLabelOf.set(k, String(v).trim());
+            if (!pivotLabelOf.has(k)) pivotLabelOf.set(k, safeKey(String(v).trim()));
             return pivotLabelOf.get(k)!;
           };
           const pivotValues = pivotCol
@@ -2803,10 +2937,48 @@ function executePipelineSteps(
           }));
         }
 
+        // Columns are matched by name ignoring case and surrounding spaces, so
+        // a feed that starts sending "Revenue " instead of "revenue" stays in
+        // one column. Every rename, new column and missing column is reported.
+        const norm = (c: string) => c.trim().toLowerCase();
+        const canon = new Map<string, string>();
+        for (const r of rows.length > 400 ? [...rows.slice(0, 200), ...rows.slice(-200)] : rows) {
+          for (const k of Object.keys(r)) if (!canon.has(norm(k))) canon.set(norm(k), k);
+        }
+        const baseNames = new Set(canon.keys());
+        const renamed: string[] = [];
+        const added = new Map<string, string[]>();
+        const missing = new Map<string, string[]>();
+        const missingIds: string[] = [];
+        let withinBatchDupes = 0;
+        let baseDupes = 0;
+        let staleSkipped = 0;
+        const newestBy: string = p.newest_by || '';
+
         otherIds.forEach((id) => {
           const other = allDatasets.find((d) => d.meta.id === id);
+          if (!other) {
+            missingIds.push(id);
+            return;
+          }
           if (other) {
             const otherCols = other.meta.schema_metadata.map((c) => c.name);
+            const colMap = new Map<string, string>();
+            if (!alignByPos) {
+              for (const rc of otherCols) {
+                const target = canon.get(norm(rc));
+                if (target === undefined) {
+                  canon.set(norm(rc), rc);
+                  colMap.set(rc, rc);
+                  if (rows.length > 0 && !baseNames.has(norm(rc))) (added.get(rc) || added.set(rc, []).get(rc)!).push(other.meta.name);
+                } else {
+                  colMap.set(rc, target);
+                  if (target !== rc) renamed.push(`"${rc}" in ${other.meta.name} -> "${target}"`);
+                }
+              }
+              const otherNorm = new Set(otherCols.map(norm));
+              for (const [n, name] of canon) if (baseNames.has(n) && !otherNorm.has(n)) (missing.get(name) || missing.set(name, []).get(name)!).push(other.meta.name);
+            }
             let mappedOtherRows = other.rows.map((r) => {
               let nextR: Record<string, any>;
               if (alignByPos && leftCols.length > 0) {
@@ -2817,7 +2989,8 @@ function executePipelineSteps(
                 });
                 nextR = posRow;
               } else {
-                nextR = { ...r };
+                nextR = {};
+                for (const k of Object.keys(r)) nextR[colMap.get(k) ?? canon.get(norm(k)) ?? k] = r[k];
               }
               if (addCustomCol && customCol) {
                 nextR[customCol] = appendVal;
@@ -2825,26 +2998,77 @@ function executePipelineSteps(
               return nextR;
             });
 
-            // Incremental key handling
+            // Incremental key handling. Keys match like Remove Duplicates and
+            // Group By (trimmed, case-insensitive), and a batch that carries the
+            // same key twice contributes ONE row: for upsert the last one (the
+            // latest update), for append-new-only the first.
             if (keyCol && (incMode === 'append_new_only' || incMode === 'upsert')) {
-              const existingKeys = new Set(rows.map((r) => String(r[keyCol] ?? '').trim()));
+              const keyOf = (r: Record<string, any>) => groupKeyOf(r[keyCol]);
               if (incMode === 'append_new_only') {
-                mappedOtherRows = mappedOtherRows.filter(
-                  (r) => !existingKeys.has(String(r[keyCol] ?? '').trim())
-                );
-                rows = [...rows, ...mappedOtherRows];
+                const existingKeys = new Set(rows.map(keyOf));
+                const fresh: Record<string, any>[] = [];
+                for (const r of mappedOtherRows) {
+                  const k = keyOf(r);
+                  if (existingKeys.has(k)) continue;
+                  existingKeys.add(k);
+                  fresh.push(r);
+                }
+                rows = [...rows, ...fresh];
               } else if (incMode === 'upsert') {
-                const newKeys = new Set(mappedOtherRows.map((r) => String(r[keyCol] ?? '').trim()));
-                rows = [
-                  ...rows.filter((r) => !newKeys.has(String(r[keyCol] ?? '').trim())),
-                  ...mappedOtherRows,
-                ];
+                // newest_by: keep whichever version has the later timestamp, so
+                // a late-arriving stale update cannot overwrite a newer one.
+                const stamp = (r: Record<string, any>) => {
+                  if (!newestBy) return 0;
+                  const k = orderKey(r[newestBy]);
+                  return k.kind === 0 || k.kind === 1 ? k.n : -Infinity; // number or date
+                };
+                // The key is unique in the result: repeats already in the base
+                // rows collapse the same way (last, or newest by newest_by).
+                const pos = new Map<string, number>();
+                const merged: Record<string, any>[] = [];
+                for (const r of rows) {
+                  const k = keyOf(r);
+                  const at = pos.get(k);
+                  if (at === undefined) {
+                    pos.set(k, merged.length);
+                    merged.push(r);
+                  } else {
+                    baseDupes++;
+                    if (!(newestBy && stamp(merged[at]) > stamp(r))) merged[at] = r;
+                  }
+                }
+                const inThisBatch = new Set<string>();
+                for (const r of mappedOtherRows) {
+                  const k = keyOf(r);
+                  if (inThisBatch.has(k)) withinBatchDupes++;
+                  else inThisBatch.add(k);
+                  const at = pos.get(k);
+                  if (at === undefined) {
+                    pos.set(k, merged.length);
+                    merged.push(r);
+                    continue;
+                  }
+                  if (newestBy && stamp(merged[at]) > stamp(r)) {
+                    staleSkipped++;
+                    continue;
+                  }
+                  merged[at] = r;
+                }
+                rows = merged;
               }
             } else {
               rows = [...rows, ...mappedOtherRows];
             }
           }
         });
+
+        if (missingIds.length) warn(`${missingIds.length} dataset${missingIds.length === 1 ? '' : 's'} to append could not be found and ${missingIds.length === 1 ? 'was' : 'were'} skipped.`);
+        if (renamed.length) warn(`Matched ${renamed.length} column name${renamed.length === 1 ? '' : 's'} that differ only in case or spaces: ${renamed.slice(0, 3).join(', ')}${renamed.length > 3 ? ', ...' : ''}.`);
+        for (const [c, from] of added) warn(`New column "${c}" first appears in ${from[0]}${from.length > 1 ? ` (+${from.length - 1} more)` : ''}; earlier rows are blank there.`);
+        for (const [c, from] of missing) warn(`${from.length} appended dataset${from.length === 1 ? '' : 's'} (${from.slice(0, 2).join(', ')}${from.length > 2 ? ', ...' : ''}) ${from.length === 1 ? 'has' : 'have'} no "${c}" column; those rows are blank there.`);
+        if (staleSkipped) warn(`${staleSkipped} incoming row${staleSkipped === 1 ? ' was' : 's were'} older than the stored version (by "${newestBy}") and ${staleSkipped === 1 ? 'was' : 'were'} not applied.`);
+        if (baseDupes) warn(`${baseDupes} row${baseDupes === 1 ? '' : 's'} in the starting data repeated a key; one row per key was kept.`);
+        if (withinBatchDupes) warn(`${withinBatchDupes} key${withinBatchDupes === 1 ? '' : 's'} appeared more than once in the appended data; one row per key was kept.`);
 
         if (incMode === 'distinct' || p.union_type === 'distinct') {
           const allCols = inferSchema(rows).map((c) => c.name);
@@ -2897,10 +3121,10 @@ function executePipelineSteps(
           rows = rows.map((r) => {
             const next: Record<string, any> = {};
             order.forEach((k) => {
-              if (k in r) next[k] = r[k];
+              if (Object.prototype.hasOwnProperty.call(r, k)) next[k] = r[k];
             });
             Object.keys(r).forEach((k) => {
-              if (!(k in next)) next[k] = r[k];
+              if (!Object.prototype.hasOwnProperty.call(next, k)) next[k] = r[k];
             });
             return next;
           });
@@ -3587,6 +3811,16 @@ export const localEngine = {
       }
     }
 
+    // JSON.parse keeps a "__proto__" key as an own property; copying such a
+    // row later would turn it into the prototype and drop the column.
+    if (rows.some((r) => r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, '__proto__'))) {
+      rows = rows.map((r) => {
+        if (!r || typeof r !== 'object' || !Object.prototype.hasOwnProperty.call(r, '__proto__')) return r;
+        const next: Record<string, any> = {};
+        for (const k of Object.keys(r)) Object.defineProperty(next, k === '__proto__' ? '_proto_' : k, { value: r[k], enumerable: true, writable: true, configurable: true });
+        return next;
+      });
+    }
     let schema = inferSchema(rows);
     if (schema.length === 0 && parsedHeaders.length > 0) {
       // A header-only file still has columns (it is a template to fill).
@@ -5077,6 +5311,14 @@ export const localEngine = {
     context?: { columns?: any[]; rows?: any[]; datasetName?: string }
   ): Promise<any> {
     const { rows, cols, datasetName } = resolveActiveDatasetContext(datasetId, context);
+    if (!String(prompt ?? '').trim()) {
+      return {
+        plan: { schema_version: '1.0', intent: 'empty', dataset_id: datasetId, select: [], filters: [], group_by: [], limit: 0, chart: null, explanation: 'No question asked.' },
+        explanation: `Ask a question about ${datasetName || 'this dataset'}, for example "total revenue by region" or "how many orders are cancelled?".`,
+        calculation_method: 'No calculation: the question was empty.',
+        columns: [], rows: [], row_count: 0, chart: null, query_trace: '', latency_ms: 0.5, provider: 'localEngine', model: 'duckdb-in-browser',
+      };
+    }
     const profile = profileDatasetFields(cols, rows);
     const pLower = prompt.toLowerCase().trim();
 
@@ -5251,7 +5493,7 @@ export const localEngine = {
     // column (a name or id) is not something a user references by value, and
     // including it risks a coincidental word match.
     const findNamedCategoricalValue = (): { value: string; col: string } | null => {
-      const valueToCol: Record<string, string> = {};
+      const valueToCol: Record<string, string> = Object.create(null); // keyed by data values: no inherited keys
       for (const d of profile.dimensions) {
         const seen = new Set<string>();
         let tooHighCardinality = false;
@@ -5267,7 +5509,7 @@ export const localEngine = {
         }
         if (!tooHighCardinality && seen.size > 0) {
           for (const v of seen) {
-            if (!(v in valueToCol)) valueToCol[v] = d;
+            if (!Object.prototype.hasOwnProperty.call(valueToCol, v)) valueToCol[v] = d;
           }
         }
       }
@@ -5967,7 +6209,7 @@ export const localEngine = {
         else if (pLower.includes('amount')) alias = 'Total Amount';
 
         const nfA = namedFilter(dimCol);
-        const groupSums: Record<string, number> = {};
+        const groupSums: Record<string, number> = Object.create(null); // keyed by data values: no inherited keys
         for (const r of nfA ? nfA.rows : rows) {
           let k = String(getRowVal(r, dimCol) ?? '(Blank)').trim();
           if (!k) k = '(Blank)';
@@ -6071,7 +6313,7 @@ export const localEngine = {
         else if (targetEntityCol.toLowerCase().includes('product')) alias = 'Product Count';
 
         const distinctByGroup: Record<string, Set<string>> = {};
-        const countByGroup: Record<string, number> = {};
+        const countByGroup: Record<string, number> = Object.create(null); // keyed by data values: no inherited keys
 
         for (const r of rows) {
           let g = String(getRowVal(r, groupDim) ?? '(Blank)').trim();
@@ -6140,7 +6382,7 @@ export const localEngine = {
       }
 
       const nfG = namedFilter(groupDim);
-      const groupValues: Record<string, number[]> = {};
+      const groupValues: Record<string, number[]> = Object.create(null); // keyed by data values: no inherited keys
       for (const r of nfG ? nfG.rows : rows) {
         let k = String(getRowVal(r, groupDim) ?? '(Blank)').trim();
         if (!k) k = '(Blank)';
@@ -6406,7 +6648,7 @@ export const localEngine = {
     }
     const groupKey = resolveDimCol(pLower) || profile.primaryDim;
 
-    const groupSums: Record<string, number> = {};
+    const groupSums: Record<string, number> = Object.create(null); // keyed by data values: no inherited keys
     for (const r of rows) {
       let k = String(getRowVal(r, groupKey) ?? '(Blank)').trim();
       if (!k) k = '(Blank)';

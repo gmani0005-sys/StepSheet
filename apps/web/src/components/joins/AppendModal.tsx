@@ -37,6 +37,9 @@ export const AppendModal: React.FC<AppendModalProps> = ({ isOpen, onClose }) => 
 
   const [incrementalMode, setIncrementalMode] = useState<'all' | 'distinct' | 'append_new_only' | 'upsert'>('all');
   const [keyColumn, setKeyColumn] = useState('');
+  // Upsert: keep the version with the latest value in this column, so a
+  // late-arriving older update cannot overwrite a newer one.
+  const [newestBy, setNewestBy] = useState('');
   const [alignmentMode, setAlignmentMode] = useState<'by_name' | 'by_position'>('by_name');
 
   // Custom Provenance / Tracking Column (e.g. Month, Quarter, Batch)
@@ -127,6 +130,7 @@ export const AppendModal: React.FC<AppendModalProps> = ({ isOpen, onClose }) => 
         appended_value: addCustomCol ? appendVal : undefined,
         incremental_mode: incrementalMode,
         key_column: (incrementalMode === 'append_new_only' || incrementalMode === 'upsert') ? keyColumn : undefined,
+        newest_by: incrementalMode === 'upsert' && newestBy ? newestBy : undefined,
       },
     });
     onClose();
@@ -587,6 +591,26 @@ export const AppendModal: React.FC<AppendModalProps> = ({ isOpen, onClose }) => 
                         {c.name} ({c.data_type})
                       </option>
                     ))}
+                </select>
+              </div>
+            )}
+            {incrementalMode === 'upsert' && (
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-slate-300 shrink-0 font-medium" title="Use when updates can arrive late or out of order">
+                  Newest version by:
+                </div>
+                <select
+                  value={newestBy}
+                  onChange={(e) => setNewestBy(e.target.value)}
+                  aria-label="Newest version by"
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400"
+                >
+                  <option value="">Arrival order (later file wins)</option>
+                  {leftColumns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      Latest {c.name}
+                    </option>
+                  ))}
                 </select>
               </div>
             )}

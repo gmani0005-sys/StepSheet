@@ -323,10 +323,18 @@ export function parseSharedDate(raw: any, opts: { asDateStep?: boolean; monthFir
   // A string that names an impossible date is simply not a date.
 
   // ISO yyyy-mm-dd (optional time, optional seconds)
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(am|pm)?)?(?![\d])/i);
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(am|pm)?\s*(z|[+-]\d{2}(?::?\d{2})?)?)?(?![\d])/i);
   if (m) {
-    const [, y, mo, d, hh, mi, se, ap] = m;
-    return validDate(+y, +mo, +d, hh ? to24h(+hh, ap) : 0, mi ? +mi : 0, se ? +se : 0);
+    const [, y, mo, d, hh, mi, se, ap, tz] = m;
+    const local = validDate(+y, +mo, +d, hh ? to24h(+hh, ap) : 0, mi ? +mi : 0, se ? +se : 0);
+    if (!local || !tz || /^z$/i.test(tz)) return local;
+    // An explicit offset names an instant: convert it to UTC, so feeds from
+    // different time zones line up on one clock (02:30+05:30 is 21:00Z the
+    // previous day). Values without an offset are taken as written.
+    const sign = tz[0] === '-' ? -1 : 1;
+    const digits = tz.slice(1).replace(':', '');
+    const offMin = sign * (+digits.slice(0, 2) * 60 + (digits.length > 2 ? +digits.slice(2, 4) : 0));
+    return new Date(local.getTime() - offMin * 60000);
   }
 
   // yyyy/mm/dd

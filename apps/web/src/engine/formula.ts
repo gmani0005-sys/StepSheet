@@ -1414,20 +1414,34 @@ export function evaluateFormula(expression: string, row: Record<string, any>): F
   const columnNames = Object.keys(row || {});
   const ctx: FormulaContext = {
     getColumn: (name: string) => {
-      if (name in row) return row[name];
+      if (Object.prototype.hasOwnProperty.call(row, name)) return row[name];
       const key = Object.keys(row).find((k) => k.toLowerCase() === name.toLowerCase());
       return key ? row[key] : undefined;
     },
   };
 
+  // A step evaluates the same formula on every row: parse it once per
+  // (formula, column set) instead of once per row.
+  const cacheKey = `${expr}\u0000${columnNames.join('\u0001')}`;
+  let ast = AST_CACHE.get(cacheKey);
+  if (ast === undefined) {
+    try {
+      ast = new Parser(tokenize(expr, columnNames)).parse();
+    } catch {
+      ast = PARSE_FAILED;
+    }
+    if (AST_CACHE.size >= 256) AST_CACHE.delete(AST_CACHE.keys().next().value as string);
+    AST_CACHE.set(cacheKey, ast);
+  }
+  if (ast === PARSE_FAILED) return VALUE_ERR();
   try {
-    const tokens = tokenize(expr, columnNames);
-    const ast = new Parser(tokens).parse();
     return evalNode(ast, ctx);
   } catch {
     return VALUE_ERR();
   }
 }
+const PARSE_FAILED = Symbol('parse-failed');
+const AST_CACHE = new Map<string, any>();
 
 /** Convert a formula result into the plain JS value StepSheet stores in a cell. */
 export function formulaResultToCell(v: FxValue): any {

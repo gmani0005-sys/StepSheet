@@ -648,6 +648,17 @@ function asText(v: FxValue): string {
   return String(v);
 }
 
+/** Splits a string into Unicode code points (not UTF-16 code units), so an
+ * emoji or other character outside the Basic Multilingual Plane -- stored
+ * internally as a surrogate pair -- counts as one character instead of two.
+ * Without this, LEN/LEFT/RIGHT/MID/REPLACE on emoji-bearing text (common in
+ * free-text survey/feedback/social data) undercount or slice a surrogate
+ * pair in half, producing a lone unpaired surrogate that downstream CSV/XLSX
+ * export silently mangles into a replacement character. */
+function toChars(s: string): string[] {
+  return Array.from(s);
+}
+
 function asNum(v: FxValue): number | FxError {
   return toNumber(v);
 }
@@ -1069,25 +1080,25 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
     case 'CLEAN':
       return asText(a0).replace(/[\x00-\x1F\x7F]/g, '');
     case 'LEN':
-      return asText(a0).length;
+      return toChars(asText(a0)).length;
     case 'LEFT': {
-      const s = asText(a0);
+      const chars = toChars(asText(a0));
       const cnt = args.length > 1 ? Number(asNum(args[1])) : 1;
       if (!(cnt >= 0)) return VALUE_ERR();
-      return s.slice(0, Math.floor(cnt));
+      return chars.slice(0, Math.floor(cnt)).join('');
     }
     case 'RIGHT': {
-      const s = asText(a0);
+      const chars = toChars(asText(a0));
       const cnt = args.length > 1 ? Number(asNum(args[1])) : 1;
       if (!(cnt >= 0)) return VALUE_ERR();
-      return cnt === 0 ? '' : s.slice(-Math.floor(cnt));
+      return cnt === 0 ? '' : chars.slice(-Math.floor(cnt)).join('');
     }
     case 'MID': {
-      const s = asText(a0);
+      const chars = toChars(asText(a0));
       const start = Number(asNum(args[1]));
       const len = Number(asNum(args[2]));
       if (!(start >= 1) || !(len >= 0)) return VALUE_ERR();
-      return s.slice(Math.floor(start) - 1, Math.floor(start) - 1 + Math.floor(len));
+      return chars.slice(Math.floor(start) - 1, Math.floor(start) - 1 + Math.floor(len)).join('');
     }
     case 'FIND': {
       const needle = asText(a0);
@@ -1132,11 +1143,11 @@ function callFunction(name: string, args: FxValue[], ctx: FormulaContext): FxVal
       return s.split(oldS).join(newS);
     }
     case 'REPLACE': {
-      const s = asText(a0);
+      const chars = toChars(asText(a0));
       const start = Math.max(1, Number(asNum(args[1])));
       const len = Math.max(0, Number(asNum(args[2])));
       const newText = asText(args[3]);
-      return s.slice(0, start - 1) + newText + s.slice(start - 1 + len);
+      return chars.slice(0, start - 1).join('') + newText + chars.slice(start - 1 + len).join('');
     }
     case 'EXACT':
       return asText(a0) === asText(args[1]);

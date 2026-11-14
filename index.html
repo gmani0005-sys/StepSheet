@@ -161,6 +161,26 @@ section.band{padding:96px 0}
 .feature-card p{font-size:14px;line-height:1.6;color:var(--muted)}
 @media (max-width:860px){.feature-grid{grid-template-columns:1fr}}
 
+/* PRICING */
+.trial-banner{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:9999px;font-size:12.5px;color:#bdf0d6;margin-bottom:28px}
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch}
+.price-card{padding:32px 28px;border-radius:24px;display:flex;flex-direction:column;gap:22px;position:relative}
+.price-card.featured{border:1px solid rgba(61,220,132,.5);box-shadow:0 0 0 1px rgba(61,220,132,.12),0 24px 54px rgba(0,0,0,.28)}
+.price-badge{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--brand-light);color:#06241a;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:5px 14px;border-radius:9999px;white-space:nowrap}
+.price-card h3{font-size:19px}
+.price-card .price-sub{font-size:13px;color:var(--muted);margin-top:4px}
+.price-amount{display:flex;align-items:baseline;gap:6px}
+.price-amount .amt{font-size:40px;font-weight:600;letter-spacing:-0.02em}
+.price-amount .per{font-size:13px;color:var(--muted)}
+.price-trial{font-size:12px;color:var(--brand-light);font-weight:600}
+.price-features{display:flex;flex-direction:column;gap:11px;flex:1;margin:0;padding:0}
+.price-features li{display:flex;align-items:flex-start;gap:9px;font-size:13.5px;color:rgba(255,255,255,.82);line-height:1.5;list-style:none}
+.price-features li svg{flex-shrink:0;margin-top:3px;color:var(--brand-light)}
+.price-cta{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:9999px;font-size:14px;font-weight:600;width:100%}
+.price-cta.primary{background:var(--brand-light);color:#06241a}
+.price-cta.secondary{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
+@media (max-width:860px){.pricing-grid{grid-template-columns:1fr}}
+
 /* CLOSING + FOOTER */
 .closing{border-radius:28px;padding:56px 40px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:20px}
 .closing h2{font-size:34px;letter-spacing:-0.02em}
@@ -187,6 +207,7 @@ footer{padding:40px 0 56px;display:flex;flex-wrap:wrap;gap:16px;align-items:cent
 </a>
 <div style="display:flex;align-items:center;gap:10px">
 <a href="#demo" style="font-size:14px;color:rgba(255,255,255,.75);padding:10px 8px">Live demo</a>
+<a href="#pricing" style="font-size:14px;color:rgba(255,255,255,.75);padding:10px 8px">Pricing</a>
 <a href="https://github.com/gmani0005-sys/StepSheet#readme" target="_blank" rel="noopener" style="font-size:14px;color:rgba(255,255,255,.75);padding:10px 8px">Docs</a>
 <button type="button" class="liquid-glass-strong hov" style="display:flex;align-items:center;gap:8px;padding:10px 20px;border-radius:9999px;font-size:14px;font-weight:500;min-height:40px">
 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
@@ -214,6 +235,7 @@ Try StepSheet Free
 <span class="pill liquid-glass">No-code pipelines</span>
 <span class="pill liquid-glass">AI-generated dashboards</span>
 </div>
+<a href="#pricing" style="font-size:12.5px;color:var(--muted-2)">15-day free trial on every plan — see pricing ↓</a>
 </div>
 <a href="#demo" class="scroll-cue" aria-hidden="true">
 Scroll
@@ -355,6 +377,80 @@ Orders.xlsx — StepSheet workspace
 </div>
 </section>
 
+<!-- PRICING -->
+<section class="band shell" id="pricing" style="text-align:center">
+<div class="section-head">
+<span class="eyebrow">Pricing</span>
+<h2>Simple pricing, no surprises</h2>
+<p>Every plan includes a 15-day free trial — no credit card required to start.</p>
+</div>
+
+<span class="trial-banner liquid-glass">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+15 days free on every plan, then pay monthly — cancel anytime
+</span>
+
+<div class="pricing-grid">
+
+<div class="price-card liquid-glass" style="text-align:left">
+<div>
+<h3>Basic</h3>
+<p class="price-sub">For simple, one-off cleanups</p>
+</div>
+<div>
+<div class="price-amount"><span class="amt">₹249</span><span class="per">/ month</span></div>
+<p class="price-trial">Free for 15 days, then ₹249/mo</p>
+</div>
+<ul class="price-features">
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Basic formula transformations (lookups, text, date, math)</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Upload and transform Excel or CSV files</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Export the result to Excel or CSV</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Email support</li>
+</ul>
+<a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="price-cta secondary hov">Start free trial</a>
+</div>
+
+<div class="price-card liquid-glass-strong featured" style="text-align:left">
+<span class="price-badge">Most popular</span>
+<div>
+<h3>Pro</h3>
+<p class="price-sub">All transformations, plus AI chat</p>
+</div>
+<div>
+<div class="price-amount"><span class="amt">₹499</span><span class="per">/ month</span></div>
+<p class="price-trial">Free for 15 days, then ₹499/mo</p>
+</div>
+<ul class="price-features">
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Everything in Basic</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>All 65+ formula functions, unlocked</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Full no-code pipelines — filter, pivot, join, dedupe, split</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:#fff;font-weight:600">Chat with your data</strong>, powered by AI</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Priority support</li>
+</ul>
+<a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="price-cta primary hov">Start free trial</a>
+</div>
+
+<div class="price-card liquid-glass" style="text-align:left">
+<div>
+<h3>Premium</h3>
+<p class="price-sub">Everything, plus AI dashboards</p>
+</div>
+<div>
+<div class="price-amount"><span class="amt">₹899</span><span class="per">/ month</span></div>
+<p class="price-trial">Free for 15 days, then ₹899/mo</p>
+</div>
+<ul class="price-features">
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Everything in Pro</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:#fff;font-weight:600">AI-generated dashboards</strong> from your transformed data</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Unlimited files and rows</li>
+<li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Dedicated onboarding support</li>
+</ul>
+<a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener" class="price-cta secondary hov">Start free trial</a>
+</div>
+
+</div>
+</section>
+
 <!-- CLOSING -->
 <section class="band shell">
 <div class="closing liquid-glass-strong">
@@ -378,6 +474,7 @@ StepSheet
 <a href="https://github.com/gmani0005-sys/StepSheet" target="_blank" rel="noopener">GitHub</a>
 <a href="https://github.com/gmani0005-sys/StepSheet#readme" target="_blank" rel="noopener">Docs</a>
 <a href="#demo">Live demo</a>
+<a href="#pricing">Pricing</a>
 </nav>
 <span class="footer-copy">© 2026 StepSheet</span>
 </footer>

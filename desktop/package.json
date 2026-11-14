@@ -1,0 +1,16 @@
+{
+  "name": "stepsheet-desktop",
+  "version": "1.0.0",
+  "description": "StepSheet — No-Code Data Workbench, packaged as a native desktop app (Windows / macOS) via Tauri.",
+  "private": true,
+  "scripts": {
+    "copy-html": "node scripts/copy-html.mjs",
+    "tauri": "tauri",
+    "dev": "npm run copy-html && tauri dev",
+    "build": "tauri build"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
+  }
+}

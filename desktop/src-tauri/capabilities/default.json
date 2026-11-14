@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main StepSheet window. The app is a fully self-contained offline page, so no additional Tauri APIs are exposed to it.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,0 +1,79 @@
+name: Desktop Build (Windows & macOS)
+
+# Builds the StepSheet desktop app natively on a Windows runner and a macOS
+# runner and uploads the installers as downloadable workflow artifacts.
+# Run manually any time from the Actions tab ("Run workflow"), or push a tag
+# like "desktop-v1.0.0" to also publish them as assets on a GitHub Release.
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "desktop-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            label: windows
+          - platform: macos-latest
+            label: macos
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install desktop project dependencies
+        working-directory: desktop
+        run: npm install
+
+      - name: Build native installer
+        working-directory: desktop
+        run: npm run build
+
+      - name: Collect installer paths
+        id: find
+        shell: bash
+        run: |
+          OUT_DIR="src-tauri/target/release/bundle"
+          echo "Bundle output:"
+          find "$OUT_DIR" -maxdepth 3 -type f \( -iname "*.exe" -o -iname "*.msi" -o -iname "*.dmg" \) -print
+        working-directory: desktop
+
+      - name: Upload installer as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stepsheet-desktop-${{ matrix.label }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.exe
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+          if-no-files-found: error
+
+      - name: Attach installer to the GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: StepSheet Desktop ${{ github.ref_name }}
+          files: |
+            desktop/src-tauri/target/release/bundle/**/*.exe
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.dmg

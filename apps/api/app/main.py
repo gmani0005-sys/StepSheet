@@ -1,4 +1,5 @@
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ from app.core.database import engine, Base, SessionLocal
 from app.api.v1.api import api_router
 from app.models.user import User
 from app.core.security import hash_password
+from app.core.security_guard import EnterpriseSecurityGuardMiddleware, rate_limiter, micro_cache
 
 
 @asynccontextmanager
@@ -41,7 +43,21 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Enterprise background memory & cache sweeper (10-minute interval)
+    async def _sweeper_loop():
+        try:
+            while True:
+                await asyncio.sleep(600)
+                rate_limiter.sweep_stale(300.0)
+                micro_cache.sweep_stale()
+        except asyncio.CancelledError:
+            pass
+
+    sweeper_task = asyncio.create_task(_sweeper_loop())
+
     yield
+
+    sweeper_task.cancel()
 
 
 app = FastAPI(
@@ -50,6 +66,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Enterprise Security Guard (Bot protection & sliding-window rate limiting)
+app.add_middleware(EnterpriseSecurityGuardMiddleware)
 
 # Set up CORS
 app.add_middleware(

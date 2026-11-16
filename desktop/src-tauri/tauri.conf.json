@@ -23,6 +23,11 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "schemes": ["stepsheet"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

@@ -23,17 +23,9 @@ services:
       - key: DATABASE_URL
         sync: false  # Configure with Supabase PostgreSQL connection string
       - key: STORAGE_BACKEND
-        value: s3
-      - key: S3_ENDPOINT_URL
-        sync: false  # e.g. https://<account_id>.r2.cloudflarestorage.com
-      - key: S3_ACCESS_KEY
-        sync: false  # Cloudflare R2 / AWS S3 Access Key ID
-      - key: S3_SECRET_KEY
-        sync: false  # Cloudflare R2 / AWS S3 Secret Access Key
-      - key: S3_BUCKET_NAME
-        value: stepsheet-enterprise-datasets
-      - key: S3_REGION
-        value: auto
+        value: local
+      - key: LOCAL_STORAGE_DIR
+        value: /app/storage
       - key: DUCKDB_MEMORY_LIMIT
         value: 4GB
       - key: DUCKDB_THREADS
@@ -42,3 +34,8 @@ services:
         value: '["https://stepsheet.app","https://www.stepsheet.app","https://gmani0005-sys.github.io"]'
       - key: PORT
         value: "8000"
+    # Optional persistent disk for Render paid instances (uncomment to keep files across redeploys):
+    # disk:
+    #   name: stepsheet-storage
+    #   mountPath: /app/storage
+    #   sizeGB: 10

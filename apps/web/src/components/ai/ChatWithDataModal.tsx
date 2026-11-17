@@ -73,6 +73,7 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [appliedStepIds, setAppliedStepIds] = useState<Record<string, boolean>>({});
 
   const activeDataset =
     datasets.find((d) => d.id === selectedDatasetId) || selectedDataset || datasets[0];
@@ -344,6 +345,102 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
     onClose();
   };
 
+  const canApplyStep = (resp: any): boolean => {
+    if (!resp || !resp.plan) return false;
+    const plan = resp.plan;
+    if (plan.intent === 'unsupported' || plan.intent === 'empty') return false;
+    if (Array.isArray(plan.filters) && plan.filters.length > 0) return true;
+    if (Array.isArray(plan.group_by) && plan.group_by.length > 0) return true;
+    if (['filter_rows', 'group_by', 'row_ranking', 'nth_ranking', 'missing_values', 'top_bottom_n'].includes(plan.intent)) return true;
+    return false;
+  };
+
+  const handleApplyAsPipelineStep = async (msgId: string, resp: any) => {
+    if (!resp || !resp.plan) return;
+    const plan = resp.plan;
+    const { addStep } = useWorkbenchStore.getState();
+
+    let step: any = null;
+
+    // 1. Group By step
+    if (Array.isArray(plan.group_by) && plan.group_by.length > 0) {
+      const groupCol = plan.group_by[0];
+      const aggCol = resp.columns.find((c: string) => c !== groupCol) || groupCol;
+      step = {
+        id: `step_ai_grp_${Date.now()}`,
+        type: 'group_by',
+        label: `AI Group by ${groupCol}`,
+        enabled: true,
+        params: {
+          group_by_columns: plan.group_by,
+          aggregations: [
+            {
+              column: aggCol,
+              aggregation: plan.select?.find((s: any) => s.column === aggCol)?.aggregation || 'sum',
+              output_column: aggCol,
+            },
+          ],
+        },
+        description: resp.explanation || `Group by ${plan.group_by.join(', ')}`,
+      };
+    }
+    // 2. Filter Rows step
+    else if (Array.isArray(plan.filters) && plan.filters.length > 0) {
+      const conditions = plan.filters.map((f: any) => {
+        let op = 'equals';
+        let val = '';
+        if (f.kind === 'cat') {
+          op = f.negate ? 'not_equals' : 'equals';
+          val = Array.isArray(f.labels) && f.labels.length > 0 ? f.labels[0] : (Array.isArray(f.values) ? f.values[0] : String(f.values || ''));
+        } else if (f.kind === 'num') {
+          op = f.op === 'gt' ? 'greater_than' : f.op === 'gte' ? 'greater_than_or_equal' : f.op === 'lt' ? 'less_than' : f.op === 'lte' ? 'less_than_or_equal' : 'equals';
+          val = String(f.value);
+        } else if (f.kind === 'date') {
+          op = 'contains';
+          val = f.label || String(f.year || f.month || '');
+        }
+        return {
+          column: f.col,
+          operator: op,
+          value: val,
+        };
+      });
+
+      step = {
+        id: `step_ai_flt_${Date.now()}`,
+        type: 'filter_rows',
+        label: `AI Filter (${plan.filters.map((f: any) => f.col).join(', ')})`,
+        enabled: true,
+        params: {
+          conditions,
+          match_type: 'and',
+        },
+        description: resp.explanation || 'Filtered rows via AI query',
+      };
+    }
+    // 3. Row Ranking / Top N step
+    else if (plan.intent === 'row_ranking' || plan.intent === 'nth_ranking' || plan.intent === 'top_bottom_n') {
+      const rankCol = resp.chart?.y || resp.columns[1] || resp.columns[0];
+      step = {
+        id: `step_ai_top_${Date.now()}`,
+        type: 'top_bottom_n',
+        label: `AI Top ${resp.rows.length} by ${rankCol}`,
+        enabled: true,
+        params: {
+          column: rankCol,
+          n: Math.min(resp.rows.length, 100),
+          order: 'top',
+        },
+        description: resp.explanation || `Top rows by ${rankCol}`,
+      };
+    }
+
+    if (step) {
+      await addStep(step);
+      setAppliedStepIds((prev) => ({ ...prev, [msgId]: true }));
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -589,6 +686,21 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
                         </div>
 
                         <div className="flex items-center gap-1.5">
+                          {canApplyStep(resp) && (
+                            <button
+                              type="button"
+                              onClick={() => handleApplyAsPipelineStep(msg.id, resp)}
+                              className={`px-2.5 py-1 text-white text-[11px] font-semibold rounded-lg shadow-xs flex items-center gap-1 transition ${
+                                appliedStepIds[msg.id]
+                                  ? 'bg-[#107C41] cursor-default'
+                                  : 'bg-[#0078D4] hover:bg-[#106EBE] active:scale-95'
+                              }`}
+                              title="Apply this query directly as an analytical step in your active pipeline"
+                            >
+                              <Sparkles className="w-3 h-3 text-emerald-200" />
+                              {appliedStepIds[msg.id] ? 'Step Added ✓' : 'Add to Pipeline'}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleInsertAsNewSheet(resp, resp.explanation)}

@@ -54,24 +54,25 @@ const ORDINALS: Record<string, number> = { first: 1, '1st': 1, second: 2, '2nd':
 const NEGATION_BEFORE = /(?:\bnot|\bexcluding|\bexclude|\bexcept(?:\s+for)?|\bother\s+than|\bnon-?|\bwithout|n't|\bapart\s+from|\bbesides)\s*(?:the\s+|any\s+|in\s+|from\s+|been\s+|be\s+)*$/;
 
 const MEASURE_WORDS: Array<[RegExp, string[]]> = [
-  [/\b(revenue|sales|turnover|order values?|spend|spent|amounts?|money|income)\b/, ['revenue', 'sales', 'amount', 'total_amount', 'total', 'value', 'spend']],
-  [/\b(profit|margin)\b/, ['profit', 'margin']],
-  [/\b(quantity|quantities|units?|qty|pieces)\b/, ['quantity', 'qty', 'units']],
-  [/\b(prices?)\b/, ['unit_price', 'price']],
-  [/\b(costs?)\b/, ['cost', 'unit_cost']],
-  [/\b(discounts?)\b/, ['discount']],
+  [/\b(revenue|sales|turnover|order values?|spend|spent|spending|amounts?|money|income|gross|earnings?)\b/, ['revenue', 'sales', 'amount', 'total_amount', 'total', 'value', 'spend', 'gross']],
+  [/\b(profit|margin|net|gain|returns?)\b/, ['profit', 'margin', 'net_profit', 'net_margin']],
+  [/\b(quantity|quantities|units?|qty|pieces|volume)\b/, ['quantity', 'qty', 'units', 'volume']],
+  [/\b(prices?|rates?|fees?)\b/, ['unit_price', 'price', 'rate']],
+  [/\b(costs?|unit_cost|expense|expenses|expenditure)\b/, ['cost', 'unit_cost', 'expense']],
+  [/\b(discounts?|rebates?|deductions?)\b/, ['discount', 'rebate']],
 ];
 const ENTITY_DIM_WORDS: Array<[RegExp, string[]]> = [
-  [/\b(customers?|clients?|buyers?|accounts?)\b/, ['customer_id', 'customer_name', 'customer', 'client', 'account']],
-  [/\b(regions?|territor(?:y|ies)|markets?)\b/, ['region', 'territory', 'market']],
-  [/\b(countr(?:y|ies))\b/, ['country']],
-  [/\b(cit(?:y|ies))\b/, ['city']],
-  [/\b(states?)\b/, ['state']],
-  [/\b(categor(?:y|ies)|segments?|departments?)\b/, ['category', 'segment', 'department']],
-  [/\b(products?|items?|skus?)\b/, ['product', 'product_name', 'item', 'sku']],
-  [/\b(status(?:es)?|stages?)\b/, ['status', 'stage']],
-  [/\b(channels?)\b/, ['channel']],
-  [/\b(tiers?)\b/, ['tier', 'account_tier']],
+  [/\b(customers?|clients?|buyers?|accounts?|shoppers?|users?|who)\b/, ['customer_name', 'customer_id', 'customer', 'client', 'account', 'buyer', 'user_id']],
+  [/\b(regions?|territor(?:y|ies)|markets?|zones?|areas?)\b/, ['region', 'territory', 'market', 'zone']],
+  [/\b(countr(?:y|ies)|nations?)\b/, ['country', 'nation']],
+  [/\b(cit(?:y|ies)|towns?|metros?)\b/, ['city', 'town', 'metro']],
+  [/\b(states?|provinces?)\b/, ['state', 'province']],
+  [/\b(categor(?:y|ies)|segments?|departments?|types?|genres?)\b/, ['category', 'segment', 'department', 'type']],
+  [/\b(products?|items?|skus?|goods?|merchandise)\b/, ['product', 'product_name', 'item', 'item_name', 'sku']],
+  [/\b(status(?:es)?|stages?|states?|phases?)\b/, ['status', 'stage', 'phase']],
+  [/\b(channels?|sources?|mediums?)\b/, ['channel', 'source', 'medium']],
+  [/\b(tiers?|levels?|grades?)\b/, ['tier', 'account_tier', 'level', 'grade']],
+  [/\b(salespersons?|reps?|agents?|managers?|employees?|sellers?)\b/, ['salesperson', 'sales_rep', 'rep', 'agent', 'manager', 'employee', 'seller']],
 ];
 const ROW_ENTITY = /\b(orders?|transactions?|purchases?|invoices?|records?|rows?|sales|deals?|tickets?|calls?|visits?|bookings?|requests?|cases?|claims?|entries)\b/;
 
@@ -88,12 +89,15 @@ function numOf(v: any): number | null {
 }
 
 function pickColumn(candidates: string[], pool: string[]): string {
+  const norm = (s: string) => s.toLowerCase().replace(/[-_\s]+/g, '');
   for (const c of candidates) {
-    const exact = pool.find((p) => p.toLowerCase() === c);
+    const nc = norm(c);
+    const exact = pool.find((p) => p.toLowerCase() === c.toLowerCase() || norm(p) === nc);
     if (exact) return exact;
   }
   for (const c of candidates) {
-    const part = pool.find((p) => p.toLowerCase().includes(c));
+    const nc = norm(c);
+    const part = pool.find((p) => p.toLowerCase().includes(c.toLowerCase()) || norm(p).includes(nc) || nc.includes(norm(p)));
     if (part) return part;
   }
   return '';
@@ -193,7 +197,11 @@ export function needsPlanner(q: string): boolean {
     /\bcompare\b|\bvs\.?\b|\bversus\b/.test(q) ||
     /\b(combined|together)\b/.test(q) ||
     /\b[a-z]{0,4}\d{2,}[a-z\d-]*\b/.test(q.replace(/\$?\b\d[\d,]*(\.\d+)?\s*(k|m|million|thousand|%)?\b/g, ' ')) ||
-    /\b(customer|client|order|invoice|product|sku|account)\s+(?:id\s+|#|no\.?\s*)?[a-z]{0,4}-?\d+\b/.test(q)
+    /\b(customer|client|order|invoice|product|sku|account)\s+(?:id\s+|#|no\.?\s*)?[a-z]{0,4}-?\d+\b/.test(q) ||
+    /\b(who|which\s+[a-z_]+)\s+(?:bought|spent|ordered|has|had|generated|brought|sold)\s+(?:the\s+)?(most|highest|least|lowest|best|worst)\b/.test(q) ||
+    /\b(best|worst|top|highest|lowest)\s+(?:selling|performing|grossing|earning)\s+[a-z_]+\b/.test(q) ||
+    /\b(unprofitable|loss[\s-]making|in the red|negative profit)\b/.test(q) ||
+    /\b(?:filter|keep|exclude|remove rows|show only)\b/.test(q)
   );
 }
 // "how many agents have more than 170 tickets", "customers who placed at least 3 orders"
@@ -297,6 +305,11 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
       filters.push({ kind: 'num', col, op: thr.op, value: thr.value, value2: thr.value2 });
     }
     consumed.push([thr.start, thr.end]);
+  } else if (/\b(unprofitable|loss[\s-]making|in the red|negative profit)\b/.test(q)) {
+    const profitCol = pickColumn(['profit', 'net_profit', 'margin', 'net_margin'], profile.measures);
+    if (profitCol) {
+      filters.push({ kind: 'num', col: profitCol, op: 'lt', value: 0 });
+    }
   }
 
   // Date filters: "March 2024", "Dec 2024", "in March", "Q2", "Q2 2024", "in 2024".
@@ -654,7 +667,9 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
       return d ? WEEKDAYS[d.getUTCDay()] : null;
     };
   } else {
-    const word = topNByCount?.[2] || (nthM ? (q.slice((nthM.index ?? 0) + nthM[0].length).match(/^\s+(?:[a-z_]+\s+)?([a-z_]+)/)?.[1] ?? '') : '') || topN?.[3] || byM?.[1] || '';
+    const bestWorstMatch = q.match(/\b(?:best|worst|top|highest|lowest)\s+(?:selling|performing|grossing|earning)\s+([a-z_]+)\b/);
+    const whoMatch = /\bwho\b/.test(q) ? 'customer' : '';
+    const word = topNByCount?.[2] || (nthM ? (q.slice((nthM.index ?? 0) + nthM[0].length).match(/^\s+(?:[a-z_]+\s+)?([a-z_]+)/)?.[1] ?? '') : '') || bestWorstMatch?.[1] || topN?.[3] || whoMatch || byM?.[1] || '';
     let cands = word ? [word, ...word.split(' ')] : [];
     if (nthM && !cands.some((w) => dimFor(w))) cands = q.split(' ');
     for (const w of cands) {
@@ -685,7 +700,9 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
       [gName]: gAgg === 'count' ? rs.length : aggregate(rs.map((r) => numOf(r[measure])).filter((n): n is number => n !== null), gAgg),
     }));
     const lowFirst = /\b(lowest|smallest|least|bottom|worst|fewest)\b/.test(q);
-    const ranked = !!(nthM || topN || topNByCount || dowAsked || /\b(which|what)\b.*\b(highest|most|best|top|largest|lowest|least|smallest)\b/.test(q));
+    const bestWorstMatch = q.match(/\b(?:best|worst|top|highest|lowest)\s+(?:selling|performing|grossing|earning)\s+([a-z_]+)\b/);
+    const whoMatch = /\bwho\b/.test(q);
+    const ranked = !!(nthM || topN || topNByCount || dowAsked || bestWorstMatch || whoMatch || /\b(which|what)\b.*\b(highest|most|best|top|largest|lowest|least|smallest)\b/.test(q));
     if (ranked) out.sort((a, b) => ((lowFirst ? 1 : -1) * (((a[gName] as number) ?? -Infinity) - ((b[gName] as number) ?? -Infinity))));
     else if (compareFilter) out.sort((a, b) => compareFilter.labels.indexOf(String(a[groupLabel])) - compareFilter.labels.indexOf(String(b[groupLabel])));
     const metricText = gAgg === 'count' ? 'row count' : `${AGG_LABEL[gAgg].toLowerCase()} ${human(measure)}`;
@@ -704,7 +721,7 @@ export function planChatQuery(prompt: string, rows: Record<string, any>[], profi
         groupBy: [groupLabel],
       });
     }
-    const limitN = topNByCount ? +topNByCount[1] : topN ? +topN[2] : 0;
+    const limitN = topNByCount ? +topNByCount[1] : topN ? +topN[2] : (whoMatch ? 1 : (bestWorstMatch ? 5 : 0));
     if (limitN) out = out.slice(0, limitN);
     if (dowAsked && /\b(which|what)\b/.test(q)) {
       const top = out[0];

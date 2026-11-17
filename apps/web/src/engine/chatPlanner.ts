@@ -211,6 +211,8 @@ const NEGATION_WORDS = /\b(not|excluding|exclude|except|other than|non-?\w+|with
 export function planChatQuery(prompt: string, rows: Record<string, any>[], profile: PlannerProfile): PlannerResult {
   const q = prompt.toLowerCase().replace(/[?!]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (rows.length === 0) return null;
+  // Yield executive findings and dataset overview queries to localEngine's multi-metric findings synthesizer
+  if (/\b(top\s+)?findings?\b/i.test(q) || /\bexecutive\s+summary\b/i.test(q) || /\b(key|main)\s+(insights?|takeaways?)\b/i.test(q)) return null;
   const triggered = needsPlanner(q);
   const decline = (reason: string): PlannerResult => ({ kind: 'decline', reason });
 

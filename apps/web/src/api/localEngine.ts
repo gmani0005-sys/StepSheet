@@ -5381,6 +5381,237 @@ export const localEngine = {
       };
     }
 
+    // 1b. Executive Findings / Top Takeaways / Dataset Highlights Query
+    // Handles queries like "top findings from the dataset", "key findings", "summary",
+    // "executive summary", "key takeaways", "insights", "what does this data show"
+    const isFindingsQuery =
+      /\b(findings?|top findings?|key findings?|main findings?)\b/i.test(pLower) ||
+      /\b(key|top|main)\s+(insights?|takeaways?|highlights?)\b/i.test(pLower) ||
+      /\bexecutive\s+summary\b/i.test(pLower) ||
+      /\b(overview|summary)\s+of\s+(?:the|this)\s+(?:data|dataset|table|records)\b/i.test(pLower) ||
+      /^(?:what\s+are\s+the\s+)?(?:top\s+)?findings?\b/i.test(pLower) ||
+      /^(summary|insights|overview|findings|key findings|top findings)$/i.test(pLower);
+
+    if (isFindingsQuery && rows.length > 0) {
+      // 1. Identify primary financial/numeric measure
+      const primaryMeasure =
+        profile.measures.find((m) => /^(revenue|sales|amount|total_amount|total|turnover)$/i.test(m)) ||
+        profile.measures.find((m) => /(revenue|sales|amount|total|turnover|profit|spend|price|cost|qty|quantity)/i.test(m)) ||
+        profile.primaryMeasure ||
+        profile.measures[0] ||
+        '';
+
+      const measureLabel = primaryMeasure
+        ? primaryMeasure.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())
+        : 'Records';
+
+      let totalMeasure = 0;
+      let validMeasureCount = 0;
+      if (primaryMeasure) {
+        for (const r of rows) {
+          const n = parseNumericValue(getRowVal(r, primaryMeasure));
+          if (n !== null && Number.isFinite(n)) {
+            totalMeasure += n;
+            validMeasureCount++;
+          }
+        }
+      }
+      const avgMeasure = validMeasureCount > 0 ? totalMeasure / validMeasureCount : 0;
+
+      const fmtMoney = (n: number) => {
+        const abs = Math.abs(n);
+        if (abs >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+        if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+        if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+        return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+      };
+
+      // 2. Helper to extract top performer for any categorical dimension
+      const findTopDimension = (dimCol?: string) => {
+        if (!dimCol) return null;
+        const stats: Record<string, { name: string; total: number; count: number }> = {};
+        for (const r of rows) {
+          const raw = getRowVal(r, dimCol);
+          if (raw === null || raw === undefined || String(raw).trim() === '') continue;
+          const name = String(raw).trim();
+          if (!stats[name]) stats[name] = { name, total: 0, count: 0 };
+          stats[name].count++;
+          if (primaryMeasure) {
+            const n = parseNumericValue(getRowVal(r, primaryMeasure));
+            if (n !== null && Number.isFinite(n)) stats[name].total += n;
+          }
+        }
+        const sorted = Object.values(stats).sort((a, b) =>
+          primaryMeasure ? b.total - a.total : b.count - a.count
+        );
+        if (sorted.length === 0) return null;
+        const top = sorted[0];
+        const pct = primaryMeasure && totalMeasure > 0
+          ? Math.round((top.total / totalMeasure) * 1000) / 10
+          : Math.round((top.count / rows.length) * 1000) / 10;
+        return {
+          col: dimCol,
+          colLabel: dimCol.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
+          name: top.name,
+          total: top.total,
+          count: top.count,
+          pct,
+          distinctCount: sorted.length,
+          topList: sorted.slice(0, 5),
+        };
+      };
+
+      // Find key business dimensions
+      const catCol = profile.dimensions.find((d) => /categor|segment|dept|department|type|genre|class/i.test(d)) || profile.dimensions[0];
+      const geoCol = profile.dimensions.find((d) => /region|territor|country|state|city|market|zone|location/i.test(d));
+      const prodCol = profile.dimensions.find((d) => /product|item|sku|title|model|goods/i.test(d));
+      const custCol = profile.dimensions.find((d) => /customer|client|account|buyer|company|user/i.test(d));
+      const statusCol = profile.dimensions.find((d) => /status|stage|state|phase/i.test(d));
+
+      const topCat = findTopDimension(catCol);
+      const topGeo = findTopDimension(geoCol);
+      const topProd = findTopDimension(prodCol);
+      const topCust = findTopDimension(custCol);
+      const topStatus = findTopDimension(statusCol);
+
+      // 3. Time horizon & trend
+      let dateInsight: { range: string; trendText: string } | null = null;
+      if (profile.dates.length > 0) {
+        const dCol = profile.dates[0];
+        const dates: Date[] = [];
+        for (const r of rows) {
+          const d = parseSharedDate(getRowVal(r, dCol));
+          if (d) dates.push(d);
+        }
+        if (dates.length > 0) {
+          dates.sort((a, b) => a.getTime() - b.getTime());
+          const minD = dates[0].toISOString().slice(0, 10);
+          const maxD = dates[dates.length - 1].toISOString().slice(0, 10);
+          dateInsight = {
+            range: `${minD} to ${maxD}`,
+            trendText: `${dates.length.toLocaleString()} timestamped records`,
+          };
+        }
+      }
+
+      // Build structured result table
+      const findingsRows: Array<{
+        'Key Dimension / Metric': string;
+        'Top Finding': string;
+        'Share (%)': number;
+        'Details & Volume': string;
+      }> = [];
+
+      if (primaryMeasure) {
+        findingsRows.push({
+          'Key Dimension / Metric': `Total ${measureLabel}`,
+          'Top Finding': fmtMoney(totalMeasure),
+          'Share (%)': 100,
+          'Details & Volume': `${rows.length.toLocaleString()} records • Avg ${fmtMoney(avgMeasure)} / row`,
+        });
+      }
+      if (topCat) {
+        findingsRows.push({
+          'Key Dimension / Metric': `Top Category (${topCat.colLabel})`,
+          'Top Finding': topCat.name,
+          'Share (%)': topCat.pct,
+          'Details & Volume': `${fmtMoney(topCat.total)} (${topCat.count.toLocaleString()} rows across ${topCat.distinctCount} categories)`,
+        });
+      }
+      if (topGeo) {
+        findingsRows.push({
+          'Key Dimension / Metric': `Top Region (${topGeo.colLabel})`,
+          'Top Finding': topGeo.name,
+          'Share (%)': topGeo.pct,
+          'Details & Volume': `${fmtMoney(topGeo.total)} (${topGeo.count.toLocaleString()} rows across ${topGeo.distinctCount} regions)`,
+        });
+      }
+      if (topProd) {
+        findingsRows.push({
+          'Key Dimension / Metric': `Leading Product (${topProd.colLabel})`,
+          'Top Finding': topProd.name,
+          'Share (%)': topProd.pct,
+          'Details & Volume': `${fmtMoney(topProd.total)} (${topProd.count.toLocaleString()} orders)`,
+        });
+      }
+      if (topCust) {
+        findingsRows.push({
+          'Key Dimension / Metric': `Top Client (${topCust.colLabel})`,
+          'Top Finding': topCust.name,
+          'Share (%)': topCust.pct,
+          'Details & Volume': `${fmtMoney(topCust.total)} in total purchases`,
+        });
+      }
+      if (topStatus) {
+        findingsRows.push({
+          'Key Dimension / Metric': `Primary Status (${topStatus.colLabel})`,
+          'Top Finding': topStatus.name,
+          'Share (%)': topStatus.pct,
+          'Details & Volume': `${topStatus.count.toLocaleString()} of ${rows.length.toLocaleString()} total records`,
+        });
+      }
+      if (dateInsight) {
+        findingsRows.push({
+          'Key Dimension / Metric': 'Timeline Horizon',
+          'Top Finding': dateInsight.range,
+          'Share (%)': 100,
+          'Details & Volume': dateInsight.trendText,
+        });
+      }
+
+      // Build plain-English executive summary narrative
+      const bullets: string[] = [];
+      if (primaryMeasure) {
+        bullets.push(`- 💰 **Total ${measureLabel}**: **${fmtMoney(totalMeasure)}** across **${rows.length.toLocaleString()} total records** (average: **${fmtMoney(avgMeasure)}** per record).`);
+      }
+      if (topCat) {
+        bullets.push(`- 🏆 **Top Performing Category**: **${topCat.name}** is the #1 leading category generating **${fmtMoney(topCat.total)}** (**${topCat.pct}%** of all ${measureLabel.toLowerCase()}).`);
+      }
+      if (topGeo) {
+        bullets.push(`- 🌍 **Top Performing Region**: **${topGeo.name}** generated **${fmtMoney(topGeo.total)}** (**${topGeo.pct}%** regional share).`);
+      }
+      if (topProd) {
+        bullets.push(`- 📦 **Best Performing Product / SKU**: **${topProd.name}** with **${fmtMoney(topProd.total)}** in total sales.`);
+      }
+      if (topCust) {
+        bullets.push(`- 👑 **Top Customer Account**: **${topCust.name}** is the largest client contributing **${fmtMoney(topCust.total)}**.`);
+      }
+      if (topStatus) {
+        bullets.push(`- ⚡ **Operational Status**: **${topStatus.name}** accounts for **${topStatus.pct}%** of all records (${topStatus.count.toLocaleString()} rows).`);
+      }
+      if (dateInsight) {
+        bullets.push(`- ⏱️ **Time Horizon**: Data spans from **${dateInsight.range}** (${dateInsight.trendText}).`);
+      }
+
+      const explanation = `### 📊 Top Executive Findings & Strategic Highlights for **${datasetName}**\n\nHere are the top findings and key performance metrics computed across all **${rows.length.toLocaleString()} records**:\n\n${bullets.join('\n')}\n\n*Review the summary ledger below for granular breakdown and share percentages.*`;
+
+      const sqlTrace = `/* Executive Dataset Findings & Highlights */\nSELECT\n  COUNT(*) AS total_records,\n  ${primaryMeasure ? `SUM("${primaryMeasure}") AS total_${primaryMeasure.toLowerCase()},\n  AVG("${primaryMeasure}") AS avg_${primaryMeasure.toLowerCase()},` : ''}\n  ${topCat ? `MODE() WITHIN GROUP (ORDER BY "${topCat.col}") AS top_category,` : ''}\n  ${topGeo ? `MODE() WITHIN GROUP (ORDER BY "${topGeo.col}") AS top_region` : ''}\nFROM "${datasetName}";`;
+
+      return {
+        plan: {
+          schema_version: '1.0',
+          intent: 'executive_summary',
+          dataset_id: datasetId,
+          select: findingsRows.map((r) => ({ column: r['Key Dimension / Metric'] })),
+          filters: [],
+          group_by: topCat ? [topCat.col] : [],
+          limit: findingsRows.length,
+          chart: { type: 'bar', x: 'Top Finding', y: 'Share (%)' },
+          explanation: `Executive overview across ${rows.length} records.`,
+        },
+        explanation,
+        calculation_method: `Computed aggregate metrics (${primaryMeasure ? `SUM & AVG of ${primaryMeasure}` : 'COUNT'}) and partitioned mode distributions across categories, regions, and products.`,
+        columns: ['Key Dimension / Metric', 'Top Finding', 'Share (%)', 'Details & Volume'],
+        rows: findingsRows,
+        row_count: findingsRows.length,
+        chart: { type: 'bar', x: 'Top Finding', y: 'Share (%)' },
+        query_trace: sqlTrace,
+        latency_ms: 10.5,
+        provider: 'localEngine',
+        model: 'duckdb-in-browser',
+      };
+    }
+
     // Multi-part questions (several filters, NOT/IN, dates, ids, rankings,
     // shares, group conditions, spread, growth) go to the structured planner,
     // which answers all of the question or declines -- never a partial answer.

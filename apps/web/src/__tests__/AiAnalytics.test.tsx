@@ -199,6 +199,16 @@ describe('AI Analytics Suite (Chat with Data, Native Julius Dashboard, Local AI)
     console.log('TEST RESULT 3:', res3.plan.dashboard_title, res3.plan.kpis, res3.plan.visuals);
   });
 
+  it('answers "top findings from the dataset" with executive summary of total sales, top category, etc.', async () => {
+    const res = await localEngine.executeChatQuery('local-sample-orders', 'top findings from the dataset');
+    expect(res.plan.intent).toBe('executive_summary');
+    expect(res.explanation).toContain('Top Executive Findings');
+    expect(res.rows.length).toBeGreaterThan(3);
+    const findingNames = res.rows.map((r: any) => r['Key Dimension / Metric']);
+    expect(findingNames.some((f: string) => f.includes('Total'))).toBe(true);
+    expect(findingNames.some((f: string) => f.includes('Top Category'))).toBe(true);
+  });
+
   it('answers "average order value by category" with AVG, not an order count (regression)', async () => {
     const datasets = await localEngine.listDatasets();
     const all = await localEngine.previewPipeline(datasets[0].id, [], { limit: 1000 });

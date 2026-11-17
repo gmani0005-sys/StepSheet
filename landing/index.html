@@ -16,8 +16,8 @@
   --brand-light:#21a366;
   --brand-glow:#3ddc84;
   --fg:#ffffff;
-  --muted:rgba(255,255,255,.72);
-  --muted-2:rgba(255,255,255,.52);
+  --muted:rgba(255,255,255,.76);
+  --muted-2:rgba(255,255,255,.54);
   --font-display:'Poppins',sans-serif;
   --font-serif:'Source Serif 4',Georgia,serif;
   --font-mono:'JetBrains Mono',monospace;
@@ -26,9 +26,9 @@
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg-deep);font-family:var(--font-display);color:var(--fg);-webkit-font-smoothing:antialiased;overflow-x:hidden}
 a{color:#fff;text-decoration:none}
-a:hover{color:rgba(255,255,255,.88)}
+a:hover{color:rgba(255,255,255,.9)}
 h1,h2,h3,h4{font-weight:500;margin:0}
-em{font-family:var(--font-serif);font-style:italic;font-weight:400;color:rgba(255,255,255,.92)}
+em{font-family:var(--font-serif);font-style:italic;font-weight:400;color:rgba(255,255,255,.94)}
 button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
 p{margin:0}
 table{border-collapse:collapse}
@@ -45,22 +45,22 @@ table{border-collapse:collapse}
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/></svg>");}
 
 .wrap{position:relative;z-index:1}
-.shell{max-width:1160px;margin:0 auto;padding:0 28px}
+.shell{max-width:1160px;margin:0 auto;padding:0 24px}
 
 .liquid-glass{position:relative;overflow:hidden;isolation:isolate;
   background:
     linear-gradient(155deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.02) 28%, rgba(255,255,255,0) 55%),
-    rgba(20,46,35,.46);
-  -webkit-backdrop-filter:blur(22px) saturate(165%);backdrop-filter:blur(22px) saturate(165%);
+    rgba(14,40,29,.58);
+  -webkit-backdrop-filter:blur(24px) saturate(175%);backdrop-filter:blur(24px) saturate(175%);
   box-shadow:inset 0 1px 1px rgba(255,255,255,.16), inset 0 -10px 18px -14px rgba(0,0,0,.5), 0 14px 30px -16px rgba(0,0,0,.55);}
-.liquid-glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.4px;background:linear-gradient(180deg,rgba(255,255,255,.5) 0%,rgba(255,255,255,.14) 18%,transparent 42%,transparent 62%,rgba(255,255,255,.1) 82%,rgba(255,255,255,.38) 100%);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;z-index:1}
-.liquid-glass::after{content:"";position:absolute;inset:0 0 auto 0;height:46%;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.16),transparent);pointer-events:none;mix-blend-mode:overlay}
+.liquid-glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.4px;background:linear-gradient(180deg,rgba(255,255,255,.45) 0%,rgba(255,255,255,.12) 18%,transparent 42%,transparent 62%,rgba(255,255,255,.1) 82%,rgba(255,255,255,.34) 100%);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;z-index:1}
+.liquid-glass::after{content:"";position:absolute;inset:0 0 auto 0;height:46%;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.14),transparent);pointer-events:none;mix-blend-mode:overlay}
 
 .liquid-glass-strong{position:relative;overflow:hidden;isolation:isolate;
   background:
     linear-gradient(155deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,.04) 30%, rgba(255,255,255,0) 58%),
-    rgba(18,48,36,.55);
-  -webkit-backdrop-filter:blur(44px) saturate(180%);backdrop-filter:blur(44px) saturate(180%);
+    rgba(12,36,26,.72);
+  -webkit-backdrop-filter:blur(44px) saturate(190%);backdrop-filter:blur(44px) saturate(190%);
   box-shadow:inset 0 1px 1px rgba(255,255,255,.24), inset 0 -12px 20px -16px rgba(0,0,0,.55), 0 4px 10px -4px rgba(0,0,0,.35), 0 24px 48px -20px rgba(0,0,0,.6);}
 .liquid-glass-strong::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.4px;background:linear-gradient(180deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,.18) 18%,transparent 42%,transparent 62%,rgba(255,255,255,.12) 82%,rgba(255,255,255,.42) 100%);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;z-index:1}
 .liquid-glass-strong::after{content:"";position:absolute;inset:0 0 auto 0;height:50%;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.18),transparent);pointer-events:none;mix-blend-mode:overlay}
@@ -69,133 +69,274 @@ table{border-collapse:collapse}
 .hov:hover{transform:translateY(-2px)}
 .btn-primary{background:linear-gradient(135deg, #21a366 0%, #177a4a 100%);color:#fff;font-weight:600;box-shadow:0 8px 24px -6px rgba(33,163,102,.55);border:1px solid rgba(255,255,255,.25)}
 .btn-primary:hover{box-shadow:0 12px 30px -4px rgba(61,220,132,.65);color:#fff}
-.btn-gold{background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%);color:#fff;font-weight:600;box-shadow:0 8px 24px -6px rgba(245,158,11,.45);border:1px solid rgba(255,255,255,.25)}
 
-/* HEADER */
-header.nav{padding-top:20px;position:sticky;top:0;z-index:50}
-.nav-inner{display:flex;align-items:center;justify-content:space-between;padding:10px 18px 10px 24px;border-radius:9999px}
-.brand-link{display:flex;align-items:center;gap:12px;font-weight:600;font-size:19px;letter-spacing:-0.02em}
-.grid-logo{width:22px;height:22px;display:grid;grid-template-columns:repeat(3,1fr);gap:2.5px}
+/* HEADER & NAVBAR */
+header.nav{padding-top:16px;position:sticky;top:0;z-index:100}
+.nav-inner{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 18px 10px 22px;
+  border-radius:9999px;
+  background:rgba(6,28,19,.92);
+  -webkit-backdrop-filter:blur(32px) saturate(190%);
+  backdrop-filter:blur(32px) saturate(190%);
+  border:1px solid rgba(255,255,255,.14);
+  box-shadow:0 12px 34px -10px rgba(0,0,0,.65), inset 0 1px 1px rgba(255,255,255,.2);
+  gap:16px;
+}
+.brand-link{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:600;
+  font-size:18px;
+  letter-spacing:-0.02em;
+  flex-shrink:0;
+  white-space:nowrap;
+}
+.grid-logo{width:22px;height:22px;display:grid;grid-template-columns:repeat(3,1fr);gap:2.5px;flex-shrink:0}
 .grid-logo span{background:rgba(255,255,255,.4);border-radius:1.5px}
 .grid-logo span.on{background:var(--brand-glow)}
-.nav-links{display:flex;align-items:center;gap:18px;font-size:13.5px;color:rgba(255,255,255,.8)}
+
+.nav-links{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:22px;
+  font-size:13.5px;
+  color:rgba(255,255,255,.82);
+  white-space:nowrap;
+  flex:1;
+}
+.nav-links a{
+  white-space:nowrap;
+  transition:color .18s ease;
+}
 .nav-links a:hover{color:#fff}
-.nav-actions{display:flex;align-items:center;gap:10px}
+
+.nav-actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-shrink:0;
+  white-space:nowrap;
+}
+.nav-launch-btn{
+  padding:9px 18px;
+  font-size:13.5px;
+  min-height:38px;
+  white-space:nowrap;
+}
+
+/* MOBILE TOGGLE & DRAWER */
+.mobile-toggle{
+  display:none;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  gap:4.5px;
+  width:38px;
+  height:38px;
+  border-radius:50%;
+  background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.18);
+  cursor:pointer;
+  padding:0;
+  transition:background .2s ease;
+  flex-shrink:0;
+}
+.mobile-toggle:hover{background:rgba(255,255,255,.16)}
+.hamburger-bar{
+  width:18px;
+  height:2px;
+  background:#fff;
+  border-radius:2px;
+  transition:transform .25s ease, opacity .25s ease;
+}
+.mobile-toggle.active .hamburger-bar:nth-child(1){transform:translateY(6.5px) rotate(45deg)}
+.mobile-toggle.active .hamburger-bar:nth-child(2){opacity:0}
+.mobile-toggle.active .hamburger-bar:nth-child(3){transform:translateY(-6.5px) rotate(-45deg)}
+
+.mobile-menu-drawer{
+  display:none;
+  margin-top:10px;
+  border-radius:20px;
+  padding:18px 20px;
+  background:rgba(6,28,19,.96);
+  -webkit-backdrop-filter:blur(36px) saturate(200%);
+  backdrop-filter:blur(36px) saturate(200%);
+  border:1px solid rgba(255,255,255,.18);
+  box-shadow:0 20px 45px -10px rgba(0,0,0,.75);
+  animation:drawerFade .2s ease-out forwards;
+}
+.mobile-menu-drawer.open{display:flex;flex-direction:column;gap:12px}
+@keyframes drawerFade{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.mobile-nav-links{display:flex;flex-direction:column;gap:8px}
+.mobile-nav-link{
+  font-size:14.5px;
+  font-weight:500;
+  color:rgba(255,255,255,.88);
+  padding:9px 12px;
+  border-radius:10px;
+  transition:background .15s ease, color .15s ease;
+}
+.mobile-nav-link:hover{background:rgba(255,255,255,.08);color:var(--brand-glow)}
 
 /* HERO */
-section.hero{padding:72px 0 48px;text-align:center;position:relative}
+section.hero{padding:64px 0 44px;text-align:center;position:relative}
 .hero-inner{max-width:860px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:20px}
 .pill-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:9999px;font-size:12.5px;font-weight:500;color:#cbf5dc}
 .pill-badge span.dot{width:7px;height:7px;border-radius:50%;background:var(--brand-glow);animation:pulseDot 1.4s infinite}
 @keyframes pulseDot{0%{box-shadow:0 0 0 0 rgba(61,220,132,.7)}70%{box-shadow:0 0 0 8px rgba(61,220,132,0)}100%{box-shadow:0 0 0 0 rgba(61,220,132,0)}}
-h1.hero-title{font-size: clamp(38px, 6vw, 68px);line-height:1.06;letter-spacing:-0.035em;font-weight:600}
-p.hero-lede{font-size: clamp(15.5px, 2vw, 18.5px);line-height:1.6;color:var(--muted);max-width:720px;font-weight:400}
-.cta-group{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:10px}
-.cta-button{display:flex;align-items:center;gap:10px;padding:13px 26px;border-radius:9999px;font-size:14.5px;font-weight:600;min-height:48px}
-.pill-strip{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:8px}
-.pill-tag{font-size:12px;padding:5px 14px;border-radius:9999px;color:rgba(255,255,255,.75)}
+h1.hero-title{font-size: clamp(34px, 5.8vw, 64px);line-height:1.08;letter-spacing:-0.035em;font-weight:600}
+p.hero-lede{font-size: clamp(15px, 2vw, 18px);line-height:1.6;color:var(--muted);max-width:720px;font-weight:400}
+.cta-group{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:10px}
+.cta-button{display:flex;align-items:center;gap:10px;padding:12px 24px;border-radius:9999px;font-size:14px;font-weight:600;min-height:46px;white-space:nowrap}
+.pill-strip{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px}
+.pill-tag{font-size:11.5px;padding:5px 13px;border-radius:9999px;color:rgba(255,255,255,.78)}
 
-/* DEMO ANIMATION */
-section.band{padding:54px 0}
-.section-head{text-align:center;max-width:680px;margin:0 auto 36px;display:flex;flex-direction:column;gap:10px}
-.eyebrow{font-size:11.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:600;color:var(--brand-glow)}
-.section-head h2{font-size: clamp(28px, 4vw, 40px);letter-spacing:-0.025em;line-height:1.15}
-.section-head p{font-size:15px;line-height:1.6;color:var(--muted)}
+/* DEMO */
+section.band{padding:48px 0}
+.section-head{text-align:center;max-width:680px;margin:0 auto 32px;display:flex;flex-direction:column;gap:10px}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.12em;font-weight:600;color:var(--brand-glow)}
+.section-head h2{font-size: clamp(26px, 3.8vw, 38px);letter-spacing:-0.025em;line-height:1.18}
+.section-head p{font-size:14.5px;line-height:1.6;color:var(--muted)}
 
-.demo-frame{border-radius:26px;padding:26px;display:flex;flex-direction:column;gap:20px;margin-bottom:14px}
+.demo-frame{border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:18px;margin-bottom:14px}
 .demo-workbench{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-@media (max-width:920px){.demo-workbench{grid-template-columns:1fr}}
 
-.demo-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:14px}
+.demo-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:12px}
 .window-dots{display:flex;gap:6px}
 .window-dots span{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.2)}
 .window-dots span:nth-child(1){background:#ff5f56}
 .window-dots span:nth-child(2){background:#ffbd2e}
 .window-dots span:nth-child(3){background:#27c93f}
 
-.demo-grids{background:#ffffff;border-radius:14px;padding:14px;color:#183224;display:flex;gap:16px;overflow-x:auto;box-shadow:inset 0 1px 3px rgba(0,0,0,.12)}
-.excel-table{font-size:12.5px;width:100%}
-.excel-table th, .excel-table td{border:1px solid #e3e6e1;padding:7px 11px;text-align:left;white-space:nowrap}
+.demo-grids-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:14px}
+.demo-grids{background:#ffffff;border-radius:14px;padding:14px;color:#183224;display:flex;gap:16px;min-width:540px;box-shadow:inset 0 1px 3px rgba(0,0,0,.12)}
+.excel-table{font-size:12px;width:100%}
+.excel-table th, .excel-table td{border:1px solid #e3e6e1;padding:6px 10px;text-align:left;white-space:nowrap}
 .col-letters th{background:#eef1ee;color:#7c8c82;font-size:11px;font-weight:500;text-align:center;padding:4px 8px}
-.gutter{background:#eef1ee;color:#7c8c82;font-size:11.5px;text-align:center;width:28px;font-weight:500}
-.field-head{background:#f6f8f6;font-weight:600;font-size:12px;color:#183224}
-.num{text-align:right;font-family:var(--font-mono);font-size:12px}
+.gutter{background:#eef1ee;color:#7c8c82;font-size:11px;text-align:center;width:28px;font-weight:500}
+.field-head{background:#f6f8f6;font-weight:600;font-size:11.5px;color:#183224}
+.num{text-align:right;font-family:var(--font-mono);font-size:11.5px}
 .cell-empty{color:#cbd5ce}
 .active-row td{background:#e6f8ee}
 .price-active td{background:#e6f8ee;transition:background .25s ease}
-@keyframes cellFill{from{opacity:0;transform:translateY(4px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes cellFill{from{opacity:0;transform:translateY(3px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
 .cell-fill{animation:cellFill .3s ease forwards}
 .fill-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand-light);animation:pulseDot .9s infinite}
 
-.step-builder{border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:16px}
+.step-builder{border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:14px}
 .step-builder-head{display:flex;align-items:flex-start;gap:12px}
 .step-badge{flex-shrink:0;width:26px;height:26px;border-radius:9999px;background:var(--brand-glow);color:#06241a;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
 .step-fields{display:flex;flex-wrap:wrap;gap:12px}
-.step-field{flex:1 1 140px;display:flex;flex-direction:column;gap:5px}
-.step-field label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
-.select-box{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);font-size:13.5px;font-weight:500;transition:all .25s ease}
+.step-field{flex:1 1 130px;display:flex;flex-direction:column;gap:5px}
+.step-field label{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+.select-box{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);font-size:13px;font-weight:500;transition:all .25s ease}
 .select-box.selecting{box-shadow:0 0 0 3px rgba(61,220,132,.35);border-color:rgba(61,220,132,.65)}
 .select-box.selected{background:rgba(33,163,102,.26);border-color:rgba(61,220,132,.45)}
-.step-apply{display:inline-flex;align-items:center;gap:10px;padding:12px 22px;border-radius:9999px;background:var(--brand-glow);color:#06241a;font-weight:600;font-size:13.5px;align-self:flex-start;transition:all .25s ease}
+.step-apply{display:inline-flex;align-items:center;gap:10px;padding:11px 20px;border-radius:9999px;background:var(--brand-glow);color:#06241a;font-weight:600;font-size:13px;align-self:flex-start;transition:all .25s ease}
 .step-apply.applying{background:#bdf0d6}
 .step-apply.done{background:#3ddc84}
 
-/* ARCHITECTURE COMPARISON */
-.arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-@media (max-width:860px){.arch-grid{grid-template-columns:1fr}}
-.arch-card{padding:32px 28px;border-radius:24px;display:flex;flex-direction:column;gap:18px;position:relative}
+/* ARCHITECTURE */
+.arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.arch-card{padding:28px 24px;border-radius:22px;display:flex;flex-direction:column;gap:16px;position:relative}
 .arch-card.highlight{border:1px solid rgba(61,220,132,.45);box-shadow:0 0 45px -10px rgba(33,163,102,.35)}
-.arch-pill{align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:4px 12px;border-radius:9999px}
+.arch-pill{align-self:flex-start;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:4px 11px;border-radius:9999px}
 .arch-pill.local{background:rgba(255,255,255,.12);color:#fff}
 .arch-pill.enterprise{background:var(--brand-glow);color:#06241a}
-.arch-specs{display:flex;flex-direction:column;gap:10px;padding:0;margin:0}
-.arch-specs li{list-style:none;display:flex;align-items:flex-start;gap:10px;font-size:13.5px;color:rgba(255,255,255,.82);line-height:1.5}
+.arch-specs{display:flex;flex-direction:column;gap:9px;padding:0;margin:0}
+.arch-specs li{list-style:none;display:flex;align-items:flex-start;gap:9px;font-size:13px;color:rgba(255,255,255,.84);line-height:1.5}
 .arch-specs li svg{flex-shrink:0;margin-top:3px;color:var(--brand-glow)}
 
 /* FEATURES GRID */
-.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-@media (max-width:920px){.features-grid{grid-template-columns:repeat(2,1fr)}}
-@media (max-width:620px){.features-grid{grid-template-columns:1fr}}
-.feature-card{padding:26px 24px;border-radius:22px;display:flex;flex-direction:column;gap:12px}
-.feature-icon{width:42px;height:42px;border-radius:12px;background:rgba(33,163,102,.3);display:flex;align-items:center;justify-content:center}
-.feature-card h3{font-size:17px;font-weight:600}
-.feature-card p{font-size:13.5px;line-height:1.6;color:var(--muted)}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.feature-card{padding:24px 20px;border-radius:20px;display:flex;flex-direction:column;gap:11px}
+.feature-icon{width:40px;height:40px;border-radius:12px;background:rgba(33,163,102,.3);display:flex;align-items:center;justify-content:center}
+.feature-card h3{font-size:16.5px;font-weight:600}
+.feature-card p{font-size:13px;line-height:1.6;color:var(--muted)}
 
 /* PRICING */
-.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch}
-@media (max-width:920px){.pricing-grid{grid-template-columns:1fr}}
-.price-card{padding:34px 28px;border-radius:24px;display:flex;flex-direction:column;gap:20px;position:relative}
-.price-card.featured{border:1px solid rgba(61,220,132,.5);box-shadow:0 0 60px -15px rgba(33,163,102,.5)}
-.price-badge{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--brand-glow);color:#06241a;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 14px;border-radius:9999px}
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch}
+.price-card{padding:30px 24px;border-radius:22px;display:flex;flex-direction:column;gap:18px;position:relative}
+.price-card.featured{border:1px solid rgba(61,220,132,.5);box-shadow:0 0 50px -15px rgba(33,163,102,.45)}
+.price-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--brand-glow);color:#06241a;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:3.5px 13px;border-radius:9999px;white-space:nowrap}
 .price-amount{display:flex;align-items:baseline;gap:6px}
-.price-amount .amt{font-size:42px;font-weight:600;letter-spacing:-0.03em}
-.price-amount .per{font-size:13px;color:var(--muted)}
-.price-features{display:flex;flex-direction:column;gap:11px;flex:1;padding:0;margin:0}
-.price-features li{list-style:none;display:flex;align-items:flex-start;gap:10px;font-size:13.5px;color:rgba(255,255,255,.82);line-height:1.5}
+.price-amount .amt{font-size:38px;font-weight:600;letter-spacing:-0.03em}
+.price-amount .per{font-size:12.5px;color:var(--muted)}
+.price-features{display:flex;flex-direction:column;gap:10px;flex:1;padding:0;margin:0}
+.price-features li{list-style:none;display:flex;align-items:flex-start;gap:9px;font-size:13px;color:rgba(255,255,255,.84);line-height:1.5}
 .price-features li svg{flex-shrink:0;margin-top:3px;color:var(--brand-glow)}
-.price-cta{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:9999px;font-size:14px;font-weight:600;width:100%}
+.price-cta{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border-radius:9999px;font-size:13.5px;font-weight:600;width:100%;text-align:center}
 .price-cta.primary{background:var(--brand-glow);color:#06241a}
 .price-cta.secondary{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.2)}
 
 /* FAQ */
-.faq-list{max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
-.faq-item{border-radius:18px;padding:20px 24px;cursor:pointer}
-.faq-q{display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:16px;font-weight:500}
-.faq-a{font-size:14px;line-height:1.6;color:var(--muted);margin-top:12px;display:none}
+.faq-list{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.faq-item{border-radius:16px;padding:18px 22px;cursor:pointer}
+.faq-q{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:15px;font-weight:500}
+.faq-a{font-size:13.5px;line-height:1.6;color:var(--muted);margin-top:10px;display:none}
 .faq-item.open .faq-a{display:block}
-.faq-icon{transition:transform .2s ease}
+.faq-icon{transition:transform .2s ease;flex-shrink:0}
 .faq-item.open .faq-icon{transform:rotate(180deg)}
 
 /* FOOTER */
-footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:18px}
-.footer-links{display:flex;gap:24px;font-size:13.5px;color:var(--muted)}
-.footer-copy{font-size:12.5px;color:var(--muted-2)}
+footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
+.footer-links{display:flex;flex-wrap:wrap;gap:20px;font-size:13px;color:var(--muted)}
+.footer-copy{font-size:12px;color:var(--muted-2)}
 
-@media (max-width:768px){
-  header.nav{padding:12px 16px}
+/* ========================================================================== */
+/* RESPONSIVE MEDIA QUERIES (DESKTOP, TABLET, MOBILE)                         */
+/* ========================================================================== */
+
+@media (max-width: 1040px) {
   .nav-links{display:none}
-  .shell{padding:0 20px}
-  section.band{padding:42px 0}
+  .mobile-toggle{display:flex}
+}
+
+@media (max-width: 920px) {
+  .demo-workbench{grid-template-columns:1fr}
+  .features-grid{grid-template-columns:repeat(2,1fr)}
+  .pricing-grid{grid-template-columns:1fr}
+  .arch-grid{grid-template-columns:1fr}
+}
+
+@media (max-width: 640px) {
+  .shell{padding:0 16px}
+  header.nav{padding-top:10px}
+  .nav-inner{padding:8px 12px 8px 16px}
+  .nav-launch-btn{display:none}
+  .brand-link{font-size:16px}
+  
+  section.hero{padding:44px 0 28px}
+  h1.hero-title{font-size:30px;line-height:1.15}
+  p.hero-lede{font-size:14px}
+  .pill-badge{font-size:11px;padding:5px 12px;text-align:center}
+  
+  .cta-group{flex-direction:column;width:100%;max-width:320px}
+  .cta-button{width:100%;justify-content:center}
+  .pill-strip{gap:6px}
+  .pill-tag{font-size:10.5px;padding:4px 10px}
+  
+  section.band{padding:36px 0}
+  .section-head{margin-bottom:24px}
+  .section-head h2{font-size:24px}
+  .demo-frame{padding:14px 10px;border-radius:18px}
+  .demo-header{flex-direction:column;align-items:flex-start;gap:8px}
+  .step-builder{padding:14px 12px}
+  
+  .features-grid{grid-template-columns:1fr}
+  .feature-card{padding:20px 16px}
+  .price-card{padding:24px 18px}
+  .price-amount .amt{font-size:34px}
+  .faq-item{padding:15px 16px}
+  .faq-q{font-size:14px}
+  
+  footer{flex-direction:column;align-items:center;text-align:center;gap:14px}
+  .footer-links{justify-content:center;gap:16px}
 }
 </style>
 </head>
@@ -212,6 +353,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
     <span>StepSheet</span>
   </a>
 
+  <!-- Desktop nav links (visible on screens >= 1040px) -->
   <nav class="nav-links">
     <a href="#demo">Live Demo</a>
     <a href="#architecture">Architecture</a>
@@ -222,11 +364,33 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   </nav>
 
   <div class="nav-actions">
-    <a href="app.html" target="_blank" class="cta-button btn-primary hov" style="padding:9px 18px;font-size:13.5px;min-height:38px">
-      Launch Web App
+    <a href="app.html" target="_blank" class="cta-button btn-primary hov nav-launch-btn">
+      <span>Launch Web App</span>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
     </a>
+
+    <!-- Mobile Hamburger Toggle (visible on screens < 1040px) -->
+    <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle navigation menu" type="button">
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+    </button>
   </div>
+</div>
+
+<!-- Mobile Dropdown Drawer -->
+<div class="mobile-menu-drawer liquid-glass" id="mobileMenu">
+  <nav class="mobile-nav-links">
+    <a href="#demo" class="mobile-nav-link">Live Demo</a>
+    <a href="#architecture" class="mobile-nav-link">Architecture</a>
+    <a href="#features" class="mobile-nav-link">Features</a>
+    <a href="#pricing" class="mobile-nav-link">Pricing</a>
+    <a href="#downloads" class="mobile-nav-link">Desktop App</a>
+    <a href="#faq" class="mobile-nav-link">FAQ</a>
+  </nav>
+  <a href="app.html" target="_blank" class="cta-button btn-primary hov" style="width:100%;justify-content:center;margin-top:6px">
+    <span>🚀 Launch Free Web App</span>
+  </a>
 </div>
 </header>
 
@@ -280,7 +444,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
 <div class="demo-frame liquid-glass-strong">
   <div class="demo-header">
     <div class="window-dots"><span></span><span></span><span></span></div>
-    <div style="font-size:12.5px;color:rgba(255,255,255,.8);font-family:var(--font-mono)">StepSheet Workbook — Active Step: XLOOKUP()</div>
+    <div style="font-size:12px;color:rgba(255,255,255,.8);font-family:var(--font-mono)">StepSheet Workbook — Active Step: XLOOKUP()</div>
     <a href="app.html" target="_blank" style="font-size:12px;color:var(--brand-glow);font-weight:600">Open in Full Screen →</a>
   </div>
 
@@ -291,7 +455,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
         <span class="step-badge">1</span>
         <div>
           <h4>Add Lookup Step</h4>
-          <p style="font-size:13px;color:var(--muted)">Matches SKU between sheets and pulls unit price</p>
+          <p style="font-size:12.5px;color:var(--muted)">Matches SKU between sheets and pulls unit price</p>
         </div>
       </div>
 
@@ -319,48 +483,50 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:8px">
         <button id="step-apply-btn" class="step-apply">
           <span id="step-apply-label">Run Step</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
         </button>
-        <span style="font-size:11.5px;color:var(--muted-2);font-family:var(--font-mono)">Generated: =XLOOKUP(A2, PriceList!A:A, PriceList!B:B)</span>
+        <span style="font-size:11px;color:var(--muted-2);font-family:var(--font-mono)">=XLOOKUP(A2, PriceList!A:A, PriceList!B:B)</span>
       </div>
     </div>
 
     <!-- Live Excel Grid Preview -->
-    <div class="demo-grids">
-      <div style="flex:1">
-        <div style="font-size:11.5px;font-weight:600;margin-bottom:6px;color:#183224">Orders Sheet (Live Calculation)</div>
-        <table class="excel-table">
-          <thead>
-            <tr class="col-letters"><th class="gutter"></th><th>A</th><th>B</th><th>C</th><th style="background:#dff2e6;color:#1c6b40">D (Calculated)</th><th>E</th></tr>
-            <tr><td class="gutter">1</td><td class="field-head">SKU</td><td class="field-head">Product</td><td class="field-head">Qty</td><td class="field-head">Unit Price</td><td class="field-head">Total</td></tr>
-          </thead>
-          <tbody id="orders-body">
-            <tr data-sku="SKU-204"><td class="gutter">2</td><td>SKU-204</td><td>Wireless Mouse</td><td class="num">12</td><td class="num" id="d2"><span class="cell-empty">—</span></td><td class="num" id="e2"><span class="cell-empty">—</span></td></tr>
-            <tr data-sku="SKU-118"><td class="gutter">3</td><td>SKU-118</td><td>USB‑C Hub</td><td class="num">8</td><td class="num" id="d3"><span class="cell-empty">—</span></td><td class="num" id="e3"><span class="cell-empty">—</span></td></tr>
-            <tr data-sku="SKU-331"><td class="gutter">4</td><td>SKU-331</td><td>Laptop Stand</td><td class="num">5</td><td class="num" id="d4"><span class="cell-empty">—</span></td><td class="num" id="e4"><span class="cell-empty">—</span></td></tr>
-            <tr data-sku="SKU-092"><td class="gutter">5</td><td>SKU-092</td><td>Mechanical Keyboard</td><td class="num">3</td><td class="num" id="d5"><span class="cell-empty">—</span></td><td class="num" id="e5"><span class="cell-empty">—</span></td></tr>
-            <tr data-sku="SKU-277"><td class="gutter">6</td><td>SKU-277</td><td>Webcam HD</td><td class="num">10</td><td class="num" id="d6"><span class="cell-empty">—</span></td><td class="num" id="e6"><span class="cell-empty">—</span></td></tr>
-          </tbody>
-        </table>
-      </div>
+    <div class="demo-grids-scroll">
+      <div class="demo-grids">
+        <div style="flex:1">
+          <div style="font-size:11.5px;font-weight:600;margin-bottom:6px;color:#183224">Orders Sheet (Live Calculation)</div>
+          <table class="excel-table">
+            <thead>
+              <tr class="col-letters"><th class="gutter"></th><th>A</th><th>B</th><th>C</th><th style="background:#dff2e6;color:#1c6b40">D (Calculated)</th><th>E</th></tr>
+              <tr><td class="gutter">1</td><td class="field-head">SKU</td><td class="field-head">Product</td><td class="field-head">Qty</td><td class="field-head">Unit Price</td><td class="field-head">Total</td></tr>
+            </thead>
+            <tbody id="orders-body">
+              <tr data-sku="SKU-204"><td class="gutter">2</td><td>SKU-204</td><td>Wireless Mouse</td><td class="num">12</td><td class="num" id="d2"><span class="cell-empty">—</span></td><td class="num" id="e2"><span class="cell-empty">—</span></td></tr>
+              <tr data-sku="SKU-118"><td class="gutter">3</td><td>SKU-118</td><td>USB‑C Hub</td><td class="num">8</td><td class="num" id="d3"><span class="cell-empty">—</span></td><td class="num" id="e3"><span class="cell-empty">—</span></td></tr>
+              <tr data-sku="SKU-331"><td class="gutter">4</td><td>SKU-331</td><td>Laptop Stand</td><td class="num">5</td><td class="num" id="d4"><span class="cell-empty">—</span></td><td class="num" id="e4"><span class="cell-empty">—</span></td></tr>
+              <tr data-sku="SKU-092"><td class="gutter">5</td><td>SKU-092</td><td>Mechanical Keyboard</td><td class="num">3</td><td class="num" id="d5"><span class="cell-empty">—</span></td><td class="num" id="e5"><span class="cell-empty">—</span></td></tr>
+              <tr data-sku="SKU-277"><td class="gutter">6</td><td>SKU-277</td><td>Webcam HD</td><td class="num">10</td><td class="num" id="d6"><span class="cell-empty">—</span></td><td class="num" id="e6"><span class="cell-empty">—</span></td></tr>
+            </tbody>
+          </table>
+        </div>
 
-      <div style="width:160px;border-left:1px dashed #d1d5db;padding-left:14px">
-        <div style="font-size:11.5px;font-weight:600;margin-bottom:6px;color:#183224">PriceList Source</div>
-        <table class="excel-table">
-          <thead>
-            <tr class="col-letters"><th class="gutter"></th><th>SKU</th><th>Price</th></tr>
-          </thead>
-          <tbody id="pricelist-body">
-            <tr data-sku="SKU-092"><td class="gutter">1</td><td>SKU-092</td><td class="num">$62.00</td></tr>
-            <tr data-sku="SKU-204"><td class="gutter">2</td><td>SKU-204</td><td class="num">$14.50</td></tr>
-            <tr data-sku="SKU-331"><td class="gutter">3</td><td>SKU-331</td><td class="num">$38.00</td></tr>
-            <tr data-sku="SKU-277"><td class="gutter">4</td><td>SKU-277</td><td class="num">$29.99</td></tr>
-            <tr data-sku="SKU-118"><td class="gutter">5</td><td>SKU-118</td><td class="num">$21.75</td></tr>
-          </tbody>
-        </table>
+        <div style="width:150px;border-left:1px dashed #d1d5db;padding-left:12px">
+          <div style="font-size:11.5px;font-weight:600;margin-bottom:6px;color:#183224">PriceList Source</div>
+          <table class="excel-table">
+            <thead>
+              <tr class="col-letters"><th class="gutter"></th><th>SKU</th><th>Price</th></tr>
+            </thead>
+            <tbody id="pricelist-body">
+              <tr data-sku="SKU-092"><td class="gutter">1</td><td>SKU-092</td><td class="num">$62.00</td></tr>
+              <tr data-sku="SKU-204"><td class="gutter">2</td><td>SKU-204</td><td class="num">$14.50</td></tr>
+              <tr data-sku="SKU-331"><td class="gutter">3</td><td>SKU-331</td><td class="num">$38.00</td></tr>
+              <tr data-sku="SKU-277"><td class="gutter">4</td><td>SKU-277</td><td class="num">$29.99</td></tr>
+              <tr data-sku="SKU-118"><td class="gutter">5</td><td>SKU-118</td><td class="num">$21.75</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -380,7 +546,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   <div class="arch-card liquid-glass">
     <span class="arch-pill local">Local-First (Free & Pro)</span>
     <h3>100% In-Browser Execution</h3>
-    <p style="font-size:14px;color:var(--muted)">Run the full data workbench client-side with zero infrastructure dependencies and total privacy.</p>
+    <p style="font-size:13.5px;color:var(--muted)">Run the full data workbench client-side with zero infrastructure dependencies and total privacy.</p>
     <ul class="arch-specs">
       <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg><b>Zero Cloud Cost:</b> 100% execution in browser JavaScript V8 engine</li>
       <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg><b>Complete Privacy:</b> Data stays in browser memory & IndexedDB</li>
@@ -396,7 +562,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   <div class="arch-card liquid-glass-strong highlight">
     <span class="arch-pill enterprise">Enterprise / Cloud Sync</span>
     <h3>DuckDB & Supabase Cloud Cluster</h3>
-    <p style="font-size:14px;color:var(--muted)">Deploy containerized FastAPI with multi-threaded DuckDB and centralized team workspaces.</p>
+    <p style="font-size:13.5px;color:var(--muted)">Deploy containerized FastAPI with multi-threaded DuckDB and centralized team workspaces.</p>
     <ul class="arch-specs">
       <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg><b>Multi-Million Row Scale:</b> Vectorized DuckDB processing (4GB+ memory)</li>
       <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg><b>Supabase PostgreSQL:</b> Central connection pooling via Supavisor (Port 6543)</li>
@@ -480,20 +646,20 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
 <div class="arch-grid" style="max-width:860px;margin:0 auto">
   <!-- Windows -->
   <div class="arch-card liquid-glass hov" style="text-align:center;align-items:center">
-    <svg width="44" height="44" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.901"/></svg>
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.901"/></svg>
     <h3>Windows 10 / 11</h3>
-    <p style="font-size:13px;color:var(--muted)">Lightweight NSIS installer (~12 MB)</p>
-    <a href="https://github.com/gmani0005-sys/StepSheet/releases" target="_blank" class="price-cta primary hov" style="margin-top:10px">
+    <p style="font-size:12.5px;color:var(--muted)">Lightweight NSIS installer (~12 MB)</p>
+    <a href="https://github.com/gmani0005-sys/StepSheet/releases" target="_blank" class="price-cta primary hov" style="margin-top:6px">
       Download for Windows (.exe)
     </a>
   </div>
 
   <!-- macOS -->
   <div class="arch-card liquid-glass hov" style="text-align:center;align-items:center">
-    <svg width="44" height="44" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 7.05c.61-.75 1.04-1.8 1.01-2.85-.9.04-2.03.6-2.68 1.34-.56.63-.99 1.68-.94 2.71 1.02.08 2-.45 2.61-1.2"/></svg>
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 7.05c.61-.75 1.04-1.8 1.01-2.85-.9.04-2.03.6-2.68 1.34-.56.63-.99 1.68-.94 2.71 1.02.08 2-.45 2.61-1.2"/></svg>
     <h3>macOS (Apple Silicon & Intel)</h3>
-    <p style="font-size:13px;color:var(--muted)">Drag-to-Applications installer (~15 MB)</p>
-    <a href="https://github.com/gmani0005-sys/StepSheet/releases" target="_blank" class="price-cta primary hov" style="margin-top:10px">
+    <p style="font-size:12.5px;color:var(--muted)">Drag-to-Applications installer (~15 MB)</p>
+    <a href="https://github.com/gmani0005-sys/StepSheet/releases" target="_blank" class="price-cta primary hov" style="margin-top:6px">
       Download for macOS (.dmg)
     </a>
   </div>
@@ -513,7 +679,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   <div class="price-card liquid-glass">
     <div>
       <h3>Starter (Local-First)</h3>
-      <p style="font-size:13px;color:var(--muted);margin-top:4px">For individual analysts & students</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:4px">For individual analysts & students</p>
     </div>
     <div class="price-amount">
       <span class="amt">₹0</span>
@@ -534,7 +700,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
     <span class="price-badge">Most Popular</span>
     <div>
       <h3>Pro Analyst</h3>
-      <p style="font-size:13px;color:var(--muted);margin-top:4px">Power tools & automated AI intelligence</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:4px">Power tools & automated AI intelligence</p>
     </div>
     <div class="price-amount">
       <span class="amt">₹499</span>
@@ -554,7 +720,7 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   <div class="price-card liquid-glass">
     <div>
       <h3>Enterprise Cloud Sync</h3>
-      <p style="font-size:13px;color:var(--muted);margin-top:4px">For data teams & organizations</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:4px">For data teams & organizations</p>
     </div>
     <div class="price-amount">
       <span class="amt">₹1,999</span>
@@ -643,8 +809,39 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
 
 </div>
 
-<!-- INTERACTIVE DEMO SCRIPT -->
+<!-- INTERACTIVE SCRIPTS -->
 <script>
+// Mobile Navigation Drawer Toggle
+(function(){
+  var toggle = document.getElementById('mobileToggle');
+  var menu = document.getElementById('mobileMenu');
+  if(toggle && menu){
+    toggle.addEventListener('click', function(e){
+      e.stopPropagation();
+      var isOpen = menu.classList.toggle('open');
+      toggle.classList.toggle('active', isOpen);
+    });
+
+    // Close when clicking any nav link
+    var links = menu.querySelectorAll('a');
+    for(var i = 0; i < links.length; i++){
+      links[i].addEventListener('click', function(){
+        menu.classList.remove('open');
+        toggle.classList.remove('active');
+      });
+    }
+
+    // Close when clicking outside
+    document.addEventListener('click', function(e){
+      if(!menu.contains(e.target) && !toggle.contains(e.target)){
+        menu.classList.remove('open');
+        toggle.classList.remove('active');
+      }
+    });
+  }
+})();
+
+// Interactive Live Formula Demo Animation
 (function(){
   var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var rows = [
@@ -661,13 +858,13 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   var applyLabel = document.getElementById('step-apply-label');
 
   function fmtMoney(n){ return '$' + n.toFixed(2); }
-  function priceRowFor(sku){ return priceBody.querySelector('tr[data-sku="'+sku+'"]'); }
-  function orderRowFor(sku){ return ordersBody.querySelector('tr[data-sku="'+sku+'"]'); }
+  function priceRowFor(sku){ return priceBody ? priceBody.querySelector('tr[data-sku="'+sku+'"]') : null; }
+  function orderRowFor(sku){ return ordersBody ? ordersBody.querySelector('tr[data-sku="'+sku+'"]') : null; }
 
   function fillStatic(){
-    fields.forEach(function(f){ f.classList.add('selected'); });
-    applyBtn.classList.add('done');
-    applyLabel.textContent = 'Step Added';
+    fields.forEach(function(f){ if(f) f.classList.add('selected'); });
+    if(applyBtn) applyBtn.classList.add('done');
+    if(applyLabel) applyLabel.textContent = 'Step Added';
     rows.forEach(function(r){
       var d = document.getElementById(r.d);
       var e = document.getElementById(r.e);
@@ -677,9 +874,9 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   }
 
   function resetAll(){
-    fields.forEach(function(f){ f.classList.remove('selected','selecting'); });
-    applyBtn.classList.remove('applying','done');
-    applyLabel.textContent = 'Run Step';
+    fields.forEach(function(f){ if(f) f.classList.remove('selected','selecting'); });
+    if(applyBtn) applyBtn.classList.remove('applying','done');
+    if(applyLabel) applyLabel.textContent = 'Run Step';
     rows.forEach(function(r){
       var d = document.getElementById(r.d);
       var e = document.getElementById(r.e);
@@ -697,10 +894,12 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
     function next(){
       if(i >= fields.length){ setTimeout(done, 300); return; }
       var f = fields[i];
-      f.classList.add('selecting');
+      if(f) f.classList.add('selecting');
       setTimeout(function(){
-        f.classList.remove('selecting');
-        f.classList.add('selected');
+        if(f){
+          f.classList.remove('selecting');
+          f.classList.add('selected');
+        }
         i++;
         setTimeout(next, 260);
       }, 320);
@@ -738,12 +937,12 @@ footer{padding:36px 0 48px;border-top:1px solid rgba(255,255,255,.08);display:fl
   function cycle(){
     resetAll();
     selectFields(function(){
-      applyBtn.classList.add('applying');
-      applyLabel.textContent = 'Calculating rows…';
+      if(applyBtn) applyBtn.classList.add('applying');
+      if(applyLabel) applyLabel.textContent = 'Calculating rows…';
       runRow(0, function(){
-        applyBtn.classList.remove('applying');
-        applyBtn.classList.add('done');
-        applyLabel.textContent = 'Step Added ✓';
+        if(applyBtn) applyBtn.classList.remove('applying');
+        if(applyBtn) applyBtn.classList.add('done');
+        if(applyLabel) applyLabel.textContent = 'Step Added ✓';
         setTimeout(function(){
           rows.forEach(function(r){
             var d = document.getElementById(r.d);

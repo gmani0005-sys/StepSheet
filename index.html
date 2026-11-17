@@ -23,8 +23,9 @@
   --font-mono:'JetBrains Mono',monospace;
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth}
+html{scroll-behavior:smooth;scroll-padding-top:90px}
 body{margin:0;background:var(--bg-deep);font-family:var(--font-display);color:var(--fg);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+section{scroll-margin-top:90px}
 a{color:#fff;text-decoration:none}
 a:hover{color:rgba(255,255,255,.9)}
 h1,h2,h3,h4{font-weight:500;margin:0}
@@ -110,7 +111,9 @@ header.nav{padding-top:16px;position:sticky;top:0;z-index:100}
   flex:1;
 }
 .nav-links a{
-  white-space:nowrap;
+  white-space:nowrap !important;
+  text-wrap:nowrap;
+  flex-shrink:0;
   transition:color .18s ease;
 }
 .nav-links a:hover{color:#fff}
@@ -121,12 +124,19 @@ header.nav{padding-top:16px;position:sticky;top:0;z-index:100}
   gap:10px;
   flex-shrink:0;
   white-space:nowrap;
+  text-wrap:nowrap;
 }
 .nav-launch-btn{
   padding:9px 18px;
   font-size:13.5px;
   min-height:38px;
-  white-space:nowrap;
+  white-space:nowrap !important;
+  text-wrap:nowrap;
+  flex-shrink:0;
+}
+.nav-launch-btn span{
+  white-space:nowrap !important;
+  text-wrap:nowrap;
 }
 
 /* MOBILE TOGGLE & DRAWER */
@@ -196,7 +206,7 @@ p.hero-lede{font-size: clamp(15px, 2vw, 18px);line-height:1.6;color:var(--muted)
 .pill-strip{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px}
 .pill-tag{font-size:11.5px;padding:5px 13px;border-radius:9999px;color:rgba(255,255,255,.78)}
 
-/* DEMO */
+/* INTERACTIVE DEMO PREVIEW SECTION */
 section.band{padding:48px 0}
 .section-head{text-align:center;max-width:680px;margin:0 auto 32px;display:flex;flex-direction:column;gap:10px}
 .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.12em;font-weight:600;color:var(--brand-glow)}
@@ -206,17 +216,101 @@ section.band{padding:48px 0}
 .demo-frame{border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:18px;margin-bottom:14px}
 .demo-workbench{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 
-.demo-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:12px}
+.demo-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:12px;flex-wrap:wrap;gap:10px}
 .window-dots{display:flex;gap:6px}
 .window-dots span{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.2)}
 .window-dots span:nth-child(1){background:#ff5f56}
 .window-dots span:nth-child(2){background:#ffbd2e}
 .window-dots span:nth-child(3){background:#27c93f}
 
+.demo-header-actions{display:flex;align-items:center;gap:12px}
+.fullscreen-trigger-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:rgba(61,220,132,.18);
+  border:1px solid rgba(61,220,132,.45);
+  color:#3ddc84;
+  font-size:12px;
+  font-weight:600;
+  padding:5px 13px;
+  border-radius:9999px;
+  cursor:pointer;
+  transition:all .2s ease;
+}
+.fullscreen-trigger-btn:hover{
+  background:var(--brand-glow);
+  color:#06241a;
+  transform:scale(1.03);
+}
+
+/* STEP TABS */
+.step-tabs{
+  display:flex;
+  gap:8px;
+  border-bottom:1px solid rgba(255,255,255,.1);
+  padding-bottom:10px;
+  margin-bottom:12px;
+  overflow-x:auto;
+}
+.step-tab-btn{
+  padding:6px 14px;
+  border-radius:9999px;
+  font-size:12px;
+  font-weight:500;
+  background:rgba(255,255,255,.06);
+  color:rgba(255,255,255,.72);
+  border:1px solid rgba(255,255,255,.12);
+  cursor:pointer;
+  white-space:nowrap;
+  transition:all .2s ease;
+}
+.step-tab-btn.active{
+  background:var(--brand-glow);
+  color:#06241a;
+  font-weight:600;
+  border-color:var(--brand-glow);
+}
+
+/* STEP BUILDER FORM CONTROLS */
+.step-builder{border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:14px}
+.step-builder-head{display:flex;align-items:flex-start;gap:12px}
+.step-badge{flex-shrink:0;width:26px;height:26px;border-radius:9999px;background:var(--brand-glow);color:#06241a;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.step-fields{display:flex;flex-wrap:wrap;gap:12px}
+.step-field{flex:1 1 130px;display:flex;flex-direction:column;gap:5px}
+.step-field label{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+
+.select-input{
+  background:rgba(255,255,255,.09);
+  border:1px solid rgba(255,255,255,.2);
+  color:#fff;
+  border-radius:10px;
+  padding:9px 12px;
+  font-size:13px;
+  font-family:var(--font-display);
+  outline:none;
+  width:100%;
+  cursor:pointer;
+  transition:all .2s ease;
+}
+.select-input:focus{
+  border-color:var(--brand-glow);
+  box-shadow:0 0 0 3px rgba(61,220,132,.3);
+}
+.select-input option{
+  background:#092e1f;
+  color:#fff;
+}
+
+.step-apply{display:inline-flex;align-items:center;gap:10px;padding:11px 20px;border-radius:9999px;background:var(--brand-glow);color:#06241a;font-weight:600;font-size:13px;align-self:flex-start;transition:all .25s ease}
+.step-apply.applying{background:#bdf0d6}
+.step-apply.done{background:#3ddc84}
+
+/* DEMO EXCEL GRID */
 .demo-grids-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:14px}
 .demo-grids{background:#ffffff;border-radius:14px;padding:14px;color:#183224;display:flex;gap:16px;min-width:540px;box-shadow:inset 0 1px 3px rgba(0,0,0,.12)}
 .excel-table{font-size:12px;width:100%}
-.excel-table th, .excel-table td{border:1px solid #e3e6e1;padding:6px 10px;text-align:left;white-space:nowrap}
+.excel-table th, .excel-table td{border:1px solid #e3e6e1;padding:6px 10px;text-align:left;white-space:nowrap;transition:background .2s ease}
 .col-letters th{background:#eef1ee;color:#7c8c82;font-size:11px;font-weight:500;text-align:center;padding:4px 8px}
 .gutter{background:#eef1ee;color:#7c8c82;font-size:11px;text-align:center;width:28px;font-weight:500}
 .field-head{background:#f6f8f6;font-weight:600;font-size:11.5px;color:#183224}
@@ -224,22 +318,73 @@ section.band{padding:48px 0}
 .cell-empty{color:#cbd5ce}
 .active-row td{background:#e6f8ee}
 .price-active td{background:#e6f8ee;transition:background .25s ease}
+.tag-badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10.5px;font-weight:600}
+.tag-high{background:#dcfce7;color:#166534}
+.tag-std{background:#f1f5f9;color:#475569}
 @keyframes cellFill{from{opacity:0;transform:translateY(3px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
 .cell-fill{animation:cellFill .3s ease forwards}
 .fill-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand-light);animation:pulseDot .9s infinite}
 
-.step-builder{border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:14px}
-.step-builder-head{display:flex;align-items:flex-start;gap:12px}
-.step-badge{flex-shrink:0;width:26px;height:26px;border-radius:9999px;background:var(--brand-glow);color:#06241a;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
-.step-fields{display:flex;flex-wrap:wrap;gap:12px}
-.step-field{flex:1 1 130px;display:flex;flex-direction:column;gap:5px}
-.step-field label{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
-.select-box{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);font-size:13px;font-weight:500;transition:all .25s ease}
-.select-box.selecting{box-shadow:0 0 0 3px rgba(61,220,132,.35);border-color:rgba(61,220,132,.65)}
-.select-box.selected{background:rgba(33,163,102,.26);border-color:rgba(61,220,132,.45)}
-.step-apply{display:inline-flex;align-items:center;gap:10px;padding:11px 20px;border-radius:9999px;background:var(--brand-glow);color:#06241a;font-weight:600;font-size:13px;align-self:flex-start;transition:all .25s ease}
-.step-apply.applying{background:#bdf0d6}
-.step-apply.done{background:#3ddc84}
+/* FULL-SCREEN STUDIO MODAL */
+.fullscreen-studio-modal{
+  position:fixed;
+  inset:0;
+  z-index:99999;
+  background:rgba(4,18,12,.98);
+  display:none;
+  flex-direction:column;
+  animation:modalFadeIn .2s ease-out forwards;
+}
+.fullscreen-studio-modal.active{display:flex}
+@keyframes modalFadeIn{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+.studio-topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 22px;
+  background:rgba(8,32,22,.96);
+  border-bottom:1px solid rgba(255,255,255,.14);
+  flex-shrink:0;
+}
+.studio-brand{display:flex;align-items:center;gap:12px}
+.badge-enterprise{
+  background:rgba(61,220,132,.18);
+  color:#3ddc84;
+  font-size:11.5px;
+  font-weight:600;
+  padding:3px 10px;
+  border-radius:9999px;
+  border:1px solid rgba(61,220,132,.35);
+}
+.studio-actions{display:flex;align-items:center;gap:12px}
+.btn-exit-studio{
+  background:rgba(255,255,255,.12);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.24);
+  padding:6px 14px;
+  border-radius:9999px;
+  font-size:12.5px;
+  font-weight:600;
+  cursor:pointer;
+  transition:all .18s ease;
+}
+.btn-exit-studio:hover{background:#ef4444;border-color:#ef4444}
+.studio-iframe-wrap{flex:1;width:100%;height:100%;min-height:0;overflow:hidden;border:none}
+.studio-iframe-wrap iframe{width:100%;height:100%;border:none;display:block}
+
+/* ENTERPRISE CLOUD SYNC SIMULATOR CARD */
+.enterprise-cloud-box{
+  background:rgba(6,28,19,.75);
+  border:1px solid rgba(61,220,132,.35);
+  border-radius:14px;
+  padding:14px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  font-size:12.5px;
+}
+.cloud-metric-row{display:flex;justify-content:space-between;align-items:center;color:var(--muted)}
+.cloud-metric-val{font-family:var(--font-mono);font-weight:600;color:var(--brand-glow)}
 
 /* ARCHITECTURE */
 .arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
@@ -288,11 +433,14 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
 .footer-links{display:flex;flex-wrap:wrap;gap:20px;font-size:13px;color:var(--muted)}
 .footer-copy{font-size:12px;color:var(--muted-2)}
 
-/* ========================================================================== */
-/* RESPONSIVE MEDIA QUERIES (DESKTOP, TABLET, MOBILE)                         */
-/* ========================================================================== */
+/* RESPONSIVE BREAKPOINTS */
+@media (max-width: 1240px) and (min-width: 1121px) {
+  .nav-links{gap:14px;font-size:12.5px}
+  .nav-inner{padding:8px 14px}
+  .nav-launch-btn{padding:7px 14px;font-size:12.5px}
+}
 
-@media (max-width: 1040px) {
+@media (max-width: 1120px) {
   .nav-links{display:none}
   .mobile-toggle{display:flex}
 }
@@ -310,6 +458,9 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
   .nav-inner{padding:8px 12px 8px 16px}
   .nav-launch-btn{display:none}
   .brand-link{font-size:16px}
+  .studio-topbar{padding:8px 12px;gap:8px}
+  .studio-brand span:not(.grid-logo){font-size:13px}
+  .badge-enterprise{display:none}
   
   section.hero{padding:44px 0 28px}
   h1.hero-title{font-size:30px;line-height:1.15}
@@ -353,7 +504,7 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
     <span>StepSheet</span>
   </a>
 
-  <!-- Desktop nav links (visible on screens >= 1040px) -->
+  <!-- Desktop nav links -->
   <nav class="nav-links">
     <a href="#demo">Live Demo</a>
     <a href="#architecture">Architecture</a>
@@ -369,7 +520,7 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
     </a>
 
-    <!-- Mobile Hamburger Toggle (visible on screens < 1040px) -->
+    <!-- Mobile Hamburger Toggle -->
     <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle navigation menu" type="button">
       <span class="hamburger-bar"></span>
       <span class="hamburger-bar"></span>
@@ -388,6 +539,9 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
     <a href="#downloads" class="mobile-nav-link">Desktop App</a>
     <a href="#faq" class="mobile-nav-link">FAQ</a>
   </nav>
+  <button id="mobileFullscreenBtn" type="button" class="cta-button liquid-glass-strong hov" style="width:100%;justify-content:center;margin-top:6px;border:1px solid rgba(61,220,132,.45);color:#3ddc84">
+    <span>Open Full Screen Studio ⛶</span>
+  </button>
   <a href="app.html" target="_blank" class="cta-button btn-primary hov" style="width:100%;justify-content:center;margin-top:6px">
     <span>🚀 Launch Free Web App</span>
   </a>
@@ -433,62 +587,183 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
 </div>
 </section>
 
-<!-- LIVE INTERACTIVE FORMULA DEMO -->
+<!-- LIVE INTERACTIVE FORMULA & CLOUD SYNC DEMO -->
 <section class="band shell" id="demo">
 <div class="section-head">
-  <span class="eyebrow">Interactive Preview</span>
-  <h2>Pick options. Skip the formula syntax.</h2>
-  <p>Watch StepSheet execute a multi-sheet XLOOKUP in real-time. No syntax errors, no broken quotes, and no formula bars.</p>
+  <span class="eyebrow">Interactive Studio Preview</span>
+  <h2>Try every option live. Skip the formula syntax.</h2>
+  <p>Test real XLOOKUP lookups, conditional rules, or simulate the Enterprise DuckDB cloud cluster live in your browser.</p>
 </div>
 
-<div class="demo-frame liquid-glass-strong">
+<div class="demo-frame liquid-glass-strong" id="demoFrameBox">
+  <!-- Top bar with Open Full Screen -->
   <div class="demo-header">
     <div class="window-dots"><span></span><span></span><span></span></div>
-    <div style="font-size:12px;color:rgba(255,255,255,.8);font-family:var(--font-mono)">StepSheet Workbook — Active Step: XLOOKUP()</div>
-    <a href="app.html" target="_blank" style="font-size:12px;color:var(--brand-glow);font-weight:600">Open in Full Screen →</a>
+    <div id="activeStepHeader" style="font-size:12px;color:rgba(255,255,255,.8);font-family:var(--font-mono)">StepSheet Studio — Active Step: XLOOKUP()</div>
+    <div class="demo-header-actions">
+      <button id="openFullscreenBtn" class="fullscreen-trigger-btn" type="button" title="Launch Full Screen Studio">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+        <span>Open in Full Screen ⛶</span>
+      </button>
+      <a href="app.html" target="_blank" style="font-size:12px;color:var(--brand-glow);font-weight:600">New Tab ↗</a>
+    </div>
   </div>
 
   <div class="demo-workbench">
     <!-- Step Configuration Pane -->
     <div class="step-builder liquid-glass">
-      <div class="step-builder-head">
-        <span class="step-badge">1</span>
-        <div>
-          <h4>Add Lookup Step</h4>
-          <p style="font-size:12.5px;color:var(--muted)">Matches SKU between sheets and pulls unit price</p>
+      
+      <!-- Interactive Step Switcher Tabs -->
+      <div class="step-tabs">
+        <button type="button" class="step-tab-btn active" data-tab="lookup">1. XLOOKUP Match</button>
+        <button type="button" class="step-tab-btn" data-tab="conditional">2. Conditional IF</button>
+        <button type="button" class="step-tab-btn" data-tab="enterprise">3. ⚡ Enterprise Cloud</button>
+      </div>
+
+      <!-- TAB 1: XLOOKUP CONTROLS -->
+      <div id="tabContentLookup" class="tab-pane">
+        <div class="step-builder-head">
+          <span class="step-badge">1</span>
+          <div>
+            <h4>Add Lookup Step</h4>
+            <p style="font-size:12px;color:var(--muted)">Matches SKU between sheets and pulls unit price</p>
+          </div>
+        </div>
+
+        <div class="step-fields" style="margin-top:12px">
+          <div class="step-field">
+            <label>Lookup Column</label>
+            <select id="selectLookupCol" class="select-input">
+              <option value="SKU" selected>Orders.SKU</option>
+              <option value="Product">Orders.Product</option>
+              <option value="Qty">Orders.Qty</option>
+            </select>
+          </div>
+          <div class="step-field">
+            <label>Target Sheet</label>
+            <select id="selectTargetSheet" class="select-input">
+              <option value="PriceList" selected>PriceList</option>
+              <option value="SupplierCatalog">SupplierCatalog</option>
+              <option value="DiscountRates">DiscountRates</option>
+            </select>
+          </div>
+          <div class="step-field">
+            <label>Return Column</label>
+            <select id="selectReturnCol" class="select-input">
+              <option value="Price" selected>PriceList.Price</option>
+              <option value="Cost">PriceList.Cost</option>
+              <option value="Margin">PriceList.Margin</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      <div class="step-fields">
-        <div class="step-field">
-          <label>Lookup Value</label>
-          <div class="select-box" id="field-lookup">
-            <span>Orders.SKU</span>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      <!-- TAB 2: CONDITIONAL IF CONTROLS -->
+      <div id="tabContentConditional" class="tab-pane" style="display:none">
+        <div class="step-builder-head">
+          <span class="step-badge">2</span>
+          <div>
+            <h4>Conditional Column</h4>
+            <p style="font-size:12px;color:var(--muted)">Classify orders into High Priority vs Standard</p>
           </div>
         </div>
-        <div class="step-field">
-          <label>Target Sheet</label>
-          <div class="select-box" id="field-sheet">
-            <span>PriceList</span>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+
+        <div class="step-fields" style="margin-top:12px">
+          <div class="step-field">
+            <label>If Column</label>
+            <select id="selectIfCol" class="select-input">
+              <option value="Total" selected>Orders.Total</option>
+              <option value="Qty">Orders.Qty</option>
+              <option value="Price">Orders.UnitPrice</option>
+            </select>
           </div>
-        </div>
-        <div class="step-field">
-          <label>Return Column</label>
-          <div class="select-box" id="field-return">
-            <span>PriceList.Price</span>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          <div class="step-field">
+            <label>Condition</label>
+            <select id="selectIfOp" class="select-input">
+              <option value="gt" selected>&gt; (Greater than)</option>
+              <option value="gte">&gt;= (Greater or equal)</option>
+              <option value="lt">&lt; (Less than)</option>
+            </select>
+          </div>
+          <div class="step-field">
+            <label>Threshold</label>
+            <select id="selectIfVal" class="select-input">
+              <option value="150" selected>$150.00</option>
+              <option value="100">$100.00</option>
+              <option value="200">$200.00</option>
+            </select>
           </div>
         </div>
       </div>
 
+      <!-- TAB 3: ENTERPRISE CLOUD SYNC CONTROLS -->
+      <div id="tabContentEnterprise" class="tab-pane" style="display:none">
+        <div class="step-builder-head">
+          <span class="step-badge" style="background:#f59e0b;color:#000">⚡</span>
+          <div>
+            <h4>Enterprise Cloud Sync Active</h4>
+            <p style="font-size:12px;color:var(--muted)">Multi-threaded DuckDB cluster + Supabase PostgreSQL</p>
+          </div>
+        </div>
+
+        <div class="step-fields" style="margin-top:12px">
+          <div class="step-field" style="flex:1 1 100%">
+            <label>Enterprise Workspace</label>
+            <select id="selectEntWorkspace" class="select-input">
+              <option value="Acme Corp Global Analytics" selected>🏢 Acme Corp Global Analytics</option>
+              <option value="North America Logistics Hub">🚚 North America Logistics Hub</option>
+              <option value="Global Financial Operations">💼 Global Financial Operations</option>
+            </select>
+          </div>
+          <div class="step-field">
+            <label>Compute Cluster</label>
+            <select id="selectEntCluster" class="select-input">
+              <option value="duckdb" selected>⚡ FastAPI + DuckDB (4GB Memory)</option>
+              <option value="postgres">🐘 Supabase PostgreSQL (Port 6543)</option>
+              <option value="hybrid">🔄 Dual Hybrid Sync Engine</option>
+            </select>
+          </div>
+          <div class="step-field">
+            <label>Sync / Audit Policy</label>
+            <select id="selectEntPolicy" class="select-input">
+              <option value="soc2" selected>🔒 SOC2 Immutable Snapshots</option>
+              <option value="wal">📡 Real-Time WAL Replication</option>
+              <option value="deeplink">🔗 Desktop Deep-Link (stepsheet://auth)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="enterprise-cloud-box" style="margin-top:12px">
+          <div class="cloud-metric-row">
+            <span>Active Tenant:</span>
+            <span class="cloud-metric-val" id="dispTenantVal">🏢 Acme Corp Global Analytics</span>
+          </div>
+          <div class="cloud-metric-row">
+            <span>Storage Layer:</span>
+            <span class="cloud-metric-val" id="dispStorageVal">Supabase PostgreSQL (Supavisor Pooler)</span>
+          </div>
+          <div class="cloud-metric-row">
+            <span>Compute Cluster:</span>
+            <span class="cloud-metric-val" id="dispClusterVal">DuckDB Vectorized (4GB Memory)</span>
+          </div>
+          <div class="cloud-metric-row">
+            <span>Execution Speed:</span>
+            <span class="cloud-metric-val" id="cloudBenchmarkStat">150K rows in 6.4ms</span>
+          </div>
+          <div class="cloud-metric-row">
+            <span>SOC2 Audit Snapshot:</span>
+            <span class="cloud-metric-val" id="dispAuditVal">#v2.4-e81a (SHA256 verified)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dynamic Formula Display and Run Step Button -->
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:8px">
-        <button id="step-apply-btn" class="step-apply">
+        <button id="step-apply-btn" class="step-apply" type="button">
           <span id="step-apply-label">Run Step</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
         </button>
-        <span style="font-size:11px;color:var(--muted-2);font-family:var(--font-mono)">=XLOOKUP(A2, PriceList!A:A, PriceList!B:B)</span>
+        <span id="formulaPreview" style="font-size:11px;color:var(--muted-2);font-family:var(--font-mono);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">=XLOOKUP(A2, PriceList!A:A, PriceList!B:B)</span>
       </div>
     </div>
 
@@ -496,18 +771,21 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
     <div class="demo-grids-scroll">
       <div class="demo-grids">
         <div style="flex:1">
-          <div style="font-size:11.5px;font-weight:600;margin-bottom:6px;color:#183224">Orders Sheet (Live Calculation)</div>
+          <div style="font-size:11.5px;font-weight:600;margin-bottom:6px;color:#183224;display:flex;justify-content:space-between">
+            <span>Orders Sheet (Interactive Calculation)</span>
+            <span id="calcIndicator" style="color:#166534;font-size:10.5px">● Live Grid</span>
+          </div>
           <table class="excel-table">
             <thead>
-              <tr class="col-letters"><th class="gutter"></th><th>A</th><th>B</th><th>C</th><th style="background:#dff2e6;color:#1c6b40">D (Calculated)</th><th>E</th></tr>
-              <tr><td class="gutter">1</td><td class="field-head">SKU</td><td class="field-head">Product</td><td class="field-head">Qty</td><td class="field-head">Unit Price</td><td class="field-head">Total</td></tr>
+              <tr class="col-letters"><th class="gutter"></th><th>A</th><th>B</th><th>C</th><th style="background:#dff2e6;color:#1c6b40">D (UnitPrice)</th><th style="background:#eafaf0;color:#1c6b40">E (Total)</th><th id="thTier" style="background:#fef3c7;color:#92400e;display:none">F (Tier)</th></tr>
+              <tr><td class="gutter">1</td><td class="field-head">SKU</td><td class="field-head">Product</td><td class="field-head">Qty</td><td class="field-head">Unit Price</td><td class="field-head">Total</td><td id="thTierLabel" class="field-head" style="display:none">Order Priority</td></tr>
             </thead>
             <tbody id="orders-body">
-              <tr data-sku="SKU-204"><td class="gutter">2</td><td>SKU-204</td><td>Wireless Mouse</td><td class="num">12</td><td class="num" id="d2"><span class="cell-empty">—</span></td><td class="num" id="e2"><span class="cell-empty">—</span></td></tr>
-              <tr data-sku="SKU-118"><td class="gutter">3</td><td>SKU-118</td><td>USB‑C Hub</td><td class="num">8</td><td class="num" id="d3"><span class="cell-empty">—</span></td><td class="num" id="e3"><span class="cell-empty">—</span></td></tr>
-              <tr data-sku="SKU-331"><td class="gutter">4</td><td>SKU-331</td><td>Laptop Stand</td><td class="num">5</td><td class="num" id="d4"><span class="cell-empty">—</span></td><td class="num" id="e4"><span class="cell-empty">—</span></td></tr>
-              <tr data-sku="SKU-092"><td class="gutter">5</td><td>SKU-092</td><td>Mechanical Keyboard</td><td class="num">3</td><td class="num" id="d5"><span class="cell-empty">—</span></td><td class="num" id="e5"><span class="cell-empty">—</span></td></tr>
-              <tr data-sku="SKU-277"><td class="gutter">6</td><td>SKU-277</td><td>Webcam HD</td><td class="num">10</td><td class="num" id="d6"><span class="cell-empty">—</span></td><td class="num" id="e6"><span class="cell-empty">—</span></td></tr>
+              <tr data-sku="SKU-204"><td class="gutter">2</td><td>SKU-204</td><td>Wireless Mouse</td><td class="num">12</td><td class="num" id="d2">$14.50</td><td class="num" id="e2">$174.00</td><td id="f2" style="display:none"><span class="tag-badge tag-high">High Priority</span></td></tr>
+              <tr data-sku="SKU-118"><td class="gutter">3</td><td>SKU-118</td><td>USB‑C Hub</td><td class="num">8</td><td class="num" id="d3">$21.75</td><td class="num" id="e3">$174.00</td><td id="f3" style="display:none"><span class="tag-badge tag-high">High Priority</span></td></tr>
+              <tr data-sku="SKU-331"><td class="gutter">4</td><td>SKU-331</td><td>Laptop Stand</td><td class="num">5</td><td class="num" id="d4">$38.00</td><td class="num" id="e4">$190.00</td><td id="f4" style="display:none"><span class="tag-badge tag-high">High Priority</span></td></tr>
+              <tr data-sku="SKU-092"><td class="gutter">5</td><td>SKU-092</td><td>Mechanical Keyboard</td><td class="num">3</td><td class="num" id="d5">$62.00</td><td class="num" id="e5">$186.00</td><td id="f5" style="display:none"><span class="tag-badge tag-high">High Priority</span></td></tr>
+              <tr data-sku="SKU-277"><td class="gutter">6</td><td>SKU-277</td><td>Webcam HD</td><td class="num">10</td><td class="num" id="d6">$29.99</td><td class="num" id="e6">$299.90</td><td id="f6" style="display:none"><span class="tag-badge tag-high">High Priority</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -532,6 +810,28 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
   </div>
 </div>
 </section>
+
+<!-- FULL-SCREEN INTERACTIVE STUDIO OVERLAY MODAL -->
+<div id="fullscreenStudioModal" class="fullscreen-studio-modal">
+  <div class="studio-topbar">
+    <div class="studio-brand">
+      <span class="grid-logo"><span></span><span></span><span class="on"></span><span></span><span class="on"></span><span></span><span class="on"></span><span></span><span></span></span>
+      <span style="font-weight:600;font-size:16px;color:#fff">StepSheet Studio — Full Screen</span>
+      <span class="badge-enterprise">⚡ Enterprise Cloud Sync Active</span>
+    </div>
+    <div class="studio-actions">
+      <a href="app.html" target="_blank" class="cta-button liquid-glass hov" style="font-size:12px;padding:6px 14px;min-height:30px">
+        Open in Separate Tab ↗
+      </a>
+      <button id="exitFullscreenBtn" class="btn-exit-studio" type="button">
+        ✕ Exit Full Screen
+      </button>
+    </div>
+  </div>
+  <div class="studio-iframe-wrap">
+    <iframe id="studioIframe" src="app.html" title="StepSheet Application Studio"></iframe>
+  </div>
+</div>
 
 <!-- ARCHITECTURE / HOW IT WORKS -->
 <section class="band shell" id="architecture">
@@ -811,7 +1111,7 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
 
 <!-- INTERACTIVE SCRIPTS -->
 <script>
-// Mobile Navigation Drawer Toggle
+// 1. Mobile Navigation Drawer Toggle
 (function(){
   var toggle = document.getElementById('mobileToggle');
   var menu = document.getElementById('mobileMenu');
@@ -822,7 +1122,6 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
       toggle.classList.toggle('active', isOpen);
     });
 
-    // Close when clicking any nav link
     var links = menu.querySelectorAll('a');
     for(var i = 0; i < links.length; i++){
       links[i].addEventListener('click', function(){
@@ -831,7 +1130,6 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
       });
     }
 
-    // Close when clicking outside
     document.addEventListener('click', function(e){
       if(!menu.contains(e.target) && !toggle.contains(e.target)){
         menu.classList.remove('open');
@@ -841,126 +1139,257 @@ footer{padding:32px 0 44px;border-top:1px solid rgba(255,255,255,.08);display:fl
   }
 })();
 
-// Interactive Live Formula Demo Animation
+// 2. Fullscreen Studio Modal Controller
 (function(){
-  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var rows = [
-    { sku:'SKU-204', qty:12, price:14.50, d:'d2', e:'e2' },
-    { sku:'SKU-118', qty:8,  price:21.75, d:'d3', e:'e3' },
-    { sku:'SKU-331', qty:5,  price:38.00, d:'d4', e:'e4' },
-    { sku:'SKU-092', qty:3,  price:62.00, d:'d5', e:'e5' },
-    { sku:'SKU-277', qty:10, price:29.99, d:'d6', e:'e6' }
-  ];
-  var ordersBody = document.getElementById('orders-body');
-  var priceBody = document.getElementById('pricelist-body');
-  var fields = ['field-lookup','field-sheet','field-return'].map(function(id){ return document.getElementById(id); });
+  var openBtn = document.getElementById('openFullscreenBtn');
+  var mobileOpenBtn = document.getElementById('mobileFullscreenBtn');
+  var closeBtn = document.getElementById('exitFullscreenBtn');
+  var modal = document.getElementById('fullscreenStudioModal');
+  var iframe = document.getElementById('studioIframe');
+
+  function openModal(e){
+    if(e) e.preventDefault();
+    if(!modal) return;
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    if(iframe && (!iframe.src || iframe.src === 'about:blank' || iframe.getAttribute('src') === '')){
+      iframe.src = 'app.html';
+    }
+    try {
+      if(modal.requestFullscreen){
+        modal.requestFullscreen().catch(function(){});
+      } else if(document.documentElement.requestFullscreen){
+        document.documentElement.requestFullscreen().catch(function(){});
+      }
+    } catch(err){}
+  }
+
+  function closeModal(){
+    if(modal){
+      modal.classList.remove('active');
+      document.body.style.overflow = '';
+      try {
+        if(document.fullscreenElement && document.exitFullscreen){
+          document.exitFullscreen().catch(function(){});
+        }
+      } catch(err){}
+    }
+  }
+
+  if(openBtn) openBtn.addEventListener('click', openModal);
+  if(mobileOpenBtn) mobileOpenBtn.addEventListener('click', openModal);
+  if(closeBtn) closeBtn.addEventListener('click', closeModal);
+
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && modal && modal.classList.contains('active')){
+      closeModal();
+    }
+  });
+})();
+
+// 3. Step Tabs & Live Interactive Options Engine
+(function(){
+  var activeTab = 'lookup';
+  var tabs = document.querySelectorAll('.step-tab-btn');
+  var tabLookup = document.getElementById('tabContentLookup');
+  var tabCond = document.getElementById('tabContentConditional');
+  var tabEnt = document.getElementById('tabContentEnterprise');
+  var formulaPreview = document.getElementById('formulaPreview');
+  var stepHeader = document.getElementById('activeStepHeader');
   var applyBtn = document.getElementById('step-apply-btn');
   var applyLabel = document.getElementById('step-apply-label');
+  var calcIndicator = document.getElementById('calcIndicator');
 
-  function fmtMoney(n){ return '$' + n.toFixed(2); }
-  function priceRowFor(sku){ return priceBody ? priceBody.querySelector('tr[data-sku="'+sku+'"]') : null; }
-  function orderRowFor(sku){ return ordersBody ? ordersBody.querySelector('tr[data-sku="'+sku+'"]') : null; }
+  // Excel Table Columns
+  var thColD = document.querySelector('.col-letters th:nth-child(5)');
+  var thColE = document.querySelector('.col-letters th:nth-child(6)');
+  var thFieldD = document.querySelector('thead tr:nth-child(2) td:nth-child(5)');
+  var thFieldE = document.querySelector('thead tr:nth-child(2) td:nth-child(6)');
+  var thTier = document.getElementById('thTier');
+  var thTierLabel = document.getElementById('thTierLabel');
+  var tierCells = ['f2','f3','f4','f5','f6'].map(function(id){ return document.getElementById(id); });
+  var dCells = ['d2','d3','d4','d5','d6'].map(function(id){ return document.getElementById(id); });
+  var eCells = ['e2','e3','e4','e5','e6'].map(function(id){ return document.getElementById(id); });
 
-  function fillStatic(){
-    fields.forEach(function(f){ if(f) f.classList.add('selected'); });
-    if(applyBtn) applyBtn.classList.add('done');
-    if(applyLabel) applyLabel.textContent = 'Step Added';
-    rows.forEach(function(r){
-      var d = document.getElementById(r.d);
-      var e = document.getElementById(r.e);
-      if(d) d.innerHTML = fmtMoney(r.price);
-      if(e) e.innerHTML = fmtMoney(r.price * r.qty);
-    });
-  }
+  // Source Table PriceList cells
+  var plRows = document.querySelectorAll('#pricelist-body tr');
 
-  function resetAll(){
-    fields.forEach(function(f){ if(f) f.classList.remove('selected','selecting'); });
-    if(applyBtn) applyBtn.classList.remove('applying','done');
-    if(applyLabel) applyLabel.textContent = 'Run Step';
-    rows.forEach(function(r){
-      var d = document.getElementById(r.d);
-      var e = document.getElementById(r.e);
-      if(d) d.innerHTML = '<span class="cell-empty">—</span>';
-      if(e) e.innerHTML = '<span class="cell-empty">—</span>';
-      var oRow = orderRowFor(r.sku);
-      var pRow = priceRowFor(r.sku);
-      if(oRow) oRow.classList.remove('active-row');
-      if(pRow) pRow.classList.remove('price-active');
-    });
-  }
-
-  function selectFields(done){
-    var i = 0;
-    function next(){
-      if(i >= fields.length){ setTimeout(done, 300); return; }
-      var f = fields[i];
-      if(f) f.classList.add('selecting');
-      setTimeout(function(){
-        if(f){
-          f.classList.remove('selecting');
-          f.classList.add('selected');
-        }
-        i++;
-        setTimeout(next, 260);
-      }, 320);
+  // Dataset values
+  var dataMap = {
+    Price: {
+      headerD: 'D (UnitPrice)', fieldD: 'Unit Price',
+      headerE: 'E (Total)', fieldE: 'Total',
+      d: ['$14.50', '$21.75', '$38.00', '$62.00', '$29.99'],
+      e: ['$174.00', '$174.00', '$190.00', '$186.00', '$299.90'],
+      totals: [174.00, 174.00, 190.00, 186.00, 299.90],
+      source: ['$62.00', '$14.50', '$38.00', '$29.99', '$21.75']
+    },
+    Cost: {
+      headerD: 'D (UnitCost)', fieldD: 'Unit Cost',
+      headerE: 'E (TotalCost)', fieldE: 'Total Cost',
+      d: ['$8.50', '$12.00', '$22.50', '$35.00', '$16.50'],
+      e: ['$102.00', '$96.00', '$112.50', '$105.00', '$165.00'],
+      totals: [102.00, 96.00, 112.50, 105.00, 165.00],
+      source: ['$35.00', '$8.50', '$22.50', '$16.50', '$12.00']
+    },
+    Margin: {
+      headerD: 'D (Margin%)', fieldD: 'Margin %',
+      headerE: 'E (GrossProfit)', fieldE: 'Gross Profit',
+      d: ['41.4%', '44.8%', '40.8%', '43.5%', '45.0%'],
+      e: ['$72.00', '$78.00', '$77.50', '$81.00', '$134.90'],
+      totals: [72.00, 78.00, 77.50, 81.00, 134.90],
+      source: ['43.5%', '41.4%', '40.8%', '45.0%', '44.8%']
     }
-    next();
-  }
+  };
 
-  function runRow(index, done){
-    if(index >= rows.length){ done(); return; }
-    var r = rows[index];
-    var oRow = orderRowFor(r.sku), pRow = priceRowFor(r.sku);
-    if(oRow) oRow.classList.add('active-row');
-    if(pRow) pRow.classList.add('price-active');
-    var dCell = document.getElementById(r.d);
-    if(dCell) dCell.innerHTML = '<span class="fill-dot" aria-hidden="true"></span>';
-    setTimeout(function(){
-      if(dCell){
-        dCell.innerHTML = fmtMoney(r.price);
-        dCell.classList.add('cell-fill');
+  // Tab Switching
+  tabs.forEach(function(tab){
+    tab.addEventListener('click', function(){
+      tabs.forEach(function(t){ t.classList.remove('active'); });
+      tab.classList.add('active');
+      activeTab = tab.dataset.tab;
+
+      if(tabLookup) tabLookup.style.display = (activeTab === 'lookup') ? 'block' : 'none';
+      if(tabCond) tabCond.style.display = (activeTab === 'conditional') ? 'block' : 'none';
+      if(tabEnt) tabEnt.style.display = (activeTab === 'enterprise') ? 'block' : 'none';
+
+      updateFormulaAndDisplay();
+    });
+  });
+
+  function evaluateConditionalCells(animate){
+    var ifCol = document.getElementById('selectIfCol') ? document.getElementById('selectIfCol').value : 'Total';
+    var ifOp = document.getElementById('selectIfOp') ? document.getElementById('selectIfOp').value : 'gt';
+    var ifVal = parseFloat(document.getElementById('selectIfVal') ? document.getElementById('selectIfVal').value : 150) || 150;
+
+    var numList = [174, 174, 190, 186, 299.9];
+    if(ifCol === 'Qty') numList = [12, 8, 5, 3, 10];
+    if(ifCol === 'Price') numList = [14.5, 21.75, 38, 62, 29.99];
+
+    tierCells.forEach(function(cell, idx){
+      if(!cell) return;
+      var val = numList[idx];
+      var isHigh = (ifOp === 'gt') ? (val > ifVal) : ((ifOp === 'gte') ? (val >= ifVal) : (val < ifVal));
+      cell.innerHTML = isHigh 
+        ? '<span class="tag-badge tag-high">High Priority</span>'
+        : '<span class="tag-badge tag-std">Standard</span>';
+      if(animate){
+        cell.classList.remove('cell-fill');
+        void cell.offsetWidth;
+        cell.classList.add('cell-fill');
       }
-      setTimeout(function(){
-        var eCell = document.getElementById(r.e);
-        if(eCell){
-          eCell.innerHTML = fmtMoney(r.price * r.qty);
-          eCell.classList.add('cell-fill');
-        }
-        setTimeout(function(){
-          if(pRow) pRow.classList.remove('price-active');
-          setTimeout(function(){ runRow(index + 1, done); }, 220);
-        }, 180);
-      }, 160);
-    }, 280);
-  }
-
-  function cycle(){
-    resetAll();
-    selectFields(function(){
-      if(applyBtn) applyBtn.classList.add('applying');
-      if(applyLabel) applyLabel.textContent = 'Calculating rows…';
-      runRow(0, function(){
-        if(applyBtn) applyBtn.classList.remove('applying');
-        if(applyBtn) applyBtn.classList.add('done');
-        if(applyLabel) applyLabel.textContent = 'Step Added ✓';
-        setTimeout(function(){
-          rows.forEach(function(r){
-            var d = document.getElementById(r.d);
-            var e = document.getElementById(r.e);
-            if(d) d.classList.remove('cell-fill');
-            if(e) e.classList.remove('cell-fill');
-          });
-          setTimeout(cycle, 3200);
-        }, 2400);
-      });
     });
   }
 
-  if (reduceMotion) {
-    fillStatic();
-  } else {
-    cycle();
+  function updateFormulaAndDisplay(){
+    if(activeTab === 'lookup'){
+      var sheet = document.getElementById('selectTargetSheet').value;
+      var ret = document.getElementById('selectReturnCol').value;
+      var retColName = (ret === 'Price') ? 'Price' : ((ret === 'Cost') ? 'Cost' : 'Margin');
+      var retColLetter = (ret === 'Price') ? 'B:B' : ((ret === 'Cost') ? 'C:C' : 'D:D');
+      
+      formulaPreview.textContent = '=XLOOKUP(A2, ' + sheet + '!' + (document.getElementById('selectLookupCol').value === 'Product' ? 'B:B' : 'A:A') + ', ' + sheet + '!' + retColLetter + ')';
+      stepHeader.textContent = 'StepSheet Studio — Active Step: XLOOKUP()';
+      applyLabel.textContent = 'Run Lookup Step';
+
+      // Update grid headers and values
+      var pack = dataMap[retColName] || dataMap.Price;
+      if(thColD) thColD.textContent = pack.headerD;
+      if(thFieldD) thFieldD.textContent = pack.fieldD;
+      if(thColE) thColE.textContent = pack.headerE;
+      if(thFieldE) thFieldE.textContent = pack.fieldE;
+
+      dCells.forEach(function(c, i){ if(c) c.textContent = pack.d[i]; });
+      eCells.forEach(function(c, i){ if(c) c.textContent = pack.e[i]; });
+      plRows.forEach(function(row, i){
+        var lastTd = row.querySelector('td:last-child');
+        if(lastTd && pack.source[i]) lastTd.textContent = pack.source[i];
+      });
+
+      if(thTier) thTier.style.display = 'none';
+      if(thTierLabel) thTierLabel.style.display = 'none';
+      tierCells.forEach(function(c){ if(c) c.style.display = 'none'; });
+
+    } else if(activeTab === 'conditional'){
+      var ifCol = document.getElementById('selectIfCol').value;
+      var ifOp = document.getElementById('selectIfOp').value;
+      var ifVal = document.getElementById('selectIfVal').value;
+      var opSym = ifOp === 'gt' ? '>' : (ifOp === 'gte' ? '>=' : '<');
+      var targetColCode = (ifCol === 'Qty') ? 'C2' : ((ifCol === 'Price') ? 'D2' : 'E2');
+
+      formulaPreview.textContent = '=IF(' + targetColCode + ' ' + opSym + ' ' + ifVal + ', "High Priority", "Standard")';
+      stepHeader.textContent = 'StepSheet Studio — Active Step: IF() Condition';
+      applyLabel.textContent = 'Run Conditional Step';
+
+      if(thTier) thTier.style.display = '';
+      if(thTierLabel) thTierLabel.style.display = '';
+      tierCells.forEach(function(c){ if(c) c.style.display = ''; });
+
+      evaluateConditionalCells(false);
+
+    } else if(activeTab === 'enterprise'){
+      var ws = document.getElementById('selectEntWorkspace') ? document.getElementById('selectEntWorkspace').value : 'Acme Corp';
+      var cluster = document.getElementById('selectEntCluster') ? document.getElementById('selectEntCluster').value : 'duckdb';
+      var policy = document.getElementById('selectEntPolicy') ? document.getElementById('selectEntPolicy').value : 'soc2';
+
+      var tenantDisp = document.getElementById('dispTenantVal');
+      var storageDisp = document.getElementById('dispStorageVal');
+      var clusterDisp = document.getElementById('dispClusterVal');
+      var auditDisp = document.getElementById('dispAuditVal');
+
+      if(tenantDisp) tenantDisp.textContent = ws;
+      if(storageDisp) storageDisp.textContent = (cluster === 'postgres') ? 'Supabase PostgreSQL (Port 6543 Dedicated)' : 'Supabase PostgreSQL (Supavisor Pooled)';
+      if(clusterDisp) clusterDisp.textContent = (cluster === 'duckdb') ? 'DuckDB Vectorized (4GB Memory)' : ((cluster === 'postgres') ? 'PostgreSQL PG16 Engine' : 'Dual Hybrid Sync (DuckDB + Postgres)');
+      if(auditDisp) auditDisp.textContent = (policy === 'soc2') ? '#v2.4-e81a (SHA256 verified)' : ((policy === 'wal') ? 'WAL Sync Stream Active' : 'Desktop Deep-Link stepsheet://auth');
+
+      var tableRef = ws.toLowerCase().indexOf('logistics') !== -1 ? 'logistics.shipments' : (ws.toLowerCase().indexOf('finance') !== -1 ? 'finance.ledger' : 'acme.orders');
+      formulaPreview.textContent = 'SELECT region, SUM(total) FROM ' + tableRef + ' GROUP BY region ORDER BY 2 DESC;';
+      stepHeader.textContent = 'StepSheet Studio — ⚡ Enterprise Cloud Sync Tier Active';
+      applyLabel.textContent = '⚡ Run Enterprise Cloud Query';
+    }
   }
+
+  // Bind change listeners to all select dropdowns
+  var allSelects = document.querySelectorAll('.select-input');
+  allSelects.forEach(function(s){
+    s.addEventListener('change', updateFormulaAndDisplay);
+  });
+
+  // Run Step Action
+  if(applyBtn){
+    applyBtn.addEventListener('click', function(){
+      applyBtn.classList.add('applying');
+      applyLabel.textContent = (activeTab === 'enterprise') ? 'Executing in DuckDB…' : 'Calculating rows…';
+      if(calcIndicator) calcIndicator.textContent = '● Processing…';
+
+      setTimeout(function(){
+        applyBtn.classList.remove('applying');
+        applyBtn.classList.add('done');
+        applyLabel.textContent = 'Step Applied ✓';
+        if(calcIndicator) calcIndicator.textContent = '● Synchronized';
+
+        if(activeTab === 'lookup'){
+          dCells.forEach(function(c){ if(c){ c.classList.remove('cell-fill'); void c.offsetWidth; c.classList.add('cell-fill'); } });
+          eCells.forEach(function(c){ if(c){ c.classList.remove('cell-fill'); void c.offsetWidth; c.classList.add('cell-fill'); } });
+        } else if(activeTab === 'conditional'){
+          evaluateConditionalCells(true);
+        } else if(activeTab === 'enterprise'){
+          var bench = document.getElementById('cloudBenchmarkStat');
+          var randomSpeed = (3.4 + Math.random()*3.2).toFixed(1);
+          if(bench) bench.textContent = '150K rows in ' + randomSpeed + 'ms';
+          if(calcIndicator) calcIndicator.textContent = '● DuckDB Cluster Synchronized';
+        }
+
+        setTimeout(function(){
+          applyBtn.classList.remove('done');
+          applyLabel.textContent = (activeTab === 'enterprise') ? '⚡ Run Enterprise Cloud Query' : 'Run Step';
+        }, 2200);
+      }, 450);
+    });
+  }
+
+  // Initial trigger
+  updateFormulaAndDisplay();
 })();
 </script>
 

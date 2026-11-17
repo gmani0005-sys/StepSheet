@@ -13,6 +13,11 @@ import { localEngine } from './localEngine';
 const isFileProtocol =
   typeof window !== 'undefined' && window.location?.protocol === 'file:';
 
+const isStandalone =
+  isFileProtocol ||
+  (typeof window !== 'undefined' && Boolean((window as any).__STEPSHEET_STANDALONE__)) ||
+  (typeof window !== 'undefined' && (window as any).__STEPSHEET_FORCE_LOCAL__ === true);
+
 const API_BASE = isFileProtocol ? 'http://127.0.0.1:8000/api/v1' : '/api/v1';
 
 function getAuthHeader(): Record<string, string> {
@@ -39,7 +44,7 @@ async function withFallback<T>(
   remoteCall: () => Promise<T>,
   localCall: () => Promise<T>
 ): Promise<T> {
-  if (isFileProtocol && (window as any).__STEPSHEET_FORCE_LOCAL__ !== false) {
+  if (isStandalone && (window as any).__STEPSHEET_FORCE_LOCAL__ !== false) {
     return localCall();
   }
   try {

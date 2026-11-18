@@ -9,6 +9,20 @@ class DashboardKpiPlan(BaseModel):
     aggFunc: Literal["sum", "avg", "min", "max", "count", "distinct_count"] = "sum"
     subtitle: str = ""
     accentColor: str = "#107C41"
+    # Insight fields (see app/services/kpi_insights.py and the web
+    # engine/kpiInsights.ts). All optional so older plans stay valid.
+    kind: Optional[Literal["aggregate", "ratio"]] = None
+    numeratorCol: Optional[str] = None
+    numeratorAgg: Optional[Literal["sum", "avg", "min", "max", "count", "distinct_count"]] = None
+    denominatorCol: Optional[str] = None
+    denominatorAgg: Optional[Literal["sum", "avg", "min", "max", "count", "distinct_count"]] = None
+    dateCol: Optional[str] = None
+    compare: Optional[Literal["previous_period", "none"]] = None
+    goodDirection: Optional[Literal["up", "down", "neutral"]] = None
+    format: Optional[Literal["number", "currency", "percent"]] = None
+    currencySymbol: Optional[str] = None
+    definition: Optional[str] = None
+    alertPct: Optional[float] = None
 
 
 class DashboardVisualPlan(BaseModel):

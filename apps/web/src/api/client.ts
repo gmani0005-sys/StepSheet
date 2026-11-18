@@ -20,6 +20,11 @@ const isStandalone =
 
 const API_BASE = isFileProtocol ? 'http://127.0.0.1:8000/api/v1' : '/api/v1';
 
+/** Chat questions give up on the server after this long (local AI can be slow). */
+const CHAT_QUERY_TIMEOUT_MS = 120_000;
+/** Most rows sent with a chat question for a dataset the server may not hold. */
+const CHAT_QUERY_MAX_ROWS = 200_000;
+
 function getAuthHeader(): Record<string, string> {
   const token = storage.get('stepsheet_access_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -885,17 +890,31 @@ export const api = {
   ): Promise<any> {
     return withFallback(
       async () => {
+        // A server whose local AI model never answers must not leave the chat
+        // waiting forever: after CHAT_QUERY_TIMEOUT_MS the request is aborted,
+        // which withFallback treats like an unreachable server (local answer).
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = controller ? setTimeout(() => controller.abort(), CHAT_QUERY_TIMEOUT_MS) : null;
         const res = await fetch(`${API_BASE}/ai/chat-query`, {
           method: 'POST',
+          signal: controller?.signal,
           headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
           body: JSON.stringify({
             dataset_id: datasetId,
             prompt,
             model_tag: modelTag,
             columns: context?.columns,
-            sample_rows: context?.rows ? context.rows.slice(0, 100) : undefined,
+            // A dataset that lives only in this browser ("local-..." ids) is
+            // answered from the rows sent here, so send them all: a 100-row
+            // sample gave silently wrong totals. The server reads its own copy
+            // of an uploaded dataset, so a small sample is enough there.
+            sample_rows: context?.rows
+              ? context.rows.slice(0, String(datasetId).startsWith('local-') ? CHAT_QUERY_MAX_ROWS : 100)
+              : undefined,
             dataset_name: context?.datasetName,
           }),
+        }).finally(() => {
+          if (timer) clearTimeout(timer);
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));

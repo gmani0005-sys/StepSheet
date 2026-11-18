@@ -18,6 +18,8 @@ from app.services.duckdb_engine import DuckDBEngine
 from app.services.ollama_manager import ollama_manager
 from app.services.credit_ledger import credit_ledger
 from app.services.storage import get_storage_service
+from app.services.sql_safe import number_parse_sql
+from app.services.executive_summary import build_executive_summary, is_findings_query
 
 ALLOWED_AGGS = {"sum", "avg", "min", "max", "count", "distinct_count", "median"}
 ALLOWED_OPS = {"eq", "neq", "gt", "gte", "lt", "lte", "contains", "not_contains", "is_null", "is_not_null", "between"}
@@ -102,6 +104,27 @@ class ChatQueryService:
         col_names = [c["name"] for c in resolved_columns]
         if not col_names:
             raise ValueError("Dataset has no schema columns.")
+
+        # "Executive summary", "key findings", "overview of this data"...: answer
+        # with findings over the whole dataset, like the in-browser engine,
+        # instead of a single "SUM of <first measure>".
+        if is_findings_query(prompt):
+            summary = self._executive_summary(
+                parquet_file, sample_rows, resolved_columns, ds_name, dataset_id, start_time
+            )
+            if summary is not None:
+                if db is not None:
+                    credit_ledger.record_transaction(
+                        db=db,
+                        operation_type="chat_query",
+                        provider="heuristic",
+                        model="executive-summary",
+                        credits=0,
+                        idempotency_key=idempotency_key,
+                        latency_ms=summary.latency_ms,
+                        metadata={"dataset_id": dataset_id, "prompt": prompt, "row_count": summary.row_count},
+                    )
+                return summary
 
         # 1. Generate Structured Plan
         plan, provider_used, model_used = self._generate_plan(
@@ -420,7 +443,10 @@ Output valid JSON only. Do not invent columns. Only reference columns present in
             if not target_entity_col:
                 target_entity_col = resolve_dim(subject_part)
 
-            if is_entity_count and target_entity_col and target_entity_col != group_dim:
+            # A numeric measure ("total amount by region") is summed below, never
+            # counted like an entity -- counting it returned row counts labelled
+            # "Total Amount".
+            if is_entity_count and target_entity_col and target_entity_col != group_dim and target_entity_col not in num_cols:
                 is_dist = is_distinct or target_entity_col.lower().endswith(("_id", "id"))
                 agg = "distinct_count" if is_dist else "count"
                 alias = f"Total Unique {target_entity_col.replace('_', ' ').title()}" if is_dist else f"Total {target_entity_col.replace('_', ' ').title()}"
@@ -683,6 +709,70 @@ Output valid JSON only. Do not invent columns. Only reference columns present in
     # Safe DuckDB SQL Translation & Execution
     # -------------------------------------------------------------------------
 
+    def _executive_summary(
+        self,
+        parquet_file: Optional[str],
+        sample_rows: Optional[List[Dict[str, Any]]],
+        columns: List[Dict[str, Any]],
+        dataset_name: str,
+        dataset_id: str,
+        start_time: float,
+    ) -> Optional[ChatQueryResponse]:
+        conn = self.duckdb_engine.get_connection()
+        try:
+            from_source = self._open_source(conn, parquet_file, sample_rows)
+            if not from_source:
+                return None
+            plan, explanation, cols, rows, trace = build_executive_summary(
+                conn, from_source, columns, dataset_name, dataset_id
+            )
+        except Exception:
+            # Fall back to the regular planner rather than fail the question.
+            return None
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return ChatQueryResponse(
+            plan=plan,
+            explanation=explanation,
+            calculation_method="Totals and averages of the main measure, the leading value of each business column (identifier columns excluded) with its share, and the date range, computed in DuckDB over all rows.",
+            columns=cols,
+            rows=rows,
+            row_count=len(rows),
+            chart=plan.chart,
+            query_trace=trace,
+            latency_ms=round((time.time() - start_time) * 1000, 1),
+            provider="heuristic",
+            model="executive-summary",
+        )
+
+    def _open_source(
+        self,
+        conn: Any,
+        parquet_path: Optional[str],
+        sample_rows: Optional[List[Dict[str, Any]]],
+    ) -> Optional[str]:
+        """The FROM source for a query: the dataset's file, or the rows the browser sent."""
+        if parquet_path:
+            parquet_sql = parquet_path.replace("\\", "/")
+            is_parquet = parquet_sql.lower().endswith(".parquet")
+            return f"read_parquet('{parquet_sql}')" if is_parquet else f"read_csv_auto('{parquet_sql}')"
+        if sample_rows and len(sample_rows) > 0:
+            try:
+                import pyarrow as pa
+                table = pa.Table.from_pylist(sample_rows)
+                conn.register("client_data", table)
+                return "client_data"
+            except Exception:
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+                    json.dump(sample_rows, tf)
+                    temp_json = tf.name.replace("\\", "/")
+                return f"read_json_auto('{temp_json}')"
+        return None
+
     def _execute_duckdb_plan(
         self,
         parquet_path: Optional[str],
@@ -693,24 +783,8 @@ Output valid JSON only. Do not invent columns. Only reference columns present in
         conn = self.duckdb_engine.get_connection()
 
         try:
-            # Determine source
-            if parquet_path:
-                parquet_sql = parquet_path.replace("\\", "/")
-                is_parquet = parquet_sql.lower().endswith(".parquet")
-                from_source = f"read_parquet('{parquet_sql}')" if is_parquet else f"read_csv_auto('{parquet_sql}')"
-            elif sample_rows and len(sample_rows) > 0:
-                try:
-                    import pyarrow as pa
-                    table = pa.Table.from_pylist(sample_rows)
-                    conn.register("client_data", table)
-                    from_source = "client_data"
-                except Exception:
-                    import tempfile
-                    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-                        json.dump(sample_rows, tf)
-                        temp_json = tf.name.replace("\\", "/")
-                    from_source = f"read_json_auto('{temp_json}')"
-            else:
+            from_source = self._open_source(conn, parquet_path, sample_rows)
+            if not from_source:
                 return [c["name"] for c in columns[:2]], [], "-- No active dataset storage found"
             # Build SELECT clause
             select_parts: List[str] = []
@@ -721,8 +795,13 @@ Output valid JSON only. Do not invent columns. Only reference columns present in
                     select_parts.append(f"{safe_col} AS {alias}")
                 elif s.aggregation in ["sum", "avg", "min", "max"]:
                     fn = s.aggregation.upper()
-                    clean_expr = f'TRY_CAST(REGEXP_REPLACE(REGEXP_REPLACE(CAST({safe_col} AS VARCHAR), \'[€$£¥, ]\', \'\', \'g\'), \'%\', \'\') AS DOUBLE)'
-                    select_parts.append(f"{fn}(COALESCE({clean_expr}, 0)) AS {alias}")
+                    # Shared Excel-style parser: "₹1,200", "$500", "(300)", "15%".
+                    # Blanks stay out of AVG/MIN/MAX instead of counting as 0.
+                    clean_expr = number_parse_sql(safe_col)
+                    agg_sql = f"{fn}({clean_expr})"
+                    if fn == "SUM":
+                        agg_sql = f"COALESCE({agg_sql}, 0)"
+                    select_parts.append(f"{agg_sql} AS {alias}")
                 elif s.aggregation == "count":
                     select_parts.append(f"COUNT({safe_col}) AS {alias}")
                 elif s.aggregation == "distinct_count":

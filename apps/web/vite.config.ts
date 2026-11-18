@@ -40,6 +40,15 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        // Backend not running: drop the connection instead of answering 500, so
+        // the browser sees a network failure and api/client's withFallback
+        // answers from the in-browser engine (a real server error still shows).
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            const r = res as any;
+            if (r && typeof r.destroy === 'function') r.destroy();
+          });
+        },
       },
     },
   },

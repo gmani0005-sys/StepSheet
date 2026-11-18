@@ -22,6 +22,10 @@ import {
 import { api } from '../../api/client';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { getRowVal } from '../dashboard/DashboardModal';
+import { ChatMarkdown } from './ChatMarkdown';
+
+/** After this long with no answer, the chat says it is still working. */
+const SLOW_NOTICE_MS = 8000;
 
 export interface ChatMessage {
   id: string;
@@ -96,15 +100,35 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([initialWelcomeMessage()]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom of chat
+  // Shown while a question takes longer than SLOW_NOTICE_MS (e.g. a local AI
+  // model on the server), so a slow answer never looks like nothing happened.
+  const [slowNotice, setSlowNotice] = useState(false);
+  useEffect(() => {
+    if (!loading) {
+      setSlowNotice(false);
+      return;
+    }
+    const t = setTimeout(() => setSlowNotice(true), SLOW_NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [loading]);
+
+  // Auto-scroll: follow the conversation, but when an answer arrives show its
+  // START (a long answer would otherwise open on its result table).
   const scrollToBottom = () => {
     if (typeof messagesEndRef.current?.scrollIntoView === 'function') { messagesEndRef.current.scrollIntoView({ behavior: 'smooth' }); }
   };
 
   useEffect(() => {
-    if (isOpen) {
-      scrollToBottom();
+    if (!isOpen) return;
+    const last = messages[messages.length - 1];
+    if (!loading && last && last.role === 'assistant' && messages.length > 1) {
+      const el = typeof document !== 'undefined' ? document.querySelector(`[data-msg-id="${last.id}"]`) : null;
+      if (el && typeof (el as HTMLElement).scrollIntoView === 'function') {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
     }
+    scrollToBottom();
   }, [messages, isOpen, loading]);
 
   // Reset conversation if dataset changes
@@ -549,7 +573,7 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
             const currentView = msg.viewMode || 'split';
 
             return (
-              <div key={msg.id} className="flex justify-start gap-3 max-w-3xl mr-auto">
+              <div key={msg.id} data-msg-id={msg.id} data-testid="chat-assistant-message" className="flex justify-start gap-3 max-w-3xl mr-auto">
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#107C41] to-[#0078D4] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
                   <Sparkles className="w-4 h-4" />
                 </div>
@@ -569,12 +593,8 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
                   </div>
 
                   {/* Text Explanation */}
-                  <div className="text-xs text-[#201F1E] font-medium leading-relaxed">
-                    {resp ? (
-                      <p>{resp.explanation}</p>
-                    ) : (
-                      <p className="whitespace-pre-line">{msg.content}</p>
-                    )}
+                  <div className="text-xs text-[#201F1E] font-medium leading-relaxed" data-testid="chat-answer-text">
+                    <ChatMarkdown text={resp ? resp.explanation : msg.content} />
                   </div>
 
                   {/* Error State */}
@@ -897,6 +917,11 @@ export const ChatWithDataModal: React.FC<ChatWithDataModalProps> = ({
                 <div className="w-2 h-2 rounded-full bg-[#0078D4] animate-ping" />
                 <span>Computing analytical query in DuckDB...</span>
               </div>
+              {slowNotice && (
+                <p data-testid="chat-slow-notice" className="text-[11px] text-[#605E5C] max-w-xs">
+                  Still working. When StepSheet runs with its server and a local AI model, an answer can take a minute or two.
+                </p>
+              )}
             </div>
           )}
 

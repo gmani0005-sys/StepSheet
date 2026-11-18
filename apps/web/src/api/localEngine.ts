@@ -5418,12 +5418,31 @@ export const localEngine = {
       }
       const avgMeasure = validMeasureCount > 0 ? totalMeasure / validMeasureCount : 0;
 
+      // No currency is guessed from a column name ("amount" in rupees is not
+      // dollars): a symbol is shown only when the data's own values carry one.
+      const currencySymbol = (() => {
+        if (!primaryMeasure) return '';
+        const counts: Record<string, number> = {};
+        let seen = 0;
+        for (const r of rows.slice(0, 200)) {
+          const v = getRowVal(r, primaryMeasure);
+          if (v === null || v === undefined || typeof v === 'number') continue;
+          seen++;
+          const m = String(v).match(/[₹$€£¥]/);
+          if (m) counts[m[0]] = (counts[m[0]] || 0) + 1;
+        }
+        const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        return best && seen > 0 && best[1] / seen >= 0.5 ? best[0] : '';
+      })();
       const fmtMoney = (n: number) => {
         const abs = Math.abs(n);
-        if (abs >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-        if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-        if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-        return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+        const sign = n < 0 ? '-' : '';
+        const body =
+          abs >= 1e9 ? `${(abs / 1e9).toFixed(2)}B`
+          : abs >= 1e6 ? `${(abs / 1e6).toFixed(2)}M`
+          : abs >= 1e3 ? `${(abs / 1e3).toFixed(1)}K`
+          : abs.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        return `${sign}${currencySymbol}${body}`;
       };
 
       // 2. Helper to extract top performer for any categorical dimension
@@ -5461,12 +5480,32 @@ export const localEngine = {
         };
       };
 
-      // Find key business dimensions
-      const catCol = profile.dimensions.find((d) => /categor|segment|dept|department|type|genre|class/i.test(d)) || profile.dimensions[0];
-      const geoCol = profile.dimensions.find((d) => /region|territor|country|state|city|market|zone|location/i.test(d));
-      const prodCol = profile.dimensions.find((d) => /product|item|sku|title|model|goods/i.test(d));
-      const custCol = profile.dimensions.find((d) => /customer|client|account|buyer|company|user/i.test(d));
-      const statusCol = profile.dimensions.find((d) => /status|stage|state|phase/i.test(d));
+      // Find key business dimensions. Identifier columns (order_id, invoice_no,
+      // a value on almost every row) are not categories: "top category
+      // ORD-20250044, 1 row across 1000 categories" says nothing.
+      const distinctShare = (col: string) => {
+        const seen = new Set<string>();
+        let n = 0;
+        for (const r of rows) {
+          const v = getRowVal(r, col);
+          if (v === null || v === undefined || String(v).trim() === '') continue;
+          n++;
+          seen.add(String(v).trim());
+        }
+        return n > 0 ? seen.size / n : 1;
+      };
+      const isIdLike = (col: string) =>
+        /(^|[_\s-])(id|uuid|guid|key|code|no|num|number)$|^id$|_id$|Id$/i.test(col) || distinctShare(col) > 0.5;
+      const groupable = profile.dimensions.filter((d) => !isIdLike(d));
+      const geoCol = groupable.find((d) => /region|territor|country|state|city|market|zone|location/i.test(d));
+      const prodCol = groupable.find((d) => /product|item|sku|title|model|goods/i.test(d));
+      // A customer id is still a meaningful "top customer" when customers repeat.
+      const custCol = profile.dimensions.find((d) => /customer|client|account|buyer|company|user/i.test(d) && distinctShare(d) <= 0.5);
+      const statusCol = groupable.find((d) => /status|stage|phase/i.test(d) && d !== geoCol);
+      const usedCols = new Set([geoCol, prodCol, custCol, statusCol].filter(Boolean) as string[]);
+      const catCol =
+        groupable.find((d) => /categor|segment|dept|department|type|genre|class/i.test(d) && !usedCols.has(d)) ||
+        groupable.find((d) => !usedCols.has(d) && distinctShare(d) <= 0.2);
 
       const topCat = findTopDimension(catCol);
       const topGeo = findTopDimension(geoCol);

@@ -41,6 +41,7 @@ import {
 } from '../engine/values';
 import { planChatQuery } from '../engine/chatPlanner';
 import { dashDateParts, dashItems, dashMetric, makeLabeler, monthlyTotals } from '../engine/dashboardData';
+import { enrichKpiSpec, suggestRatioKpi } from '../engine/kpiInsights';
 
 const LOCAL_DATASETS_KEY = 'stepsheet_local_datasets_v1';
 const LOCAL_TEMPLATES_KEY = 'stepsheet_local_templates_v2';
@@ -7164,6 +7165,26 @@ export const localEngine = {
     const distinctTargetCol = entityIdCol || primaryDim;
     if (distinctTargetCol) {
       kpis.push({ id: `kpi_distinct_${distinctTargetCol.replace(/\s+/g, '_').toLowerCase()}`, title: `Distinct ${humanizeField(distinctTargetCol)}`, column: distinctTargetCol, aggFunc: 'distinct_count', subtitle: `Unique ${humanizeField(distinctTargetCol)} values across filtered rows`, accentColor: '#0284C7' });
+    }
+
+    // A rate between two measures (conversion, failure, discount, margin...)
+    // says more than a distinct count, so it takes that card's place.
+    const ratioKpi = suggestRatioKpi(profile.measures);
+    if (ratioKpi) {
+      const distinctIdx = kpis.findIndex((k) => k.aggFunc === 'distinct_count');
+      const card = {
+        id: `kpi_rate_${String(ratioKpi.numeratorCol).replace(/\s+/g, '_').toLowerCase()}`,
+        subtitle: `${humanizeField(ratioKpi.numeratorCol || '')} ÷ ${humanizeField(ratioKpi.denominatorCol || '')}`,
+        accentColor: '#0284C7',
+        ...ratioKpi,
+      };
+      if (distinctIdx >= 0) kpis[distinctIdx] = card;
+      else kpis.push(card);
+    }
+    // Change vs the previous month, direction (is up good?), format and a
+    // plain-words definition for every card (engine/kpiInsights).
+    for (let i = 0; i < kpis.length; i++) {
+      kpis[i] = enrichKpiSpec(kpis[i], { rows, dateColumns: dateCol ? [dateCol] : profile.dates, allColumns: profile.colNames });
     }
 
     // ---- Dimensions: each visual gets its own, so no two show the same numbers ----

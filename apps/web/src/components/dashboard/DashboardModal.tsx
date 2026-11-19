@@ -35,6 +35,8 @@ import {
   Clock,
   Mail,
   ArrowLeft,
+  Info,
+  AlertTriangle,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { DashboardPaneConfig } from './panes/DashboardPaneWrapper';
@@ -56,6 +58,18 @@ import {
   sameCategory,
   cellInPeriod,
 } from '../../engine/dashboardData';
+import {
+  KpiKind,
+  KpiCompare,
+  KpiDirection,
+  KpiFormat,
+  kpiValue,
+  kpiTrend,
+  kpiLineage,
+  formatKpiValue,
+  buildDataStory,
+  detectCurrencySymbol,
+} from '../../engine/kpiInsights';
 import {
   exportShareApi,
   DashboardExportData,
@@ -137,6 +151,20 @@ export interface DashboardKpiConfig {
   borderColor?: string;
   backgroundColor?: string;
   borderRadius?: number;
+  // Insight fields (engine/kpiInsights). All optional: cards saved before
+  // these existed keep working and simply show no change badge.
+  kind?: KpiKind;
+  numeratorCol?: string;
+  numeratorAgg?: string;
+  denominatorCol?: string;
+  denominatorAgg?: string;
+  dateCol?: string;
+  compare?: KpiCompare;
+  goodDirection?: KpiDirection;
+  format?: KpiFormat;
+  currencySymbol?: string;
+  definition?: string;
+  alertPct?: number;
 }
 
 export type LegendPositionType =
@@ -590,6 +618,8 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   const [selectedVisualId, setSelectedVisualId] = useState<string | null>(null);
   const [selectedVisualIds, setSelectedVisualIds] = useState<string[]>([]);
   const [selectedKpiId, setSelectedKpiId] = useState<string | null>(null);
+  // KPI card whose "how is this calculated" panel is open.
+  const [lineageKpiId, setLineageKpiId] = useState<string | null>(null);
   const [paletteId, setPaletteId] = useState<PaletteId>('v22');
   const [dashboardTitle, setDashboardTitle] = useState<string>('');
 
@@ -1836,13 +1866,16 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     const dsName = selectedDataset?.name || 'Executive';
 
     const exportKpis: DashboardExportKpi[] = kpiCards.map((kpi) => {
-      const val = computeMetric(filteredRows, kpi.column, kpi.aggFunc);
+      // Same value and change as the card on screen (rates included).
+      const raw = kpiValue(filteredRows, kpi);
+      const val = raw ?? 0;
+      const trend = kpiTrend(filteredRows, kpi);
       return {
         title: kpi.title,
         value: val,
-        formattedValue: formatNum(val),
+        formattedValue: formatKpiValue(raw, kpi, formatNum),
         aggFunc: kpi.aggFunc,
-        subtitle: kpi.subtitle,
+        subtitle: trend && trend.deltaText ? `${trend.deltaText} ${trend.latestLabel} vs ${trend.previousLabel}` : kpi.subtitle,
         column: kpi.column,
       };
     });
@@ -4966,8 +4999,13 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
               const topCatNumPct = totalMeasSum > 0 ? (topCatSum / totalMeasSum) * 100 : 0;
               const topCatPct = totalMeasSum > 0 ? `${topCatNumPct.toFixed(1)}%` : '0%';
               const avgDeal = filteredRows.length > 0 ? (totalMeasSum / filteredRows.length) : 0;
-              const isCurr = primaryMeas && ['amount', 'revenue', 'sales', 'price', 'cost', 'spend', 'budget', 'salary', 'credit_limit'].some(k => primaryMeas.toLowerCase().includes(k));
-              const prefix = isCurr ? '$' : '';
+              // A currency symbol only when the data carries one: "amount" in
+              // rupees or euros is not dollars (same rule as the KPI cards).
+              const prefix = (primaryMeas && detectCurrencySymbol(filteredRows, primaryMeas)) || '';
+
+              // What changed: computed from the same rows and KPI specs as the
+              // cards (engine/kpiInsights), so it follows the slicers too.
+              const story = buildDataStory(filteredRows, kpiCards, slicerColumns, formatNum);
 
               const isSalesDomain = columns.some((c: any) => /sales|order|revenue|amount|customer|product/i.test(String(c.name || '')));
               const domainLabel = isSalesDomain ? 'SALES & REVENUE INTELLIGENCE' : 'EXECUTIVE BUSINESS INTELLIGENCE';
@@ -5024,6 +5062,28 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                             `Executive analytics generated for ${selectedDataset?.name || 'Dataset'} across ${filteredRows.length} active records.`
                           )}
                         </p>
+                        {story.length > 0 && (
+                          <ul data-testid="ai-data-story" className="mt-2 space-y-1">
+                            {story.map((line) => (
+                              <li
+                                key={line.id}
+                                data-tone={line.tone}
+                                className={`flex items-start gap-1.5 text-xs font-medium leading-relaxed ${
+                                  line.tone === 'bad' ? 'text-rose-700' : line.tone === 'good' ? 'text-emerald-800' : 'text-slate-700'
+                                }`}
+                              >
+                                {line.tone === 'bad' ? (
+                                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                                ) : line.tone === 'good' ? (
+                                  <ArrowUpRight className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                                ) : (
+                                  <Activity className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                                )}
+                                <span>{line.text}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     </div>
 
@@ -5067,7 +5127,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                           : {}),
                         ...(kpi.borderRadius !== undefined ? { borderRadius: `${kpi.borderRadius}px` } : {}),
                       }}
-                      className={`p-5 ${
+                      className={`relative ${lineageKpiId === kpi.id ? 'z-40' : ''} p-5 ${
                         kpi.borderRadius !== undefined ? '' : 'rounded-2xl'
                       } backdrop-blur-xl transition-all cursor-pointer flex flex-col justify-between ${
                         isKpiSelected
@@ -5079,8 +5139,11 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                             }`
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
+                      {/* On a narrow card the icon and edit/copy/delete buttons
+                          wrap onto a line above the title (flex-wrap-reverse)
+                          instead of covering it or spilling past the card edge. */}
+                      <div className="flex flex-wrap-reverse items-start justify-between gap-x-2 gap-y-1">
+                        <div className="min-w-[7.5rem] flex-1">
                           <span
                             style={{
                               fontSize: kpi.titleFontSize ? `${kpi.titleFontSize}px` : undefined,
@@ -5093,21 +5156,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                           >
                             {kpi.title}
                           </span>
-                          <div
-                            style={{ color: kpi.accentColor || '#0F172A' }}
-                            className="text-2xl font-black font-sans my-1 tracking-tight"
-                          >
-                            {(() => {
-                              // No currency symbol is guessed from the column name: a
-                              // "revenue" column in rupees or euros is not dollars.
-                              // An average/min/max of no values shows a dash, not 0.
-                              const v = dashMetricOrNull(filteredRows, kpi.column, kpi.aggFunc);
-                              return v === null ? '—' : formatNum(v);
-                            })()}
-                          </div>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <div className={`w-9 h-9 rounded-xl ${iconTint} flex items-center justify-center font-bold`}>
+                        <div className="flex flex-wrap items-center justify-end gap-1 ml-auto max-w-full">
+                          <div className={`w-9 h-9 rounded-xl ${iconTint} flex items-center justify-center font-bold shrink-0`}>
                             <TrendingUp className="w-4 h-4" />
                           </div>
                           <div
@@ -5147,7 +5198,111 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                         </div>
                       </div>
 
+                      {/* The value has a full-width line of its own, under the title row. */}
+                      <div
+                        data-testid={`kpi-value-${kpi.id}`}
+                        style={{ color: kpi.accentColor || '#0F172A' }}
+                        className="text-2xl font-black font-sans my-1 tracking-tight break-words"
+                      >
+                        {(() => {
+                          // No currency symbol is guessed from the column name: a
+                          // "revenue" column in rupees or euros is not dollars --
+                          // only one the data itself carries (kpi.currencySymbol).
+                          // An average/min/max of no values shows a dash, not 0.
+                          // Rate KPIs (kind "ratio") divide two metrics.
+                          return formatKpiValue(kpiValue(filteredRows, kpi), kpi, formatNum);
+                        })()}
+                      </div>
+
+                      {lineageKpiId === kpi.id && (
+                        // Floats over the cards below, wider than a narrow card,
+                        // opening towards the middle of the row so it stays on the canvas.
+                        <div
+                          data-testid={`kpi-lineage-${kpi.id}`}
+                          role="dialog"
+                          aria-label={`How ${kpi.title} is calculated`}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`absolute z-30 top-full mt-1 ${
+                            kpiIdx < kpiCards.length / 2 ? 'left-0' : 'right-0'
+                          } w-72 max-w-[80vw] p-3 rounded-xl bg-white border border-slate-200 shadow-lg text-[11px] leading-relaxed text-slate-600 space-y-1 cursor-default`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-800">How this is calculated</span>
+                            <button
+                              type="button"
+                              onClick={() => setLineageKpiId(null)}
+                              aria-label="Close"
+                              className="p-0.5 text-slate-400 hover:text-slate-700 rounded"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          {kpiLineage(filteredRows, kpi, formatNum).map((line, i) => (
+                            <p key={i}>{line}</p>
+                          ))}
+                        </div>
+                      )}
+
                       {(() => {
+                        // Live change vs the previous month, from the rows in view
+                        // (engine/kpiInsights), coloured by whether it is good news.
+                        const trend = kpiTrend(filteredRows, kpi);
+                        // The "how is this calculated" button sits in the footer:
+                        // the header's icon and edit/delete buttons fill it already.
+                        const lineageButton = (
+                          <button
+                            type="button"
+                            data-testid={`kpi-lineage-toggle-${kpi.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLineageKpiId((cur) => (cur === kpi.id ? null : kpi.id));
+                            }}
+                            title="How is this calculated?"
+                            aria-label={`How is ${kpi.title} calculated?`}
+                            aria-expanded={lineageKpiId === kpi.id}
+                            className="p-1 -mr-1 text-slate-400 hover:text-sky-700 rounded-lg hover:bg-slate-100 shrink-0"
+                          >
+                            <Info className="w-3.5 h-3.5" />
+                          </button>
+                        );
+                        if (trend && trend.deltaText) {
+                          const up = (trend.deltaAbs ?? 0) > 0;
+                          const Icon = up ? ArrowUpRight : ArrowDownRight;
+                          const tone =
+                            trend.sentiment === 'good'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
+                              : trend.sentiment === 'bad'
+                              ? 'bg-rose-50 text-rose-700 border-rose-200/60'
+                              : 'bg-slate-50 text-slate-600 border-slate-200/60';
+                          const detail = `${trend.latestLabel}: ${formatKpiValue(trend.current, kpi, formatNum)} vs ${trend.previousLabel}: ${formatKpiValue(trend.previous, kpi, formatNum)}${trend.partial ? ' (latest month may be incomplete)' : ''}`;
+                          return (
+                            <div className="mt-2 pt-2 border-t border-slate-100/80 space-y-1">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span
+                                  data-testid={`kpi-trend-badge-${kpi.id}`}
+                                  data-sentiment={trend.sentiment}
+                                  title={detail}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${tone}`}
+                                >
+                                  <Icon className="w-3 h-3 shrink-0" /> {trend.deltaText}
+                                </span>
+                                {lineageButton}
+                              </div>
+                              <div className="text-[10px] font-semibold text-slate-500 leading-tight" title={detail}>
+                                vs {trend.previousLabel}
+                                {trend.partial ? ' · latest month may be incomplete' : ''}
+                              </div>
+                              {trend.alert && (
+                                <div
+                                  data-testid={`kpi-alert-${kpi.id}`}
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700"
+                                >
+                                  <AlertTriangle className="w-3 h-3 shrink-0" /> Needs attention
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
                         const sub = (kpi.subtitle || '').trim();
                         const match = sub.match(/([+-]?\d+(?:\.\d+)?%)\s*(.*)/i);
                         if (match) {
@@ -5192,11 +5347,14 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                                   <span className="font-semibold opacity-80 normal-case">{shortCompare}</span>
                                 )}
                               </span>
-                              <span
-                                title={rest ? `${aggFuncLabel(kpi.aggFunc)} • ${rest}` : aggFuncLabel(kpi.aggFunc)}
-                                className="text-[10px] text-slate-400 font-mono uppercase font-bold ml-2 text-right"
-                              >
-                                {kpi.aggFunc}
+                              <span className="flex items-center gap-1 ml-2 shrink-0">
+                                <span
+                                  title={rest ? `${aggFuncLabel(kpi.aggFunc)} • ${rest}` : aggFuncLabel(kpi.aggFunc)}
+                                  className="text-[10px] text-slate-400 font-mono uppercase font-bold text-right"
+                                >
+                                  {kpi.aggFunc}
+                                </span>
+                                {lineageButton}
                               </span>
                             </div>
                           );
@@ -5237,6 +5395,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                             >
                               {sub ? sub : kpi.column || aggUpper}
                             </span>
+                            {lineageButton}
                           </div>
                         );
                       })()}
@@ -5244,6 +5403,21 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                   );
                 })}
               </div>
+
+              {kpiCards.some((k) => k.definition) && (
+                <details data-testid="kpi-definitions" className="text-[11px] text-slate-600">
+                  <summary className="cursor-pointer font-semibold text-slate-700 select-none">Metric definitions</summary>
+                  <ul className="mt-1.5 space-y-1 pl-1">
+                    {kpiCards
+                      .filter((k) => k.definition)
+                      .map((k) => (
+                        <li key={k.id}>
+                          <strong className="text-slate-800">{k.title}</strong> – {k.definition}
+                        </li>
+                      ))}
+                  </ul>
+                </details>
+              )}
             </div>
 
             <div

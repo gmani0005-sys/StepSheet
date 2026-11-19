@@ -19,6 +19,7 @@ from app.services.duckdb_engine import DuckDBEngine
 from app.services.ollama_manager import ollama_manager
 from app.services.credit_ledger import credit_ledger
 from app.services.storage import get_storage_service
+from app.services.kpi_insights import enrich_kpi, suggest_ratio_kpi
 
 PALETTE_OPTIONS = ["v22", "classic", "ocean", "emerald", "sunset", "monochrome", "vibrant"]
 
@@ -137,7 +138,7 @@ class AiDashboardService:
 
         # 3. Local DuckDB Verification (Pre-flight test all KPIs and Visuals)
         verified_kpis, verified_visuals = self._verify_plan_in_duckdb(parquet_file, plan)
-        plan.kpis = verified_kpis
+        plan.kpis = self._enrich_kpis(verified_kpis, dates, sample_rows)
         plan.visuals = verified_visuals
 
         # Ensure slicers exist
@@ -258,7 +259,11 @@ class AiDashboardService:
 
         # Verify new/updated visuals in DuckDB
         verified_kpis, verified_visuals = self._verify_plan_in_duckdb(parquet_file, updated)
-        updated.kpis = verified_kpis
+        updated.kpis = self._enrich_kpis(
+            verified_kpis,
+            [c["name"] for c in resolved_columns if c["data_type"] == "date"],
+            sample_rows,
+        )
         updated.visuals = verified_visuals
 
         latency_ms = round((time.time() - start_time) * 1000, 1)
@@ -506,6 +511,12 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
             )
         )
 
+        # A rate between two measures (conversion, failure, discount, margin...)
+        # says more than a distinct count, so it takes that card's place.
+        ratio_kpi = suggest_ratio_kpi(measures)
+        if ratio_kpi:
+            kpis = [k for k in kpis if k.aggFunc != "distinct_count"] + [ratio_kpi]
+
         # 5. Multi-Tier Visual Grid Construction (6 visuals, non-overlapping)
         visuals: List[DashboardVisualPlan] = []
         date_col = dates[0] if dates else None
@@ -697,7 +708,12 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
 
         clean_name = dataset_name.replace("_", " ").replace("-", " ").title()
         title = f"{clean_name} Executive Dashboard & Revenue Intelligence" if is_sales else f"{clean_name} Executive Dashboard"
-        narrative = f"Automated executive glassmorphic analytics suite generated for {dataset_name}. Includes 4 verified KPI metrics, time-series trajectory hero visual, category market share donut, ranked leaderboard, operational geographic breakdown, pipeline flow, and granular operational matrix ledger."
+        kpi_names = ", ".join(k.title for k in kpis)
+        narrative = (
+            f"Dashboard for {dataset_name}: {kpi_names}"
+            + (f", each compared with the previous month of {date_col}." if date_col else ".")
+            + " The on-screen summary is computed from the rows in view, so it follows the filters."
+        )
 
         return DashboardPlan(
             dashboard_title=title,
@@ -709,6 +725,22 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
             palette_id="v22",
             narrative_summary=narrative,
         )
+
+    def _enrich_kpis(
+        self,
+        kpis: List[DashboardKpiPlan],
+        dates: List[str],
+        sample_rows: Optional[List[Dict[str, Any]]],
+    ) -> List[DashboardKpiPlan]:
+        """Add change-vs-previous-month, direction, format and definition to each KPI."""
+        date_col = dates[0] if dates else None
+        out: List[DashboardKpiPlan] = []
+        for k in kpis:
+            try:
+                out.append(enrich_kpi(k, date_col, sample_rows))
+            except Exception:
+                out.append(k)
+        return out
 
     # -------------------------------------------------------------------------
     # DuckDB Pre-flight Verification
@@ -748,7 +780,12 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
             # Verify KPIs
             for k in plan.kpis:
                 try:
-                    sql = f'SELECT {safe_duckdb_agg(k.aggFunc, k.column)} FROM {from_clause};'
+                    if k.kind == "ratio" and k.numeratorCol and k.denominatorCol:
+                        num_sql = safe_duckdb_agg(k.numeratorAgg or "sum", k.numeratorCol)
+                        den_sql = safe_duckdb_agg(k.denominatorAgg or "sum", k.denominatorCol)
+                        sql = f'SELECT {num_sql}, {den_sql} FROM {from_clause};'
+                    else:
+                        sql = f'SELECT {safe_duckdb_agg(k.aggFunc, k.column)} FROM {from_clause};'
                     conn.execute(sql).fetchone()
                     verified_kpis.append(k)
                 except Exception:

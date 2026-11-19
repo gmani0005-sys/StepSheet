@@ -23,6 +23,31 @@ import {
   DashboardKpiConfig,
   PaletteId,
 } from './DashboardModal';
+import { enrichKpiSpec } from '../../engine/kpiInsights';
+
+const KPI_INSIGHT_FIELDS = [
+  'kind',
+  'numeratorCol',
+  'numeratorAgg',
+  'denominatorCol',
+  'denominatorAgg',
+  'dateCol',
+  'compare',
+  'goodDirection',
+  'format',
+  'currencySymbol',
+  'definition',
+  'alertPct',
+] as const;
+
+/** The insight fields a KPI carries (engine/kpiInsights), without empty ones. */
+function pickKpiInsightFields(k: any): Partial<DashboardKpiConfig> {
+  const out: Record<string, any> = {};
+  for (const f of KPI_INSIGHT_FIELDS) {
+    if (k && k[f] !== undefined && k[f] !== null && k[f] !== '') out[f] = k[f];
+  }
+  return out as Partial<DashboardKpiConfig>;
+}
 
 export type AiDashboardMode = 'create' | 'add' | 'edit';
 
@@ -92,6 +117,16 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
 
   const defaultPrompt =
     'Build me a complete executive glassmorphic dashboard for this dataset with KPIs, trends, comparisons, and slicers.';
+
+  // What enrichKpiSpec needs to fill in a KPI's date column, direction,
+  // format and definition when the planner (server or in-browser) left them out.
+  const kpiContext = () => {
+    const names = (columns || []).map((c: any) => (typeof c === 'string' ? c : c?.name)).filter(Boolean) as string[];
+    const dateColumns = (columns || [])
+      .filter((c: any) => c && typeof c !== 'string' && /date|timestamp/i.test(String(c.data_type || c.type || '')))
+      .map((c: any) => c.name);
+    return { rows: rows || [], dateColumns: [...dateColumns, ...names.filter((n) => !dateColumns.includes(n) && /date|time|month|period|day/i.test(n))], allColumns: names };
+  };
 
   // 1. GENERATE FULL NEW DASHBOARD FROM DATASET
   const handleGenerate = async (customPrompt?: string) => {
@@ -172,8 +207,9 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
             aggFunc: k.aggFunc || 'sum',
             subtitle: k.subtitle || 'Calculated Metric',
             accentColor: k.accentColor || (idx === 0 ? '#10B981' : idx === 1 ? '#0D9488' : idx === 2 ? '#FB923C' : '#0284C7'),
+            ...pickKpiInsightFields(k),
           })
-        );
+        ).map((k: DashboardKpiConfig) => enrichKpiSpec(k, kpiContext()));
 
         onApplyGeneratedDashboard({
           dashboardTitle: plan.dashboard_title || `${datasetName} Executive Dashboard`,
@@ -217,6 +253,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           aggFunc: k.aggFunc,
           subtitle: k.subtitle,
           accentColor: k.accentColor,
+          ...pickKpiInsightFields(k),
         })),
         visuals: currentDashboard.visuals.map((v) => ({
           id: v.id,
@@ -273,6 +310,7 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
           aggFunc: k.aggFunc,
           subtitle: k.subtitle,
           accentColor: k.accentColor,
+          ...pickKpiInsightFields(k),
         })),
         visuals: currentDashboard.visuals.map((v) => ({
           id: v.id,
@@ -375,8 +413,9 @@ export const AiDashboardPromptBar: React.FC<AiDashboardPromptBarProps> = ({
         aggFunc: k.aggFunc || 'sum',
         subtitle: k.subtitle || 'Updated KPI',
         accentColor: k.accentColor || (idx === 0 ? '#10B981' : '#0D9488'),
+        ...pickKpiInsightFields(k),
       })
-    );
+    ).map((k: DashboardKpiConfig) => enrichKpiSpec(k, kpiContext()));
 
     onApplyPatch(
       {

@@ -5127,7 +5127,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                           : {}),
                         ...(kpi.borderRadius !== undefined ? { borderRadius: `${kpi.borderRadius}px` } : {}),
                       }}
-                      className={`p-5 ${
+                      className={`relative ${lineageKpiId === kpi.id ? 'z-40' : ''} p-5 ${
                         kpi.borderRadius !== undefined ? '' : 'rounded-2xl'
                       } backdrop-blur-xl transition-all cursor-pointer flex flex-col justify-between ${
                         isKpiSelected
@@ -5215,12 +5215,28 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                       </div>
 
                       {lineageKpiId === kpi.id && (
+                        // Floats over the cards below, wider than a narrow card,
+                        // opening towards the middle of the row so it stays on the canvas.
                         <div
                           data-testid={`kpi-lineage-${kpi.id}`}
+                          role="dialog"
+                          aria-label={`How ${kpi.title} is calculated`}
                           onClick={(e) => e.stopPropagation()}
-                          className="mt-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] leading-relaxed text-slate-600 space-y-1"
+                          className={`absolute z-30 top-full mt-1 ${
+                            kpiIdx < kpiCards.length / 2 ? 'left-0' : 'right-0'
+                          } w-72 max-w-[80vw] p-3 rounded-xl bg-white border border-slate-200 shadow-lg text-[11px] leading-relaxed text-slate-600 space-y-1 cursor-default`}
                         >
-                          <div className="font-bold text-slate-800">How this is calculated</div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-800">How this is calculated</span>
+                            <button
+                              type="button"
+                              onClick={() => setLineageKpiId(null)}
+                              aria-label="Close"
+                              className="p-0.5 text-slate-400 hover:text-slate-700 rounded"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                           {kpiLineage(filteredRows, kpi, formatNum).map((line, i) => (
                             <p key={i}>{line}</p>
                           ))}

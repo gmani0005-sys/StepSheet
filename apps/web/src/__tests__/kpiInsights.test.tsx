@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import {
   kpiValue,
@@ -223,6 +223,10 @@ describe('Dashboard screen', () => {
     expect(screen.getByTestId('kpi-definitions').textContent).toContain('Lower is better');
 
     fireEvent.click(screen.getByTestId('kpi-lineage-toggle-kpi_disc'));
-    expect(screen.getByTestId('kpi-lineage-kpi_disc').textContent).toMatch(/Rows used: 4/);
+    const panel = screen.getByTestId('kpi-lineage-kpi_disc');
+    expect(panel.textContent).toMatch(/Rows used: 4/);
+    expect(panel.getAttribute('role')).toBe('dialog');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByTestId('kpi-lineage-kpi_disc')).toBeNull();
   });
 });

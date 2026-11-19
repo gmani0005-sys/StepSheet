@@ -201,9 +201,14 @@ describe('Dashboard screen', () => {
     render(<DashboardModal isOpen={true} onClose={() => {}} />);
 
     const amt = await waitFor(() => screen.getByTestId('kpi-trend-badge-kpi_amt'));
-    expect(amt.textContent).toContain('+46.7%');
-    expect(amt.textContent).toContain('vs Sep 2025');
+    expect(amt.textContent?.trim()).toBe('+46.7%');
+    expect(amt.className).toContain('whitespace-nowrap'); // never wraps into a bubble on narrow cards
+    expect(amt.parentElement?.parentElement?.textContent).toContain('vs Sep 2025');
     expect(amt.getAttribute('data-sentiment')).toBe('good');
+    // The info button sits in the badge row, not in the crowded card header.
+    expect(amt.parentElement?.querySelector('[data-testid="kpi-lineage-toggle-kpi_amt"]')).not.toBeNull();
+    // Plain numbers in the data: the banner guesses no "$" from the column name "amount".
+    expect(screen.getByTestId('executive-ai-insights-banner').textContent).not.toContain('$');
 
     const disc = screen.getByTestId('kpi-trend-badge-kpi_disc');
     expect(disc.textContent).toContain('+5.0 pts');

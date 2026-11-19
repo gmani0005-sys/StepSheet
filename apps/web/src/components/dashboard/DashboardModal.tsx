@@ -5139,8 +5139,11 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                             }`
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
+                      {/* On a narrow card the icon and edit/copy/delete buttons
+                          wrap onto a line above the title (flex-wrap-reverse)
+                          instead of covering it or spilling past the card edge. */}
+                      <div className="flex flex-wrap-reverse items-start justify-between gap-x-2 gap-y-1">
+                        <div className="min-w-[7.5rem] flex-1">
                           <span
                             style={{
                               fontSize: kpi.titleFontSize ? `${kpi.titleFontSize}px` : undefined,
@@ -5153,22 +5156,9 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                           >
                             {kpi.title}
                           </span>
-                          <div
-                            style={{ color: kpi.accentColor || '#0F172A' }}
-                            className="text-2xl font-black font-sans my-1 tracking-tight"
-                          >
-                            {(() => {
-                              // No currency symbol is guessed from the column name: a
-                              // "revenue" column in rupees or euros is not dollars --
-                              // only one the data itself carries (kpi.currencySymbol).
-                              // An average/min/max of no values shows a dash, not 0.
-                              // Rate KPIs (kind "ratio") divide two metrics.
-                              return formatKpiValue(kpiValue(filteredRows, kpi), kpi, formatNum);
-                            })()}
-                          </div>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <div className={`w-9 h-9 rounded-xl ${iconTint} flex items-center justify-center font-bold`}>
+                        <div className="flex flex-wrap items-center justify-end gap-1 ml-auto max-w-full">
+                          <div className={`w-9 h-9 rounded-xl ${iconTint} flex items-center justify-center font-bold shrink-0`}>
                             <TrendingUp className="w-4 h-4" />
                           </div>
                           <div
@@ -5206,6 +5196,22 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                             )}
                           </div>
                         </div>
+                      </div>
+
+                      {/* The value has a full-width line of its own, under the title row. */}
+                      <div
+                        data-testid={`kpi-value-${kpi.id}`}
+                        style={{ color: kpi.accentColor || '#0F172A' }}
+                        className="text-2xl font-black font-sans my-1 tracking-tight break-words"
+                      >
+                        {(() => {
+                          // No currency symbol is guessed from the column name: a
+                          // "revenue" column in rupees or euros is not dollars --
+                          // only one the data itself carries (kpi.currencySymbol).
+                          // An average/min/max of no values shows a dash, not 0.
+                          // Rate KPIs (kind "ratio") divide two metrics.
+                          return formatKpiValue(kpiValue(filteredRows, kpi), kpi, formatNum);
+                        })()}
                       </div>
 
                       {lineageKpiId === kpi.id && (

@@ -41,7 +41,7 @@ import {
 } from '../engine/values';
 import { planChatQuery } from '../engine/chatPlanner';
 import { dashDateParts, dashItems, dashMetric, makeLabeler, monthlyTotals } from '../engine/dashboardData';
-import { enrichKpiSpec, suggestRatioKpi } from '../engine/kpiInsights';
+import { enrichKpiSpec, humanize, measureScore, suggestRatioKpi } from '../engine/kpiInsights';
 
 const LOCAL_DATASETS_KEY = 'stepsheet_local_datasets_v1';
 const LOCAL_TEMPLATES_KEY = 'stepsheet_local_templates_v2';
@@ -826,22 +826,27 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
     }
   }
 
+  // Text compares ignore case and surrounding spaces, like Join, Group By and
+  // the "in" operator: an Excel cell holding "completed " is the status
+  // "Completed" (CSV import trims cells; .xlsx cells keep their spaces).
+  const aTxt = aStr.trim().toLowerCase();
+  const bTxt = bStr.trim().toLowerCase();
   switch (operator) {
     case 'eq':
     case '==':
     case '=':
-      return bothNum ? aNum === bNum : aStr.toLowerCase() === bStr.toLowerCase();
+      return bothNum ? aNum === bNum : aTxt === bTxt;
     case 'neq':
     case '!=':
-      return bothNum ? aNum !== bNum : aStr.toLowerCase() !== bStr.toLowerCase();
+      return bothNum ? aNum !== bNum : aTxt !== bTxt;
     case 'contains':
       return aStr.toLowerCase().includes(bStr.toLowerCase());
     case 'not_contains':
       return !aStr.toLowerCase().includes(bStr.toLowerCase());
     case 'starts_with':
-      return aStr.toLowerCase().startsWith(bStr.toLowerCase());
+      return aTxt.startsWith(bTxt);
     case 'ends_with':
-      return aStr.toLowerCase().endsWith(bStr.toLowerCase());
+      return aTxt.endsWith(bTxt);
     case 'gt':
     case '>':
       return emptyOrderCase && aNumRaw === null ? false : aOrd > bOrd;
@@ -2616,6 +2621,23 @@ function executePipelineSteps(
             }
           });
 
+          let approxCache: { num: { v: number; row: Record<string, any> }[]; date: { v: number; row: Record<string, any> }[] } | null = null;
+          const approxScales = () => {
+            if (approxCache) return approxCache;
+            const num: { v: number; i: number; row: Record<string, any> }[] = [];
+            const date: { v: number; i: number; row: Record<string, any> }[] = [];
+            orderedRightRows.forEach((rr, i) => {
+              const raw = rr[rightKey];
+              if (isBlank(raw)) return;
+              const n = parseSharedNumber(raw);
+              if (n !== null) { num.push({ v: n, i, row: rr }); return; }
+              const d = parseSharedDate(raw);
+              if (d) date.push({ v: d.getTime(), i, row: rr });
+            });
+            const byVal = (a: { v: number; i: number }, b: { v: number; i: number }) => a.v - b.v || a.i - b.i;
+            approxCache = { num: num.sort(byVal), date: date.sort(byVal) };
+            return approxCache;
+          };
           const findXlookupMatch = (rawVal: any): Record<string, any> | undefined => {
             if (isBlank(rawVal)) return undefined;
             const keyStr = String(rawVal).trim().toLowerCase();
@@ -2639,30 +2661,44 @@ function executePipelineSteps(
               }
             }
 
-            // Approximate match (-1 = next smaller, 1 = next larger)
-            const numVal = Number(keyStr);
-            if (!Number.isNaN(numVal)) {
-              const candidates = orderedRightRows
-                .map((rr) => ({ row: rr, num: Number(rr[rightKey]) }))
-                .filter((c) => !Number.isNaN(c.num));
-              if (matchMode === -1) {
-                const smaller = candidates
-                  .filter((c) => c.num <= numVal)
-                  .sort((a, b) => b.num - a.num);
-                return smaller[0]?.row;
-              }
-              if (matchMode === 1) {
-                const larger = candidates
-                  .filter((c) => c.num >= numVal)
-                  .sort((a, b) => a.num - b.num);
-                return larger[0]?.row;
-              }
+            // Approximate match (-1 = next smaller, 1 = next larger) on numbers
+            // (text such as "1,250.00" included) or, failing that, on dates in
+            // any format -- an effective-date price list or FX table is a date
+            // lookup. Ties keep the first row in search order, like Excel.
+            const scale = approxScales();
+            const asNum = parseSharedNumber(rawVal);
+            const asDate = asNum === null ? parseSharedDate(rawVal) : null;
+            const target = asNum !== null && scale.num.length ? asNum : asDate && scale.date.length ? asDate.getTime() : null;
+            if (target === null) return undefined;
+            const cands = asNum !== null && scale.num.length ? scale.num : scale.date;
+            if (matchMode === -1) {
+              let lo = 0, hi = cands.length - 1, at = -1;
+              while (lo <= hi) { const mid = (lo + hi) >> 1; if (cands[mid].v <= target) { at = mid; lo = mid + 1; } else hi = mid - 1; }
+              if (at < 0) return undefined;
+              while (at > 0 && cands[at - 1].v === cands[at].v) at--;
+              return cands[at].row;
+            }
+            if (matchMode === 1) {
+              let lo = 0, hi = cands.length - 1, at = -1;
+              while (lo <= hi) { const mid = (lo + hi) >> 1; if (cands[mid].v >= target) { at = mid; hi = mid - 1; } else lo = mid + 1; }
+              return at < 0 ? undefined : cands[at].row;
             }
             return undefined;
           };
 
+          let xlUnmatched = 0;
+          let xlChecked = 0;
+          const xlExamples: string[] = [];
           rows = rows.map((lr) => {
             const match = findXlookupMatch(lr[leftKey]);
+            if (!isBlank(lr[leftKey])) {
+              xlChecked++;
+              if (!match) {
+                xlUnmatched++;
+                const ex = String(lr[leftKey]).trim();
+                if (xlExamples.length < 3 && !xlExamples.includes(ex)) xlExamples.push(ex);
+              }
+            }
             const merged = { ...lr };
             if (returnCols.length > 0) {
               returnCols.forEach((col) => {
@@ -2683,6 +2719,12 @@ function executePipelineSteps(
             }
             return merged;
           });
+          if (xlUnmatched > 0) {
+            warn(
+              `${xlUnmatched.toLocaleString('en-US')} of ${xlChecked.toLocaleString('en-US')} rows found no match for "${leftKey}" in "${rightDs.meta.name}" (e.g. ${xlExamples.join(', ')})` +
+                (fallback === null ? '; their lookup columns are blank.' : `; they got "${fallback}".`)
+            );
+          }
         }
         break;
       }
@@ -2897,18 +2939,45 @@ function executePipelineSteps(
           const joinedRows: Record<string, any>[] = [];
           const matchedRightKeys = new Set<string>();
 
+          let extraRows = 0;
+          const dupKeysHit = new Set<string>();
+          let unmatchedLeft = 0;
+          const unmatchedExamples: string[] = [];
           rows.forEach((lr) => {
             const k = normalizeJoinKey(lr, true);
             const matches = k !== null ? rightMap.get(k) : undefined;
             if (matches && matches.length > 0) {
               matchedRightKeys.add(k as string);
+              if (matches.length > 1) {
+                extraRows += matches.length - 1;
+                dupKeysHit.add(k as string);
+              }
               matches.forEach((rr) => {
                 joinedRows.push(mergePair(lr, rr, leftTemplateCols));
               });
-            } else if (joinType === 'left' || joinType === 'full') {
-              joinedRows.push(mergePair(lr, null, leftTemplateCols));
+            } else {
+              if (k !== null) {
+                unmatchedLeft++;
+                const ex = leftKeyCols.map((c) => String(lr[c] ?? '').trim()).join(' + ');
+                if (unmatchedExamples.length < 3 && !unmatchedExamples.includes(ex)) unmatchedExamples.push(ex);
+              }
+              if (joinType === 'left' || joinType === 'full') joinedRows.push(mergePair(lr, null, leftTemplateCols));
             }
           });
+          // A lookup table with a repeated key silently multiplies rows, and
+          // every sum after it double-counts; say so on the step.
+          if (extraRows > 0) {
+            const sample = Array.from(dupKeysHit).slice(0, 3).map((k) => k.toUpperCase().replace(/\|\|/g, ' + '));
+            warn(
+              `${extraRows.toLocaleString('en-US')} extra rows: ${dupKeysHit.size.toLocaleString('en-US')} key value(s) appear more than once in "${rightDs.meta.name}" (e.g. ${sample.join(', ')}), so matching rows were repeated and totals after this step can double-count. Remove duplicates from that table first, or use XLOOKUP to take the first match.`
+            );
+          }
+          if (unmatchedLeft > 0 && joinType !== 'cross') {
+            warn(
+              `${unmatchedLeft.toLocaleString('en-US')} of ${rows.length.toLocaleString('en-US')} rows found no match in "${rightDs.meta.name}" (e.g. ${unmatchedExamples.join(', ')})` +
+                (joinType === 'inner' || joinType === 'right' ? ' and were dropped.' : '; their joined columns are blank.')
+            );
+          }
 
           if (joinType === 'right' || joinType === 'full') {
             sourceRightRows.forEach((rr) => {
@@ -3655,25 +3724,7 @@ function profileDatasetFields(cols: any[], rows: any[]) {
   }
 
   // Prioritize financial / volume metrics over unit_price or discount
-  const sortedMeasures = [...measures].sort((a, b) => {
-    const aLower = a.toLowerCase();
-    const bLower = b.toLowerCase();
-    const getScore = (col: string) => {
-      // Percentages and ratios are not additive: a "Total IDS %" is meaningless.
-      if (/%|percent|pct|ratio/.test(col)) return 0;
-      if (col.includes('revenue') || col.includes('amount') || col.includes('sales')) return 10;
-      // Effort/timesheet data: what was actually logged leads, the plan follows.
-      const hoursBonus = /\bhours?\b/.test(col) ? 0.5 : 0;
-      if (/\b(actual|logged|booked|spent|worked)\b/.test(col)) return 10 + hoursBonus;
-      if (col.includes('profit') || col.includes('total')) return 9;
-      if (col.includes('quantity') || col.includes('qty')) return 8;
-      if (/\b(expected|planned|target|budget|forecast|capacity)\b/.test(col)) return 7 + hoursBonus;
-      if (col.includes('price')) return 5;
-      if (/\bhours?\b/.test(col)) return 4;
-      return 1;
-    };
-    return getScore(bLower) - getScore(aLower);
-  });
+  const sortedMeasures = [...measures].sort((a, b) => measureScore(b) - measureScore(a));
 
   // Prioritize business categories over IDs
   const sortedDimensions = [...dimensions].sort((a, b) => {
@@ -3700,6 +3751,7 @@ function profileDatasetFields(cols: any[], rows: any[]) {
     measures,
     dimensions,
     dates,
+    rankedMeasures: sortedMeasures,
     primaryMeasure: sortedMeasures[0] || measures[0] || colNames[0] || 'Value',
     secondaryMeasure: sortedMeasures[1] || sortedMeasures[0] || colNames[0] || 'Metric',
     primaryDim: sortedDimensions[0] || dimensions[0] || colNames[0] || 'Category',
@@ -3753,6 +3805,8 @@ export const localEngine = {
     let rows: Record<string, any>[] = [];
     let parsedHeaders: string[] = [];
     let byteSize = file.size || 0;
+    let primarySheetName = '';
+    let extraSheets: { sheetName: string; rows: Record<string, any>[]; headers: string[] }[] = [];
 
     if (ext === 'xlsx' || ext === 'xlsm') {
       const ExcelJS = (await import('exceljs')).default ?? (await import('exceljs'));
@@ -3760,8 +3814,8 @@ export const localEngine = {
       byteSize = buf.byteLength;
       const workbook = new (ExcelJS as any).Workbook();
       await workbook.xlsx.load(buf as any);
-      const sheet = workbook.worksheets[0];
-      if (sheet) {
+      const parseSheet = (sheet: any): { rows: Record<string, any>[]; headers: string[] } => {
+        const rows: Record<string, any>[] = [];
         // HR and finance extracts often carry report metadata (title, run
         // date, filters) above the real header. Taking the column list from
         // row 1 then kept only as many columns as the title row had -- a
@@ -3843,7 +3897,23 @@ export const localEngine = {
         if (emptyUnnamed.length > 0) {
           for (const row of rows) for (const h of emptyUnnamed) delete row[h];
         }
-        parsedHeaders = headers.filter((h) => !emptyUnnamed.includes(h));
+        return { rows, headers: headers.filter((h) => !emptyUnnamed.includes(h)) };
+      };
+      // Every sheet with data becomes a dataset: lookup tables usually sit on
+      // their own sheets, and reading only the first one silently dropped them.
+      // A workbook with one data sheet keeps the file's name; with several,
+      // each is named "<file> - <sheet>" and the first is the one returned.
+      const parsed = (workbook.worksheets as any[])
+        .filter((ws) => ws && ws.state !== 'veryHidden' && ws.rowCount > 0)
+        .map((ws) => ({ sheetName: String(ws.name || ''), ...parseSheet(ws) }))
+        .filter((x) => x.rows.length > 0 || x.headers.length > 0);
+      if (parsed.length > 0) {
+        rows = parsed[0].rows;
+        parsedHeaders = parsed[0].headers;
+        if (parsed.length > 1) {
+          primarySheetName = parsed[0].sheetName;
+          extraSheets = parsed.slice(1);
+        }
       }
     } else if (ext === 'xls') {
       // Legacy binary .xls (BIFF8) is not supported by exceljs; surface a
@@ -3890,38 +3960,46 @@ export const localEngine = {
       }
     }
 
-    // JSON.parse keeps a "__proto__" key as an own property; copying such a
-    // row later would turn it into the prototype and drop the column.
-    if (rows.some((r) => r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, '__proto__'))) {
-      rows = rows.map((r) => {
-        if (!r || typeof r !== 'object' || !Object.prototype.hasOwnProperty.call(r, '__proto__')) return r;
-        const next: Record<string, any> = {};
-        for (const k of Object.keys(r)) Object.defineProperty(next, k === '__proto__' ? '_proto_' : k, { value: r[k], enumerable: true, writable: true, configurable: true });
-        return next;
-      });
-    }
-    let schema = inferSchema(rows);
-    if (schema.length === 0 && parsedHeaders.length > 0) {
-      // A header-only file still has columns (it is a template to fill).
-      schema = parsedHeaders.map((h) => ({ name: h, data_type: 'text' as DataType, physical_type: physicalTypeFor('text'), nullable: true }));
-    }
-    const now = new Date().toISOString();
-    const meta: Dataset = {
-      id: `local-ds-${crypto.randomUUID().slice(0, 8)}`,
-      name: name || file.name.replace(/\.[^/.]+$/, ''),
-      original_filename: file.name,
-      file_format: ext,
-      row_count: rows.length,
-      column_count: schema.length,
-      file_size_bytes: byteSize,
-      schema_metadata: schema,
-      created_at: now,
-      updated_at: now,
+    const baseName = name || file.name.replace(/\.[^/.]+$/, '');
+    const buildEntry = (rowsIn: Record<string, any>[], headersIn: string[], dsName: string) => {
+      let rws = rowsIn;
+      // JSON.parse keeps a "__proto__" key as an own property; copying such a
+      // row later would turn it into the prototype and drop the column.
+      if (rws.some((r) => r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, '__proto__'))) {
+        rws = rws.map((r) => {
+          if (!r || typeof r !== 'object' || !Object.prototype.hasOwnProperty.call(r, '__proto__')) return r;
+          const next: Record<string, any> = {};
+          for (const k of Object.keys(r)) Object.defineProperty(next, k === '__proto__' ? '_proto_' : k, { value: r[k], enumerable: true, writable: true, configurable: true });
+          return next;
+        });
+      }
+      let schema = inferSchema(rws);
+      if (schema.length === 0 && headersIn.length > 0) {
+        // A header-only file still has columns (it is a template to fill).
+        schema = headersIn.map((h) => ({ name: h, data_type: 'text' as DataType, physical_type: physicalTypeFor('text'), nullable: true }));
+      }
+      const now = new Date().toISOString();
+      const meta: Dataset = {
+        id: `local-ds-${crypto.randomUUID().slice(0, 8)}`,
+        name: dsName,
+        original_filename: file.name,
+        file_format: ext,
+        row_count: rws.length,
+        column_count: schema.length,
+        file_size_bytes: byteSize,
+        schema_metadata: schema,
+        created_at: now,
+        updated_at: now,
+      };
+      return { meta, rows: rws };
     };
+    const primary = buildEntry(rows, parsedHeaders, primarySheetName ? `${baseName} - ${primarySheetName}` : baseName);
+    const extras = extraSheets.map((x) => buildEntry(x.rows, x.headers, `${baseName} - ${x.sheetName}`));
+    const meta = primary.meta;
 
     const current = getStoredDatasets();
-    saveStoredDatasets([{ meta, rows }, ...current]);
-    logAudit('dataset.upload', { dataset_id: meta.id, name: meta.name, rows: meta.row_count });
+    saveStoredDatasets([primary, ...extras, ...current]);
+    logAudit('dataset.upload', { dataset_id: meta.id, name: meta.name, rows: meta.row_count, sheets: 1 + extras.length });
     return meta;
   },
 
@@ -7174,11 +7252,7 @@ export const localEngine = {
       if (Math.abs(n) >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
       return n.toLocaleString('en-US', { maximumFractionDigits: 1 });
     };
-    const humanizeField = (name: string): string => {
-      if (!name) return '';
-      const spaced = name.replace(/[_-]+/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').trim();
-      return spaced.split(/\s+/).map((w) => (w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w)).join(' ');
-    };
+    const humanizeField = (name: string): string => humanize(name);
 
     // ---- KPI subtitles from the same numbers the cards show (dashboardData) ----
     let primarySubtitle = rows.length > 0 ? `Across ${rows.length.toLocaleString('en-US')} records` : 'Cumulative total';
@@ -7233,7 +7307,7 @@ export const localEngine = {
 
     // A rate between two measures (conversion, failure, discount, margin...)
     // says more than a distinct count, so it takes that card's place.
-    const ratioKpi = suggestRatioKpi(profile.measures);
+    const ratioKpi = suggestRatioKpi(profile.rankedMeasures || profile.measures);
     if (ratioKpi) {
       const distinctIdx = kpis.findIndex((k) => k.aggFunc === 'distinct_count');
       const card = {

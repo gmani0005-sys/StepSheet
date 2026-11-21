@@ -340,7 +340,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const restoredSteps = savedPipeline ? savedPipeline.steps : [];
       const restoredUndo = savedPipeline ? savedPipeline.undoStack : [];
       const restoredRedo = savedPipeline ? savedPipeline.redoStack : [];
-      const restoredActiveIdx = savedPipeline ? savedPipeline.activeStepIndex : null;
+      // A pipeline saved without a valid step index (older saves, hand-edited
+      // state) previews the whole pipeline instead of slicing to "step NaN",
+      // which ran no steps and showed the raw rows.
+      const savedIdx = savedPipeline ? savedPipeline.activeStepIndex : null;
+      const restoredActiveIdx =
+        typeof savedIdx === 'number' && Number.isInteger(savedIdx) && savedIdx >= 0 && savedIdx < restoredSteps.length ? savedIdx : null;
       const restoredSql = savedPipeline ? savedPipeline.compiledSql : '';
       const restoredSummaries = savedPipeline ? savedPipeline.stepSummaries : [];
 
@@ -489,7 +494,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     uploadDataset: async (file: File, name?: string) => {
       const ds = await api.uploadDataset(file, name);
-      set((state) => ({ datasets: [ds, ...state.datasets] }));
+      // A multi-sheet workbook adds one dataset per sheet: refresh the list
+      // from the engine so the other sheets show up too.
+      const listed = await api.listDatasets().catch(() => null);
+      set((state) => ({
+        datasets: listed && listed.some((d) => d.id === ds.id) ? listed : [ds, ...state.datasets],
+      }));
       await get().selectDataset(ds.id);
       return ds;
     },
@@ -664,7 +674,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       if (!selectedDataset) return;
 
       const stepsToRun =
-        activeStepIndex !== null ? steps.slice(0, activeStepIndex + 1) : steps;
+        typeof activeStepIndex === 'number' && Number.isInteger(activeStepIndex) && activeStepIndex >= 0
+          ? steps.slice(0, activeStepIndex + 1)
+          : steps;
 
       set({ isLoadingRows: true });
       try {

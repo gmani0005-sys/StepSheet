@@ -117,3 +117,14 @@ def test_utilisation_rate_pairs_actual_with_expected_at_the_same_grain():
     assert r.title == "Utilization (Actual ÷ Expected)"
     s = suggest_ratio_kpi(["sales", "sales_target"])
     assert s is None or s.numeratorCol != "sales_target"
+
+
+def test_sales_fact_ranking_matches_web():
+    from app.services.kpi_insights import rank_measures, suggest_ratio_kpi, name_words
+    cols = ['LineNo', 'Qty', 'UnitPriceLocal', 'DiscountPct', 'UnitCostUSD', 'RateToUSD', 'ReturnQty', 'QtyClean', 'ReturnQtyClean',
+            'GrossLocal', 'NetLocal', 'NetUSD', 'COGSUSD', 'ReturnedUSD', 'NetAfterReturnsUSD', 'MarginUSD', 'Year', 'MonthNum']
+    assert name_words('NetAfterReturnsUSD') == 'net after returns usd'
+    ranked = rank_measures(cols)
+    assert ranked[:3] == ['NetAfterReturnsUSD', 'NetUSD', 'MarginUSD']
+    r = suggest_ratio_kpi(ranked)
+    assert r.title == 'Profit Margin' and r.numeratorCol == 'MarginUSD' and r.denominatorCol == 'NetAfterReturnsUSD'

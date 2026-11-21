@@ -61,7 +61,8 @@ export const humanize = (name: string): string =>
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .trim()
     .split(/\s+/)
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    // Acronyms stay as written: "Net After Returns USD", "IDS Resource Category".
+    .map((w) => (!w ? w : /^[A-Z][A-Z0-9]{1,4}$/.test(w) ? w : w[0].toUpperCase() + w.slice(1).toLowerCase()))
     .join(' ');
 
 /** "2025-12" -> "Dec 2025". Other labels pass through. */
@@ -119,12 +120,52 @@ interface RatioPattern {
 }
 
 const RATIO_PATTERNS: RatioPattern[] = [
+  // Margin over net sales leads: on a sales fact it is the rate an executive
+  // asks for first; a returns or discount rate comes after it.
+  { num: /\b(profit|margin)\b/i, den: /revenue|sales|amount|gross|total|\bnet\b|\b(usd|eur|gbp|inr|jpy|aud|cad)\b/i, title: () => 'Profit Margin', direction: 'up' },
   { num: /convert|conversion|won|paid|success|completed|closed_won/i, den: /trial|lead|started|visit|session|opportunit|attempt|signup|run|total/i, title: (n, d) => `${humanize(n)} Rate (÷ ${humanize(d)})`, direction: 'up' },
   { num: /fail|error|reject|return|refund|cancel|churn/i, den: /run|order|attempt|request|subscriber|total|sold|shipped|quantity|qty/i, title: (n, d) => `${humanize(n)} Rate (÷ ${humanize(d)})`, direction: 'down' },
   { num: /discount/i, den: /amount|revenue|sales|gross|price|total/i, title: () => 'Discount Rate', direction: 'down' },
-  { num: /profit|margin/i, den: /revenue|sales|amount|gross|total/i, title: () => 'Profit Margin', direction: 'up' },
   { num: /cost|expense|spend/i, den: /revenue|sales|amount|income/i, title: (n) => `${humanize(n)} to Revenue`, direction: 'down' },
 ];
+
+/** "NetAfterReturnsUSD" / "net_after_returns_usd" -> "net after returns usd". */
+export const nameWords = (c: string): string =>
+  String(c)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/[^A-Za-z0-9%]+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+// A ratio's parts must be additive amounts: never a unit price, a local
+// (mixed-currency) amount, an exchange or commission rate, or a percentage.
+const NOT_ADDITIVE = /%|percent|pct|ratio|\brate\b|\bunit\b|\blocal\b/;
+
+/**
+ * How strongly a numeric column reads as the headline measure of a dataset.
+ * Shared ranking for generated dashboards (mirrored in the API's
+ * kpi_insights._measure_score): money and actuals lead, then margin, cost,
+ * quantities and plans; rates, unit prices and mixed-currency amounts are not
+ * summed into a headline total.
+ */
+export function measureScore(name: string): number {
+  const c = nameWords(name);
+  if (/%|percent|pct|ratio|\brate\b/.test(c)) return 0;
+  if (/\bunit\b|\blocal\b/.test(c)) return 0.5;
+  if (/\b(margin|profit)\b/.test(c)) return 9.5;
+  if (/cogs|\bcosts?\b|expense|\breturned\b|refund/.test(c)) return 8.5;
+  if (/revenue|amount|sales|income|turnover|\b(usd|eur|gbp|inr|jpy|aud|cad|sgd|chf|cny)\b/.test(c))
+    return 10 + (/\bnet\b/.test(c) ? 0.5 : 0) + (/\b(after|final|adjusted)\b/.test(c) ? 0.2 : 0);
+  const hoursBonus = /\bhours?\b/.test(c) ? 0.5 : 0;
+  if (/\b(actual|logged|booked|spent|worked)\b/.test(c)) return 10 + hoursBonus;
+  if (/profit|total/.test(c)) return 9;
+  if (/quantity|\bqty\b/.test(c)) return 8;
+  if (/\b(expected|planned|target|budget|forecast|capacity)\b/.test(c)) return 7 + hoursBonus;
+  if (/price/.test(c)) return 5;
+  if (/\bhours?\b/.test(c)) return 4;
+  return 1;
+}
 
 const words = (c: string) => new Set(String(c).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
 
@@ -162,9 +203,11 @@ export function suggestRatioKpi(measures: string[]): Partial<KpiInsightSpec> & {
     }
   }
   for (const p of RATIO_PATTERNS) {
-    const num = measures.find((m) => p.num.test(m));
+    const num = measures.find((m) => p.num.test(nameWords(m)) && !NOT_ADDITIVE.test(nameWords(m)));
     if (!num) continue;
-    const den = measures.find((m) => m !== num && p.den.test(m) && !p.num.test(m));
+    const den = measures.find(
+      (m) => m !== num && p.den.test(nameWords(m)) && !p.num.test(nameWords(m)) && !NOT_ADDITIVE.test(nameWords(m))
+    );
     if (!den) continue;
     return {
       title: p.title(num, den),

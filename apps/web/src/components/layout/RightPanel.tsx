@@ -20,6 +20,7 @@ import {
   TrendingUp,
   Pencil,
   X,
+  AlertTriangle,
 } from 'lucide-react';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { StepType } from '../../types/steps';
@@ -269,6 +270,11 @@ export const RightPanel: React.FC = () => {
             {/* Steps list */}
             {steps.map((step, idx) => {
               const isSelected = activeStepIndex === idx;
+              // Warnings ride on the step card itself: in a long pipeline a
+              // duplicate-key join or unmatched lookup on step 6 must be seen
+              // without opening each step's details.
+              const stepWarnings: string[] =
+                (stepSummaries.find((s: any) => s && s.step_id === step.id) as any)?.warnings || [];
               return (
                 <div
                   key={step.id}
@@ -360,6 +366,20 @@ export const RightPanel: React.FC = () => {
                       <span className="text-[11px]">{step.enabled ? 'Enabled' : 'Disabled'}</span>
                     </label>
                   </div>
+                  {step.enabled && stepWarnings.length > 0 && (
+                    <div
+                      role="status"
+                      data-testid={`step-card-warning-${idx + 1}`}
+                      title={stepWarnings.join('\n\n')}
+                      className="mt-1.5 ml-7 p-1.5 rounded-[2px] bg-[#FFF4CE] border border-[#E8C33C] text-[11px] leading-snug text-[#5C4A00] flex gap-1.5"
+                    >
+                      <AlertTriangle size={12} className="shrink-0 mt-[1px] text-[#9D5D00]" />
+                      <span className="line-clamp-3">
+                        {stepWarnings[0]}
+                        {stepWarnings.length > 1 ? ` (+${stepWarnings.length - 1} more)` : ''}
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })}

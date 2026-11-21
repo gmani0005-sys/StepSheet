@@ -98,3 +98,22 @@ def test_generated_plan_carries_insight_fields():
     updated = patch.json()["updated_dashboard"]
     assert any(k.get("kind") == "ratio" for k in updated["kpis"])
     assert all(k.get("compare") == "previous_period" for k in updated["kpis"])
+
+
+def test_rank_measures_leads_with_logged_effort_and_puts_percentages_last():
+    from app.services.kpi_insights import rank_measures
+    cols = ["Location Weekly Hours", "IDS % (Whole Number)", "Expected Per Day", "Daily Actual Hours", "Daily Expected Hours", "Daily IDS %"]
+    ranked = rank_measures(cols)
+    assert ranked[:2] == ["Daily Actual Hours", "Daily Expected Hours"]
+    assert set(ranked[-2:]) == {"IDS % (Whole Number)", "Daily IDS %"}
+    assert rank_measures(["quantity", "amount"])[0] == "amount"  # sales data unchanged
+
+
+def test_utilisation_rate_pairs_actual_with_expected_at_the_same_grain():
+    r = suggest_ratio_kpi(["Expected Per Day", "Weekly Actual Hours", "Weekly Expected Hours", "Weekly IDS %"])
+    assert r is not None and r.kind == "ratio"
+    assert (r.numeratorCol, r.denominatorCol) == ("Weekly Actual Hours", "Weekly Expected Hours")
+    assert r.goodDirection == "neutral" and r.format == "percent"
+    assert r.title == "Utilization (Actual ÷ Expected)"
+    s = suggest_ratio_kpi(["sales", "sales_target"])
+    assert s is None or s.numeratorCol != "sales_target"

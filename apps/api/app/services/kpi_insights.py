@@ -66,8 +66,67 @@ _RATIO_PATTERNS = [
 ]
 
 
+_ACTUAL = re.compile(r"\b(actual|logged|booked|spent|worked)\b", re.I)
+_PLAN = re.compile(r"\b(expected|planned|target|budget|forecast|capacity)\b", re.I)
+_NON_ADDITIVE = re.compile(r"%|percent|pct|ratio", re.I)
+_HOURS = re.compile(r"\bhours?\b", re.I)
+
+
+def _measure_score(col: str) -> float:
+    c = col.lower()
+    if _NON_ADDITIVE.search(c):
+        return 0
+    bonus = 0.5 if _HOURS.search(c) else 0
+    if any(k in c for k in ("revenue", "amount", "sales")):
+        return 10
+    if _ACTUAL.search(c):
+        return 10 + bonus
+    if "profit" in c or "total" in c:
+        return 9
+    if "quantity" in c or "qty" in c:
+        return 8
+    if _PLAN.search(c):
+        return 7 + bonus
+    if "price" in c:
+        return 5
+    if _HOURS.search(c):
+        return 4
+    return 1
+
+
+def rank_measures(measures: List[str]) -> List[str]:
+    """Stable ranking shared with web engine/localEngine (profileDatasetFields)."""
+    return sorted(measures, key=lambda m: -_measure_score(m))
+
+
+def _words(c: str) -> set:
+    return {w for w in re.split(r"[^a-z0-9]+", c.lower()) if w}
+
+
 def suggest_ratio_kpi(measures: List[str]) -> Optional[DashboardKpiPlan]:
     """A meaningful rate between two numeric columns, if their names suggest one."""
+    # Actual against plan (timesheets vs expected hours, sales vs target), at the
+    # same grain: "Weekly Actual Hours" pairs with "Weekly Expected Hours", not
+    # with "Expected Per Day". Over- and under-runs can both be bad: neutral.
+    actuals = [m for m in measures if _ACTUAL.search(m) and not _NON_ADDITIVE.search(m)]
+    plans = [m for m in measures if _PLAN.search(m) and not _NON_ADDITIVE.search(m)]
+    for num in actuals:
+        best, best_shared = None, -1
+        for den in plans:
+            if den == num:
+                continue
+            shared = len(_words(num) & _words(den))
+            if shared > best_shared:
+                best, best_shared = den, shared
+        if best:
+            slug = re.sub(r"\s+", "_", num.lower())
+            return DashboardKpiPlan(
+                id=f"kpi_rate_{slug}",
+                title="Utilization (Actual ÷ Expected)" if _HOURS.search(num) else f"{humanize(num)} vs {humanize(best)}",
+                column=num, aggFunc="sum", subtitle=f"{humanize(num)} ÷ {humanize(best)}", accentColor="#0284C7",
+                kind="ratio", numeratorCol=num, numeratorAgg="sum", denominatorCol=best, denominatorAgg="sum",
+                format="percent", goodDirection="neutral",
+            )
     for num_re, den_re, title, direction in _RATIO_PATTERNS:
         num = next((m for m in measures if re.search(num_re, m, re.I)), None)
         if not num:

@@ -20,7 +20,7 @@
 import { parseSharedNumber, parseSharedDate, preciseSum, cleanFloat } from './values';
 
 export type DashRow = Record<string, any>;
-export type DateInterval = 'month' | 'quarter' | 'year';
+export type DateInterval = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
 export interface DashVisualSpec {
   type?: string;
@@ -112,18 +112,21 @@ export function isDateCategory(col: string | undefined, columns: Array<{ name: s
 }
 
 /** UTC calendar parts of a date cell (time-zone offsets honoured, browser zone ignored). */
-export function dashDateParts(v: any): { y: number; m: number } | null {
+export function dashDateParts(v: any): { y: number; m: number; d: number } | null {
   if (isBlankCell(v)) return null;
   const d = v instanceof Date ? v : parseSharedDate(v);
   if (!d || Number.isNaN(d.getTime())) return null;
   const y = d.getUTCFullYear();
   if (y < 1990 || y > 2100) return null;
-  return { y, m: d.getUTCMonth() + 1 };
+  return { y, m: d.getUTCMonth() + 1, d: d.getUTCDate() };
 }
 
 export function dateIntervalFor(rows: DashRow[], col: string): DateInterval {
-  let minY = 9999;
-  let maxY = 0;
+  // Pick the grain from the span of dates: a single month of data (a monthly
+  // timesheet or utilisation run) used to collapse to one point on a monthly
+  // axis, so short spans trend by day or by week.
+  let minT = Infinity;
+  let maxT = -Infinity;
   const seen = new Set<any>();
   for (const r of rows) {
     const v = dashGet(r, col);
@@ -131,24 +134,41 @@ export function dateIntervalFor(rows: DashRow[], col: string): DateInterval {
     if (seen.size < 200_000) seen.add(v);
     const p = dashDateParts(v);
     if (!p) continue;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
+    const t = Date.UTC(p.y, p.m - 1, p.d);
+    if (t < minT) minT = t;
+    if (t > maxT) maxT = t;
   }
-  if (maxY === 0) return 'month';
-  const span = maxY - minY;
-  return span > 6 ? 'year' : span > 3 ? 'quarter' : 'month';
+  if (!Number.isFinite(minT)) return 'month';
+  const days = (maxT - minT) / 86_400_000;
+  if (days <= 62) return 'day';
+  if (days <= 183) return 'week';
+  const years = new Date(maxT).getUTCFullYear() - new Date(minT).getUTCFullYear();
+  return years > 6 ? 'year' : years > 3 ? 'quarter' : 'month';
 }
 
-export function periodKey(p: { y: number; m: number }, interval: DateInterval): string {
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Monday of the date's week (UTC), as YYYY-MM-DD. */
+function mondayOf(p: { y: number; m: number; d: number }): string {
+  const t = new Date(Date.UTC(p.y, p.m - 1, p.d));
+  const back = (t.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
+  t.setUTCDate(t.getUTCDate() - back);
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+}
+
+export function periodKey(p: { y: number; m: number; d?: number }, interval: DateInterval): string {
   if (interval === 'year') return String(p.y);
   if (interval === 'quarter') return `${p.y}-Q${Math.floor((p.m - 1) / 3) + 1}`;
-  return `${p.y}-${String(p.m).padStart(2, '0')}`;
+  if (interval === 'day') return `${p.y}-${pad2(p.m)}-${pad2(p.d ?? 1)}`;
+  if (interval === 'week') return `Wk ${mondayOf({ y: p.y, m: p.m, d: p.d ?? 1 })}`;
+  return `${p.y}-${pad2(p.m)}`;
 }
 
-/** Does a date cell fall in a period label ("2024-03", "2024-Q1", "2024")? */
 export function cellInPeriod(cell: any, period: string): boolean {
   const p = dashDateParts(cell);
   if (!p) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(period)) return periodKey(p, 'day') === period;
+  if (/^Wk \d{4}-\d{2}-\d{2}$/.test(period)) return periodKey(p, 'week') === period;
   if (/^\d{4}-\d{2}$/.test(period)) return periodKey(p, 'month') === period;
   if (/^\d{4}-Q[1-4]$/.test(period)) return periodKey(p, 'quarter') === period;
   if (/^\d{4}$/.test(period)) return String(p.y) === period;

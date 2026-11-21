@@ -19,7 +19,7 @@ from app.services.duckdb_engine import DuckDBEngine
 from app.services.ollama_manager import ollama_manager
 from app.services.credit_ledger import credit_ledger
 from app.services.storage import get_storage_service
-from app.services.kpi_insights import enrich_kpi, suggest_ratio_kpi
+from app.services.kpi_insights import enrich_kpi, rank_measures, suggest_ratio_kpi
 
 PALETTE_OPTIONS = ["v22", "classic", "ocean", "emerald", "sunset", "monochrome", "vibrant"]
 
@@ -400,7 +400,10 @@ Output strict JSON only. Use ONLY columns that exist in the dataset."""
         is_finance = any(k in all_col_names or k in dataset_name.lower() for k in ["balance", "credit_limit", "debit", "spend", "budget", "expense", "invoice"])
         is_hr = any(k in all_col_names or k in dataset_name.lower() for k in ["salary", "employee", "headcount", "department", "tenure", "staff"])
 
-        # 2. Measures Resolution
+        # 2. Measures Resolution -- same ranking as the in-browser planner
+        # (localEngine profileDatasetFields): money and logged effort first,
+        # the plan next, percentages and ratios last (they are not additive).
+        measures = rank_measures(measures)
         primary_measure = measures[0] if measures else None
         secondary_measure = measures[1] if len(measures) > 1 else primary_measure
         for m in measures:

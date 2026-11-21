@@ -58,10 +58,11 @@ def detect_currency_symbol(sample_rows: Optional[List[Dict[str, Any]]], column: 
 
 
 _RATIO_PATTERNS = [
+    # Margin over net sales leads (mirrors web engine/kpiInsights RATIO_PATTERNS).
+    (r"\b(profit|margin)\b", r"revenue|sales|amount|gross|total|\bnet\b|\b(usd|eur|gbp|inr|jpy|aud|cad)\b", "Profit Margin", "up"),
     (r"convert|conversion|won|paid|success|completed|closed_won", r"trial|lead|started|visit|session|opportunit|attempt|signup|run|total", "rate", "up"),
     (r"fail|error|reject|return|refund|cancel|churn", r"run|order|attempt|request|subscriber|total|sold|shipped|quantity|qty", "rate", "down"),
     (r"discount", r"amount|revenue|sales|gross|price|total", "Discount Rate", "down"),
-    (r"profit|margin", r"revenue|sales|amount|gross|total", "Profit Margin", "up"),
     (r"cost|expense|spend", r"revenue|sales|amount|income", "to_revenue", "down"),
 ]
 
@@ -72,18 +73,35 @@ _NON_ADDITIVE = re.compile(r"%|percent|pct|ratio", re.I)
 _HOURS = re.compile(r"\bhours?\b", re.I)
 
 
+def name_words(col: str) -> str:
+    """"NetAfterReturnsUSD" / "net_after_returns_usd" -> "net after returns usd" (web: nameWords)."""
+    c = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(col))
+    c = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", c)
+    return re.sub(r"[^A-Za-z0-9%]+", " ", c).strip().lower()
+
+
+_NOT_ADDITIVE_PART = re.compile(r"%|percent|pct|ratio|\brate\b|\bunit\b|\blocal\b")
+
+
 def _measure_score(col: str) -> float:
-    c = col.lower()
-    if _NON_ADDITIVE.search(c):
+    """Headline-measure ranking; mirrors web engine/kpiInsights.measureScore."""
+    c = name_words(col)
+    if re.search(r"%|percent|pct|ratio|\brate\b", c):
         return 0
+    if re.search(r"\bunit\b|\blocal\b", c):
+        return 0.5
+    if re.search(r"\b(margin|profit)\b", c):
+        return 9.5
+    if re.search(r"cogs|\bcosts?\b|expense|\breturned\b|refund", c):
+        return 8.5
+    if re.search(r"revenue|amount|sales|income|turnover|\b(usd|eur|gbp|inr|jpy|aud|cad|sgd|chf|cny)\b", c):
+        return 10 + (0.5 if re.search(r"\bnet\b", c) else 0) + (0.2 if re.search(r"\b(after|final|adjusted)\b", c) else 0)
     bonus = 0.5 if _HOURS.search(c) else 0
-    if any(k in c for k in ("revenue", "amount", "sales")):
-        return 10
     if _ACTUAL.search(c):
         return 10 + bonus
     if "profit" in c or "total" in c:
         return 9
-    if "quantity" in c or "qty" in c:
+    if "quantity" in c or re.search(r"\bqty\b", c):
         return 8
     if _PLAN.search(c):
         return 7 + bonus
@@ -128,10 +146,14 @@ def suggest_ratio_kpi(measures: List[str]) -> Optional[DashboardKpiPlan]:
                 format="percent", goodDirection="neutral",
             )
     for num_re, den_re, title, direction in _RATIO_PATTERNS:
-        num = next((m for m in measures if re.search(num_re, m, re.I)), None)
+        num = next((m for m in measures if re.search(num_re, name_words(m)) and not _NOT_ADDITIVE_PART.search(name_words(m))), None)
         if not num:
             continue
-        den = next((m for m in measures if m != num and re.search(den_re, m, re.I) and not re.search(num_re, m, re.I)), None)
+        den = next(
+            (m for m in measures if m != num and re.search(den_re, name_words(m)) and not re.search(num_re, name_words(m))
+             and not _NOT_ADDITIVE_PART.search(name_words(m))),
+            None,
+        )
         if not den:
             continue
         if title == "rate":

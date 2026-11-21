@@ -57,6 +57,7 @@ import {
   makeLabeler,
   sameCategory,
   cellInPeriod,
+  dashDateParts,
 } from '../../engine/dashboardData';
 import {
   KpiKind,
@@ -69,6 +70,7 @@ import {
   formatKpiValue,
   buildDataStory,
   detectCurrencySymbol,
+  humanize,
 } from '../../engine/kpiInsights';
 import {
   exportShareApi,
@@ -1631,7 +1633,17 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
     const label = makeLabeler();
     const set = new Set<string>();
     sourceRows.forEach((r) => set.add(label(getRowVal(r, col))));
-    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const vals = Array.from(set);
+    // Dates list in calendar order ("01-Feb-2025" before "01-Apr-2025"), not
+    // alphabetically; anything else keeps natural text order.
+    const parts = vals.map((v) => dashDateParts(v));
+    if (vals.length > 0 && parts.every((x) => x !== null)) {
+      return vals
+        .map((v, i) => ({ v, k: parts[i]!.y * 10000 + parts[i]!.m * 100 + parts[i]!.d }))
+        .sort((a, b) => a.k - b.k || a.v.localeCompare(b.v))
+        .map((x) => x.v);
+    }
+    return vals.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   };
 
   const toggleSlicerValue = (col: string, val: string) => {
@@ -1815,17 +1827,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
   // Turns a raw column/field name (snake_case, camelCase, or already
   // human text) into a readable label for auto-generated titles, e.g.
   // "customer_id" -> "Customer Id", "orderDate" -> "Order Date".
-  const humanizeFieldName = (name: string): string => {
-    if (!name) return '';
-    const spaced = name
-      .replace(/[_-]+/g, ' ')
-      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-      .trim();
-    return spaced
-      .split(/\s+/)
-      .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
-      .join(' ');
-  };
+  const humanizeFieldName = (name: string): string => humanize(name);
 
   // Plain-English label for an aggregation function, used by auto-generated
   // KPI/visual titles instead of the raw enum value (e.g. "distinct_count"
@@ -3868,6 +3870,23 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
             } Z`
           : '';
       const primaryColor = getItemColor(vis, items[0]?.category || 'line', 0);
+      // A long series (22 months, 31 days) cannot label every point: axis
+      // labels thin to about 8, and value labels keep to the points a reader
+      // checks -- first, last, highest and lowest -- so nothing overprints.
+      const tickStep = Math.max(1, Math.ceil(pts.length / 8));
+      const showTick = (idx: number) =>
+        idx % tickStep === 0 || (idx === pts.length - 1 && (pts.length - 1) % tickStep >= tickStep / 2);
+      const keyIdx = new Set<number>();
+      if (pts.length > 0) {
+        let hi = 0;
+        let lo = 0;
+        pts.forEach((pt, i) => {
+          if (pt.value > pts[hi].value) hi = i;
+          if (pt.value < pts[lo].value) lo = i;
+        });
+        [0, pts.length - 1, hi, lo].forEach((i) => keyIdx.add(i));
+      }
+      const showValueLabel = (idx: number) => pts.length <= 12 || keyIdx.has(idx);
 
       const lineChart = (
         <div className="pt-1">
@@ -3922,7 +3941,7 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                     stroke="#FFFFFF"
                     strokeWidth="2"
                   />
-                  {vis.showDataLabels && (
+                  {vis.showDataLabels && showValueLabel(idx) && (
                     <text
                       x={p.x}
                       y={labelY}
@@ -3932,14 +3951,16 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                       {formatDataLabel(vis, p.value, totalVal)}
                     </text>
                   )}
-                  <text
-                    x={p.x}
-                    y={height - 4}
-                    textAnchor="middle"
-                    className="fill-[#605E5C] text-[9px]"
-                  >
-                    {getItemLegendLabel(vis, p.category).slice(0, 10)}
-                  </text>
+                  {showTick(idx) && (
+                    <text
+                      x={p.x}
+                      y={height - 4}
+                      textAnchor="middle"
+                      className="fill-[#605E5C] text-[9px]"
+                    >
+                      {getItemLegendLabel(vis, p.category).slice(0, 10)}
+                    </text>
+                  )}
                 </g>
               );
             })}

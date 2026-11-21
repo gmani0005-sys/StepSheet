@@ -29,7 +29,13 @@ describe('R4-01 .. R4-07 dashboard numbers', () => {
     process.env.TZ = 'America/New_York';
     const rows = [{ d: '2024-05-01', v: 1 }, { d: '2024-05-31T23:30:00-05:00', v: 2 }];
     const { items } = dashItems(rows, { type: 'line_area', categoryCol: 'd', valueCol: 'v', aggFunc: 'sum' }, [{ name: 'd', data_type: 'date' }]);
-    expect(items.map((x) => [x.category, x.value])).toEqual([['2024-05', 1], ['2024-06', 2]]);
+    // Under two months of data trends by day; 23:30 on 31 May in New York is 1 June in UTC.
+    expect(items.map((x) => [x.category, x.value])).toEqual([['2024-05-01', 1], ['2024-06-01', 2]]);
+    // A longer span still buckets by UTC month.
+    const long = [...rows, { d: '2024-12-15', v: 4 }];
+    const m = dashItems(long, { type: 'line_area', categoryCol: 'd', valueCol: 'v', aggFunc: 'sum' }, [{ name: 'd', data_type: 'date' }]);
+    expect(m.interval).toBe('month');
+    expect(m.items.map((x) => [x.category, x.value])).toEqual([['2024-05', 1], ['2024-06', 2], ['2024-12', 4]]);
   });
   it('shares are of the whole, not of the top N shown', () => {
     const rows = Array.from({ length: 20 }, (_, i) => ({ c: `C${i}`, v: 10 }));

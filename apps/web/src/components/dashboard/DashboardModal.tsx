@@ -4932,7 +4932,11 @@ export const DashboardModal: React.FC<DashboardModalProps> = ({
                 const name = String(c.name || '').toLowerCase();
                 return ['amount', 'revenue', 'sales', 'profit', 'quantity', 'balance', 'salary', 'credit_limit'].some(k => name.includes(k)) || ['integer', 'float', 'number'].includes(dt);
               });
-              const primaryMeas = numCols[0]?.name || columns.find((c: any) => !String(c.name || '').toLowerCase().endsWith('id'))?.name;
+              // Narrate the same measure the page's lead KPI card reports, so the
+              // takeaway never contradicts the cards (e.g. "Location Weekly Hours"
+              // in the banner vs "Daily Actual Hours" on the cards).
+              const kpiMeas = kpiCards.find((k) => k.column && k.aggFunc !== 'count' && k.aggFunc !== 'distinct' && columns.some((c: any) => c.name === k.column))?.column;
+              const primaryMeas = kpiMeas || numCols[0]?.name || columns.find((c: any) => !String(c.name || '').toLowerCase().endsWith('id'))?.name;
               const catCols = columns.filter((c: any) => {
                 const name = String(c.name || '').toLowerCase();
                 return !name.endsWith('_id') && name !== 'id' && !numCols.some((nc: any) => nc.name === c.name);

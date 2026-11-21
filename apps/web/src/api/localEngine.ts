@@ -3618,7 +3618,12 @@ function profileDatasetFields(cols: any[], rows: any[]) {
     const nameLower = name.toLowerCase();
 
     const isExplicitDate = dt === 'date' || dt === 'timestamp';
-    const isNameDate = nameLower.includes('date') || nameLower.includes('year') || nameLower.includes('month') || nameLower.includes('day') || nameLower.includes('time');
+    // Whole name words only: "order_date", "Month", "Calendar Date" are dates,
+    // but "Monthly Actual Hours", "Yearly Revenue" and "Downtime Hours" are
+    // measures -- a substring match turned every monthly figure into a date
+    // and left a monthly dashboard with no numbers to show.
+    const nameWords: string[] = nameLower.split(/[^a-z]+/).filter(Boolean);
+    const isNameDate = nameWords.some((w: string) => ['date', 'year', 'month', 'day', 'time', 'timestamp', 'datetime'].includes(w));
 
     let numericCount = 0;
     let datePatternCount = 0;
@@ -3654,10 +3659,17 @@ function profileDatasetFields(cols: any[], rows: any[]) {
     const aLower = a.toLowerCase();
     const bLower = b.toLowerCase();
     const getScore = (col: string) => {
+      // Percentages and ratios are not additive: a "Total IDS %" is meaningless.
+      if (/%|percent|pct|ratio/.test(col)) return 0;
       if (col.includes('revenue') || col.includes('amount') || col.includes('sales')) return 10;
+      // Effort/timesheet data: what was actually logged leads, the plan follows.
+      const hoursBonus = /\bhours?\b/.test(col) ? 0.5 : 0;
+      if (/\b(actual|logged|booked|spent|worked)\b/.test(col)) return 10 + hoursBonus;
       if (col.includes('profit') || col.includes('total')) return 9;
       if (col.includes('quantity') || col.includes('qty')) return 8;
+      if (/\b(expected|planned|target|budget|forecast|capacity)\b/.test(col)) return 7 + hoursBonus;
       if (col.includes('price')) return 5;
+      if (/\bhours?\b/.test(col)) return 4;
       return 1;
     };
     return getScore(bLower) - getScore(aLower);
@@ -3750,13 +3762,56 @@ export const localEngine = {
       await workbook.xlsx.load(buf as any);
       const sheet = workbook.worksheets[0];
       if (sheet) {
-        const headerRow = sheet.getRow(1);
-        const headers: string[] = [];
-        headerRow.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
-          headers[colNumber - 1] = String(cell.value ?? '').trim() || `column_${colNumber}`;
-        });
+        // HR and finance extracts often carry report metadata (title, run
+        // date, filters) above the real header. Taking the column list from
+        // row 1 then kept only as many columns as the title row had -- a
+        // 13-column roster under a one-cell title imported as 1 column.
+        // Read every column the sheet uses. When row 1 fills at most half the
+        // table's width (a title such as "TU Position Report"), take as the
+        // header the first of the first 30 rows that spans the table (80% of
+        // the widest row, 2+ cells) and is mostly text, not numbers; rows above
+        // it are metadata and skipped. A normal sheet keeps row 1.
+        const cellText = (v: any): string => {
+          if (v && typeof v === 'object' && 'result' in v) v = v.result;
+          if (v && typeof v === 'object' && 'text' in v) v = (v as any).text;
+          if (v && typeof v === 'object' && 'richText' in v) v = (v as any).richText.map((t: any) => t.text).join('');
+          return v === null || v === undefined ? '' : String(v).trim();
+        };
+        const width = Math.max(sheet.actualColumnCount || 0, sheet.columnCount || 0, 1);
+        const scanTo = Math.min(sheet.rowCount, 30);
+        const filled: number[] = [];
+        const textCells: number[] = [];
+        for (let r = 1; r <= scanTo; r++) {
+          const row = sheet.getRow(r);
+          let n = 0;
+          let t = 0;
+          for (let c = 1; c <= width; c++) {
+            const raw = row.getCell(c).value;
+            const txt = cellText(raw);
+            if (txt === '') continue;
+            n++;
+            if (typeof raw === 'string' && !/^-?[\d.,]+%?$/.test(txt)) t++;
+          }
+          filled[r] = n;
+          textCells[r] = t;
+        }
+        const widest = Math.max(0, ...filled.filter((n) => n !== undefined));
+        let headerRowNo = 1;
+        if (widest >= 2 && (filled[1] ?? 0) <= Math.floor(widest / 2)) {
+          for (let r = 2; r <= scanTo; r++) {
+            const n = filled[r] ?? 0;
+            if (n >= Math.max(2, Math.ceil(widest * 0.8)) && (textCells[r] ?? 0) >= Math.ceil(n * 0.6)) {
+              headerRowNo = r;
+              break;
+            }
+          }
+        }
+        const headerRow = sheet.getRow(headerRowNo);
+        const rawHeaders: string[] = [];
+        for (let c = 1; c <= width; c++) rawHeaders.push(cellText(headerRow.getCell(c).value));
+        const headers: string[] = uniqueHeaders(rawHeaders);
         const lastRow = sheet.rowCount;
-        for (let r = 2; r <= lastRow; r++) {
+        for (let r = headerRowNo + 1; r <= lastRow; r++) {
           const excelRow = sheet.getRow(r);
           if (excelRow.cellCount === 0) continue;
           const obj: Record<string, any> = {};
@@ -3780,6 +3835,15 @@ export const localEngine = {
           });
           if (anyValue) rows.push(obj);
         }
+        // A column with no header and no values (formatting left on a blank
+        // column) is not data.
+        const emptyUnnamed = headers.filter(
+          (h, i) => rawHeaders[i] === '' && rows.every((row) => row[h] === null || row[h] === undefined || row[h] === '')
+        );
+        if (emptyUnnamed.length > 0) {
+          for (const row of rows) for (const h of emptyUnnamed) delete row[h];
+        }
+        parsedHeaders = headers.filter((h) => !emptyUnnamed.includes(h));
       }
     } else if (ext === 'xls') {
       // Legacy binary .xls (BIFF8) is not supported by exceljs; surface a

@@ -126,8 +126,41 @@ const RATIO_PATTERNS: RatioPattern[] = [
   { num: /cost|expense|spend/i, den: /revenue|sales|amount|income/i, title: (n) => `${humanize(n)} to Revenue`, direction: 'down' },
 ];
 
+const words = (c: string) => new Set(String(c).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+
 /** A meaningful rate between two numeric columns, if their names suggest one. */
 export function suggestRatioKpi(measures: string[]): Partial<KpiInsightSpec> & { title: string } | null {
+  // Actual against plan (timesheets vs expected hours, sales vs target):
+  // utilisation / attainment. Pair columns at the same grain -- "Weekly Actual
+  // Hours" with "Weekly Expected Hours", not with "Expected Per Day". Both a
+  // shortfall and an overrun can be bad news, so the change is not coloured.
+  const actuals = measures.filter((m) => /\b(actual|logged|booked|spent|worked)\b/i.test(m) && !/%|percent|pct|ratio/i.test(m));
+  const plans = measures.filter((m) => /\b(expected|planned|target|budget|forecast|capacity)\b/i.test(m) && !/%|percent|pct|ratio/i.test(m));
+  for (const num of actuals) {
+    let best: { col: string; shared: number } | null = null;
+    const nw = words(num);
+    for (const den of plans) {
+      if (den === num) continue;
+      let shared = 0;
+      words(den).forEach((w) => { if (nw.has(w)) shared++; });
+      if (!best || shared > best.shared) best = { col: den, shared };
+    }
+    if (best) {
+      const isHours = /\bhours?\b/i.test(num);
+      return {
+        title: isHours ? 'Utilization (Actual ÷ Expected)' : `${humanize(num)} vs ${humanize(best.col)}`,
+        kind: 'ratio',
+        column: num,
+        aggFunc: 'sum',
+        numeratorCol: num,
+        numeratorAgg: 'sum',
+        denominatorCol: best.col,
+        denominatorAgg: 'sum',
+        format: 'percent',
+        goodDirection: 'neutral',
+      };
+    }
+  }
   for (const p of RATIO_PATTERNS) {
     const num = measures.find((m) => p.num.test(m));
     if (!num) continue;

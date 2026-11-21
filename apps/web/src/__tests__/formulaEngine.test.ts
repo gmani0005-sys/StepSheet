@@ -173,12 +173,13 @@ describe('Step engine semantics (SPEC.md)', () => {
     expect(r.rows[0].v).toBeNull();
   });
 
-  it('remove_duplicates is case-insensitive but does not trim', async () => {
+  it('remove_duplicates ignores case and surrounding spaces, like Group By and Join', async () => {
     const r = await run(
       [{ v: 'Apple' }, { v: 'apple' }, { v: 'apple ' }],
       [{ type: 'remove_duplicates', params: { columns: ['v'], keep: 'first' } }]
     );
-    expect(r.rows.length).toBe(2); // "Apple"/"apple" collapse, "apple " (trailing space) stays distinct
+    expect(r.rows.length).toBe(1); // an Excel cell "apple " is the same value as "Apple"
+    expect(r.rows[0].v).toBe('Apple'); // first-seen spelling kept
   });
 
   it('window rank matches Excel RANK.EQ (ties share a rank, the next skips) and never reorders rows', async () => {

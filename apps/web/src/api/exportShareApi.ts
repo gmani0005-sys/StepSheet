@@ -1,3 +1,4 @@
+import { buildXlsx } from '../engine/xlsxWriter';
 import { toCsv } from '../engine/csv';
 import { storage } from '../utils/storage';
 import { StepDefinition } from '../types/steps';
@@ -859,6 +860,12 @@ export function createDashboardPdfBlob(data: DashboardExportData): Blob {
   ]);
 
   return createMultiPagePdfBlob(pages);
+}
+
+/** A real .xlsx file (Office Open XML), from the same writer as the main Excel export. */
+async function xlsxBlob(columns: string[], rows: Record<string, any>[]): Promise<Blob> {
+  const bytes = await buildXlsx(columns, rows);
+  return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
 export function createDashboardExcelXml(data: DashboardExportData): Blob {
@@ -2317,96 +2324,46 @@ async function createLocalExportJob(payload: ExportJobCreatePayload): Promise<Ex
         blob = createDashboardHtmlBlob(dData);
         filename = `${safeTitle}_dashboard.html`;
         fileType = 'html';
-      } else if (format === 'xlsx_values') {
-        blob = createDashboardExcelXml(dData);
-        filename = `${safeTitle}_packaged_workbook.xml`;
-        fileType = 'xml';
+      } else if (format === 'xlsx_values' || format === 'xlsx') {
+        blob = await xlsxBlob(dData.columns, dData.rows);
+        filename = `${safeTitle}_data.xlsx`;
+        fileType = 'xlsx';
       } else if (format === 'csv') {
         const delim = payload.options?.csv_delimiter || ',';
-        const csvLines = [
-          dData.columns.join(delim),
-          ...dData.rows.map((r) =>
-            dData.columns
-              .map((c) => {
-                const val = r[c];
-                if (val === null || val === undefined) return '';
-                const s = String(val);
-                return s.includes(',') || s.includes('"') || s.includes('\n')
-                  ? `"${s.replace(/"/g, '""')}"`
-                  : s;
-              })
-              .join(delim)
-          ),
-        ];
-        blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        blob = new Blob(['\uFEFF' + toCsv(dData.columns, dData.rows, delim)], { type: 'text/csv;charset=utf-8;' });
         filename = `${safeTitle}_data.csv`;
         fileType = 'csv';
       } else {
-        blob = createDashboardExcelXml(dData);
-        filename = `${safeTitle}_packaged_workbook.xml`;
-        fileType = 'xml';
+        blob = await xlsxBlob(dData.columns, dData.rows);
+        filename = `${safeTitle}_data.xlsx`;
+        fileType = 'xlsx';
       }
     }
   } else {
 
-    // Standard data export fallback
+    // Standard data export: the full pipeline result. No silent row cap and no
+    // falling back to whatever rows happen to be on screen (SPEC.md).
     const rowLimit =
-      payload.row_scope === 'custom' && payload.row_limit ? payload.row_limit : 50000;
-    let preview: any = { rows: [], columns: [], steps: [] };
-    try {
-      preview = await localEngine.previewPipeline(payload.dataset_id, payload.steps || [], {
-        offset: 0,
-        limit: rowLimit,
-      });
-    } catch {
-      preview = { rows: [], columns: [] };
-    }
-
-    let rawRows: Record<string, any>[] = preview.rows || [];
+      payload.row_scope === 'custom' && payload.row_limit
+        ? payload.row_limit
+        : payload.row_scope === 'preview'
+        ? 200
+        : Number.MAX_SAFE_INTEGER;
+    const preview: any = await localEngine.previewPipeline(payload.dataset_id, payload.steps || [], {
+      offset: 0,
+      limit: rowLimit,
+    });
+    const rawRows: Record<string, any>[] = preview.rows || [];
     let rawCols: string[] = (preview.columns || []).map((c: any) => c.name || c);
-
-    if (rawRows.length === 0) {
-      try {
-        const store = useWorkbenchStore.getState();
-        if (store.allRows && store.allRows.length > 0) rawRows = store.allRows;
-        else if (store.rows && store.rows.length > 0) rawRows = store.rows;
-        if (rawCols.length === 0 && store.columns && store.columns.length > 0) {
-          rawCols = store.columns.map((c) => c.name);
-        }
-      } catch {}
-    }
-
-    if (rawCols.length === 0 && rawRows.length > 0) {
-      rawCols = Object.keys(rawRows[0]);
-    }
+    if (rawCols.length === 0 && rawRows.length > 0) rawCols = Object.keys(rawRows[0]);
 
     const cols =
       payload.excluded_columns && payload.excluded_columns.length > 0
         ? rawCols.filter((c) => !payload.excluded_columns?.includes(c))
         : rawCols;
-
-    let rows = rawRows;
-    if (payload.row_scope === 'preview') rows = rows.slice(0, 200);
-    else if (payload.row_scope === 'custom' && payload.row_limit) {
-      rows = rows.slice(0, payload.row_limit);
-    }
-
+    const rows = rawRows;
     const delim = payload.options?.csv_delimiter || ',';
-    const csvContent = [
-      cols.join(delim),
-      ...rows.map((r) =>
-        cols
-          .map((c) => {
-            const val = r[c];
-            if (val === null || val === undefined) return '';
-            const s = String(val);
-            return s.includes(',') || s.includes('"') || s.includes('\n')
-              ? `"${s.replace(/"/g, '""')}"`
-              : s;
-          })
-          .join(delim)
-      ),
-    ].join('\n');
+    const csvContent = '\uFEFF' + toCsv(cols, rows, delim);
 
     if (format === 'csv') {
       blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -2451,9 +2408,10 @@ async function createLocalExportJob(payload: ExportJobCreatePayload): Promise<Ex
         rows,
         columns: cols,
       };
-      blob = createDashboardExcelXml(mockDData);
-      filename = `${safeTitle}_packaged_workbook.xml`;
-      fileType = 'xml';
+      void mockDData;
+      blob = await xlsxBlob(cols, rows);
+      filename = `${safeTitle}_export.xlsx`;
+      fileType = 'xlsx';
     }
   }
 

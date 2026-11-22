@@ -8,14 +8,17 @@ import { parseSharedNumber } from './values';
  * apostrophe, which spreadsheets display as plain text. Real numbers
  * (-0.5, "-1,200") are left alone.
  */
-export function csvCell(val: unknown): string {
+export function csvCell(val: unknown, delimiter = ','): string {
   if (val === null || val === undefined) return '';
   let s = String(val);
   if (typeof val === 'string' && /^[=+\-@\t\r]/.test(s) && parseSharedNumber(s) === null) s = `'${s}`;
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  return /["\r\n]/.test(s) || s.includes(delimiter) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /** A whole CSV document: header row + one line per row (values by column name). */
-export function toCsv(columns: string[], rows: Record<string, unknown>[]): string {
-  return [columns.map(csvCell).join(','), ...rows.map((r) => columns.map((c) => csvCell(r[c])).join(','))].join('\n');
+export function toCsv(columns: string[], rows: Record<string, unknown>[], delimiter = ','): string {
+  return [
+    columns.map((c) => csvCell(c, delimiter)).join(delimiter),
+    ...rows.map((r) => columns.map((c) => csvCell(r[c], delimiter)).join(delimiter)),
+  ].join('\n');
 }

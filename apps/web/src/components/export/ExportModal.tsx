@@ -15,7 +15,7 @@ import {
   Settings2,
   Table,
 } from 'lucide-react';
-import { api } from '../../api/client';
+import { api, isStandaloneMode } from '../../api/client';
 import { Dataset } from '../../types';
 import { StepDefinition } from '../../types/steps';
 
@@ -49,6 +49,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   // File export settings
   const [includeFormulas, setIncludeFormulas] = useState(true);
   const [includeDocs, setIncludeDocs] = useState(true);
+  // The browser engine writes values only; say so instead of ignoring the options.
+  const valuesOnlyExcel = isStandaloneMode();
   const [isExporting, setIsExporting] = useState<string | null>(null);
 
   // Run full state
@@ -179,7 +181,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Download spreadsheet files with live formulas, standalone code scripts, or run across full dataset
+                {valuesOnlyExcel
+                  ? 'Download spreadsheet files, standalone code scripts, or run across the full dataset'
+                  : 'Download spreadsheet files with live formulas, standalone code scripts, or run across full dataset'}
               </p>
             </div>
           </div>
@@ -252,11 +256,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       Exports actual Excel formulas (<code className="text-emerald-300 font-mono text-[11px]">=B2 - C2</code>, <code className="text-emerald-300 font-mono text-[11px]">=IF(...)</code>, <code className="text-emerald-300 font-mono text-[11px]">=ROUND(...)</code>) into transformed cells, plus an automated Documentation audit trail worksheet.
                     </p>
 
-                    <div className="pt-2 flex items-center gap-4 text-xs text-slate-400">
+                    {valuesOnlyExcel && (
+                      <p data-testid="excel-values-only-note" className="text-[11px] text-amber-300 leading-relaxed max-w-xl">
+                        In the browser app the workbook holds values only. Live formulas and the Documentation sheet are written when StepSheet runs with its server.
+                      </p>
+                    )}
+                    <div className={`pt-2 flex items-center gap-4 text-xs text-slate-400 ${valuesOnlyExcel ? 'opacity-50 pointer-events-none' : ''}`}>
                       <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-200">
                         <input
                           type="checkbox"
-                          checked={includeFormulas}
+                          disabled={valuesOnlyExcel}
+                          checked={includeFormulas && !valuesOnlyExcel}
                           onChange={(e) => setIncludeFormulas(e.target.checked)}
                           className="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
                         />
@@ -265,7 +275,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-200">
                         <input
                           type="checkbox"
-                          checked={includeDocs}
+                          disabled={valuesOnlyExcel}
+                          checked={includeDocs && !valuesOnlyExcel}
                           onChange={(e) => setIncludeDocs(e.target.checked)}
                           className="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
                         />
@@ -413,6 +424,25 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   </button>
                 )}
               </div>
+
+              {/* Steps the generated code cannot reproduce stop it with a message instead of computing something else. */}
+              {codeBundle && Array.isArray(codeBundle.unsupported) && (() => {
+                const lang = codeLang === 'm' ? 'power_query_m' : codeLang === 'sql' ? 'sql' : codeLang === 'polars' ? 'polars' : null;
+                const items = lang ? codeBundle.unsupported.filter((u: any) => u.language === lang) : [];
+                if (!items.length) return null;
+                return (
+                  <div data-testid="code-export-unsupported" className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    <div className="font-semibold mb-1">
+                      {items.length === 1 ? '1 step' : `${items.length} steps`} can't be exported to this language. The code stops at that step with a message rather than give a different result.
+                    </div>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      {items.map((u: any) => (
+                        <li key={`${u.index}-${u.language}`}>{u.reason}</li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
 
               {/* Code viewer */}
               {isLoadingCode ? (

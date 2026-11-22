@@ -27,7 +27,7 @@ import {
 import { Dataset } from '../../types';
 import { StepDefinition } from '../../types/steps';
 import { exportShareApi, ExportJobStatus, DashboardExportData } from '../../api/exportShareApi';
-import { api } from '../../api/client';
+import { api, isStandaloneMode } from '../../api/client';
 
 export interface ExportShareModalProps {
   isOpen: boolean;
@@ -225,10 +225,13 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
     }
   }, [isOpen, activeTab, projectId]);
 
+  // Browser-only app: links would live in this browser and open for no one else.
+  const shareNeedsServer = isStandaloneMode();
+
   const loadShareLinks = async () => {
     try {
       const shares = await api.listShares(projectId);
-      setSharesList(shares || []);
+      setSharesList((shares || []).filter((x: any) => x.is_active !== false));
     } catch (e) {
       console.warn('Failed to load share links:', e);
     }
@@ -829,7 +832,12 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
                 <p className="text-xs text-gray-600 mb-4">
                   Teammates can view transformed data, step lineage, and visual dashboards without an account.
                 </p>
-
+                {shareNeedsServer && (
+                  <p data-testid="share-needs-server" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                    Share links need the StepSheet server. This browser-only app keeps your work on this computer, so a link would not open for anyone else. To share, download the workbook (Excel or CSV) or export the pipeline from Export Studio.
+                  </p>
+                )}
+                
                 <div className="grid grid-cols-2 gap-4 mb-3">
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">
@@ -907,7 +915,7 @@ export const ExportShareModal: React.FC<ExportShareModalProps> = ({
                 <button
                   type="button"
                   onClick={handleCreateShareLink}
-                  disabled={isGeneratingShare}
+                  disabled={isGeneratingShare || shareNeedsServer}
                   className="flex items-center justify-center gap-2 w-full py-2 bg-[#217346] hover:bg-[#185C37] text-white text-xs font-bold rounded shadow-sm transition-colors disabled:opacity-50"
                 >
                   {isGeneratingShare ? (

@@ -50,7 +50,11 @@ function parseNumberCore(core: string): number | null {
 
 /** Strip sign, currency and percent around a number; null if no number core. */
 function splitNumberParts(raw: string): { core: string; negative: boolean; percent: boolean } | null {
-  let s = raw.trim();
+  // Exports from Word/PDF/Excel use the Unicode minus (U+2212) and en dash for
+  // negatives, and a space, no-break space or narrow no-break space as the
+  // thousands separator ("1 234,50" in French): read them as "-" and nothing.
+  let s = raw.replace(/[\u2212\u2013]/g, '-').trim();
+  if (/^[-+(]?[^\d]*\d{1,3}(?:[ \u00A0\u202F]\d{3})+(?:[.,]\d+)?[^\d]*$/.test(s)) s = s.replace(/(\d)[ \u00A0\u202F](?=\d{3}\b)/g, '$1');
   if (s === '') return null;
   let negative = false;
   if (/^\(.*\)$/.test(s)) {

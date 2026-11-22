@@ -629,7 +629,9 @@ function parseDelimitedText(text: string, delimiter?: string): Record<string, an
 function uniqueHeaders(raw: string[]): string[] {
   const seen = new Set<string>();
   return raw.map((h, i) => {
-    let base = h.trim() || `column_${i + 1}`;
+    // Runs of spaces, tabs or no-break spaces inside a header ("Txn  Date") are
+    // export noise: a pipeline that names "Txn Date" must find the column.
+    let base = h.replace(/[\s\u00A0\u202F]+/g, ' ').trim() || `column_${i + 1}`;
     if (base === '__proto__') base = '_proto_';
     let name = base;
     let n = 2;
@@ -719,6 +721,26 @@ async function readTextWithEncodingDetection(file: File): Promise<string> {
       return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     }
   }
+}
+
+/**
+ * Forms only an explicit "change type to date" should read (never import
+ * inference, where they are usually IDs): compact 20260305 and an Excel date
+ * serial such as 46086 that lost its formatting in a CSV export (1954-2119).
+ */
+function explicitDateFallback(val: any): Date | null {
+  const s = String(val ?? '').trim();
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+  if (compact) {
+    const y = +compact[1], m = +compact[2], d = +compact[3];
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return y >= 1900 && y <= 2200 && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? dt : null;
+  }
+  if (/^\d{5}(?:\.\d+)?$/.test(s)) {
+    const serial = Math.floor(Number(s));
+    if (serial >= 20000 && serial <= 80000) return new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+  }
+  return null;
 }
 
 function normalizeUniqueValueKey(val: any): string {
@@ -1624,7 +1646,7 @@ const STEP_REQUIREMENTS: Record<string, (p: any) => string> = {
   text_transform: (p) => (has(p.column) || has(p.concat_columns) ? '' : 'which column'),
   math_transform: (p) => (has(p.column) || has(p.column1) || has(p.expression) ? '' : 'which column'),
   date_transform: needColumn,
-  replace_values: (p) => (!has(p.column) && !has(p.columns) ? 'which column' : [p.find_value, p.old_value, p.search_value].some((v) => v !== undefined) ? '' : 'the value to find'),
+  replace_values: (p) => (!has(p.column) && !has(p.columns) ? 'which column' : p.match_type === 'is_null' || [p.find_value, p.old_value, p.search_value].some((v) => v !== undefined) ? '' : 'the value to find'),
   standardize_values: needColumn,
   fill_down: needColumn,
   impute_missing: needColumn,
@@ -1723,7 +1745,7 @@ function executePipelineSteps(
   const sqlParts: string[] = ['WITH source_data AS (\n  SELECT * FROM dataset\n)'];
   let prevCte = 'source_data';
 
-  (steps || []).forEach((step, idx) => {
+  const runOne = (step: StepDefinition, idx: number) => {
     if (!step) return;
     const code = generateStepCode(step);
     const summary: StepSummary = {
@@ -1803,7 +1825,7 @@ function executePipelineSteps(
                 else if (['false', 'no', 'n', '0'].includes(s)) nextVal = false;
               }
             } else if (targetType === 'date') {
-              const d = parseSharedDate(val, { asDateStep: true, monthFirst });
+              const d = parseSharedDate(val, { asDateStep: true, monthFirst }) || explicitDateFallback(val);
               nextVal = d ? toISODate(d) : null;
             } else {
               return { ...r, [col]: String(val) };
@@ -2016,6 +2038,8 @@ function executePipelineSteps(
 
       case 'math_transform': {
         const col1 = p.column1 || p.column;
+        let unreadable = 0;
+        const unreadableEx: string[] = [];
         const col2 = p.column2;
         const op = p.operation || 'add';
         const mathOp = p.math_operator || '+';
@@ -2044,7 +2068,12 @@ function executePipelineSteps(
           }
 
           if (op === 'clean_numeric') {
-            const num = parseSharedNumber(raw1);
+            // An explicit clean-up: read "1.2E+03" too, as Change Type does.
+            const num = parseSharedNumber(raw1, { allowScientific: true });
+            if (num === null && !isBlank(raw1) && !isNullToken(raw1)) {
+              unreadable++;
+              if (unreadableEx.length < 3) unreadableEx.push(String(raw1));
+            }
             return { ...r, [targetCol]: num === null ? null : cleanFloat(num) };
           }
 
@@ -2097,6 +2126,9 @@ function executePipelineSteps(
 
           return { ...r, [targetCol]: res === null ? null : cleanFloat(res) };
         });
+        if (unreadable > 0) {
+          warn(`${unreadable.toLocaleString()} value${unreadable === 1 ? '' : 's'} in "${col1}" could not be read as a number and ${unreadable === 1 ? 'was' : 'were'} set to blank (e.g. ${unreadableEx.map((e) => `"${e}"`).join(', ')}).`);
+        }
         break;
       }
 
@@ -3412,6 +3444,18 @@ function executePipelineSteps(
       default:
         break;
     }
+  };
+  // Per-step cost and row count, so a slow or row-dropping step can be
+  // pointed at (the Applied Steps list and performance tests read these).
+  (steps || []).forEach((step, idx) => {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const before = stepSummaries.length;
+    runOne(step, idx);
+    const summary = stepSummaries[before];
+    if (summary) {
+      summary.duration_ms = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0) * 10) / 10;
+      summary.rows_out = rows.length;
+    }
   });
 
   const compiledSql = `${sqlParts.join(',\n')}\nSELECT * FROM ${prevCte};`;
@@ -3831,6 +3875,7 @@ export const localEngine = {
         // it are metadata and skipped. A normal sheet keeps row 1.
         const cellText = (v: any): string => {
           if (v && typeof v === 'object' && 'result' in v) v = v.result;
+          if (v && typeof v === 'object' && 'error' in v) v = (v as any).error;
           if (v && typeof v === 'object' && 'text' in v) v = (v as any).text;
           if (v && typeof v === 'object' && 'richText' in v) v = (v as any).richText.map((t: any) => t.text).join('');
           return v === null || v === undefined ? '' : String(v).trim();
@@ -3878,6 +3923,12 @@ export const localEngine = {
             const cell = excelRow.getCell(idx + 1);
             let v = cell.value;
             if (v && typeof v === 'object' && 'result' in v) v = v.result; // formula cell
+            // Excel error cells (#N/A from a VLOOKUP, #DIV/0!, #REF!) arrive as
+            // { error: '#N/A' } and rich-text cells as { richText: [...] }: keep
+            // their text, never "[object Object]". "#N/A" is then a missing value
+            // to every step; other errors stay visible.
+            if (v && typeof v === 'object' && 'error' in v) v = String((v as any).error ?? '');
+            if (v && typeof v === 'object' && 'richText' in v) v = (v as any).richText.map((t: any) => t.text).join('');
             if (v && typeof v === 'object' && v instanceof Date) {
               obj[h] = toISODate(v);
               anyValue = true;

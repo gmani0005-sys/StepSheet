@@ -54,6 +54,10 @@ export interface StepSummary {
   generated_code: GeneratedCode;
   /** Plain-language notes about values the step could not handle (never silent). */
   warnings?: string[];
+  /** Time this step took in the last run, in milliseconds. */
+  duration_ms?: number;
+  /** Rows after this step. */
+  rows_out?: number;
 }
 
 export interface PipelinePreviewResponse {

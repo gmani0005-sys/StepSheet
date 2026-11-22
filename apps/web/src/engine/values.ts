@@ -209,8 +209,40 @@ export function arrayMax(arr: number[]): number {
 
 const ROUND_EPS = 1e-9;
 
+/**
+ * Decimal-faithful rounding. The decimal point is shifted on the number's
+ * shortest exact string ("325329.095e2", not 325329.09499999997 * 100), and a
+ * value within a few units in the last place of the boundary counts as on it:
+ * 357504.5 * (1 - 0.09) and 858 / (176 / 90) are 325329.095 and 438.75 to a
+ * person and to Excel, so ROUND(..., 2) / ROUND(..., 1) give 325329.10 and
+ * 438.8. The tolerance (2^-44 relative, ~6e-14) is far below the 15 digits
+ * Excel shows, so a genuine 2.4999999999995 still rounds down.
+ */
+const ROUND_REL_TOL = Math.pow(2, -44);
+function excelShiftRound(n: number, digits: number, mode: 'half' | 'up' | 'down'): number | null {
+  if (!Number.isFinite(n)) return n;
+  const d = Math.trunc(digits);
+  if (Math.abs(d) > 15) return null;
+  const ax = Math.abs(n);
+  const s = String(ax);
+  const shifted = /e/i.test(s) ? ax * Math.pow(10, d) : Number(`${s}e${d}`);
+  if (!Number.isFinite(shifted)) return null;
+  const tol = Math.max(1, shifted) * ROUND_REL_TOL;
+  const fl = Math.floor(shifted);
+  const frac = shifted - fl;
+  let whole: number;
+  if (mode === 'half') whole = frac >= 0.5 - tol ? fl + 1 : fl;
+  else if (mode === 'up') whole = frac <= tol ? fl : fl + 1;
+  else whole = 1 - frac <= tol ? fl + 1 : fl;
+  const back = Number(`${whole}e${-d}`);
+  const out = n < 0 ? -back : back;
+  return out === 0 ? 0 : out;
+}
+
 /** Excel ROUND: half away from zero, supports negative digits. */
 export function roundHalfAwayFromZero(n: number, digits: number): number {
+  const exact = excelShiftRound(n, digits, 'half');
+  if (exact !== null) return exact;
   const factor = Math.pow(10, digits);
   const scaled = n * factor;
   const rounded = n >= 0 ? Math.floor(scaled + 0.5 + ROUND_EPS) : Math.ceil(scaled - 0.5 - ROUND_EPS);
@@ -219,6 +251,8 @@ export function roundHalfAwayFromZero(n: number, digits: number): number {
 
 /** Excel ROUNDUP: always away from zero. */
 export function roundUpAwayFromZero(n: number, digits: number): number {
+  const exact = excelShiftRound(n, digits, 'up');
+  if (exact !== null) return exact;
   const factor = Math.pow(10, digits);
   const scaled = n * factor;
   const rounded = n >= 0 ? Math.ceil(scaled - ROUND_EPS) : Math.floor(scaled + ROUND_EPS);
@@ -227,6 +261,8 @@ export function roundUpAwayFromZero(n: number, digits: number): number {
 
 /** Excel ROUNDDOWN: always toward zero. */
 export function roundDownTowardZero(n: number, digits: number): number {
+  const exact = excelShiftRound(n, digits, 'down');
+  if (exact !== null) return exact;
   const factor = Math.pow(10, digits);
   const scaled = n * factor;
   const rounded = n >= 0 ? Math.floor(scaled + ROUND_EPS) : Math.ceil(scaled - ROUND_EPS);

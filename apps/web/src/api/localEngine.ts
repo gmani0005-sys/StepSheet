@@ -774,13 +774,15 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
   if (operator === 'is_null') return rowVal === null || rowVal === undefined || rowVal === '';
   if (operator === 'is_not_null') return rowVal !== null && rowVal !== undefined && rowVal !== '';
   if (operator === 'in') {
+    // Trimmed and case-insensitive like equals: an Excel cell " Active"
+    // is in the list ["Active", "Pending"].
     const allowed: string[] = Array.isArray(targetVal)
-      ? targetVal.map((v) => normalizeUniqueValueKey(v))
+      ? targetVal.map((v) => normalizeUniqueValueKey(v).trim().toLowerCase())
       : String(targetVal ?? '')
           .split(',')
-          .map((s) => s.trim());
-    const rowKey = normalizeUniqueValueKey(rowVal);
-    return allowed.some((k) => k.toLowerCase() === rowKey.toLowerCase());
+          .map((s) => s.trim().toLowerCase());
+    const rowKey = normalizeUniqueValueKey(rowVal).trim().toLowerCase();
+    return allowed.some((k) => k === rowKey);
   }
 
   const aStr = rowVal === null || rowVal === undefined ? '' : String(rowVal);
@@ -888,9 +890,9 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
     }
     case 'not_in': {
       const list = Array.isArray(targetVal)
-        ? targetVal.map((x) => String(x).toLowerCase())
+        ? targetVal.map((x) => String(x).trim().toLowerCase())
         : String(targetVal).split(',').map((x) => x.trim().toLowerCase());
-      return !list.includes(aStr.toLowerCase());
+      return !list.includes(aTxt);
     }
     default:
       return true;
@@ -1886,18 +1888,18 @@ function executePipelineSteps(
         if (keep === 'duplicates_only') {
           const counts = new Map<string, number>();
           rows.forEach((r) => {
-            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
+            const key = cols.map((c) => groupKeyOf(r[c])).join('||');
             counts.set(key, (counts.get(key) || 0) + 1);
           });
           rows = rows.filter((r) => {
-            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
+            const key = cols.map((c) => groupKeyOf(r[c])).join('||');
             return (counts.get(key) || 0) > 1;
           });
         } else if (keep === 'last') {
           const reversed: Record<string, any>[] = [];
           for (let i = rows.length - 1; i >= 0; i--) {
             const r = rows[i];
-            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
+            const key = cols.map((c) => groupKeyOf(r[c])).join('||');
             if (!seen.has(key)) {
               seen.add(key);
               reversed.push(r);
@@ -1906,7 +1908,7 @@ function executePipelineSteps(
           rows = reversed.reverse();
         } else {
           rows = rows.filter((r) => {
-            const key = cols.map((c) => String(r[c] ?? '').toLowerCase()).join('||');
+            const key = cols.map((c) => groupKeyOf(r[c])).join('||');
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -2273,7 +2275,9 @@ function executePipelineSteps(
 
         const groups = new Map<string, Record<string, any>[]>();
         rows.forEach((r) => {
-          const key = groupCols.length > 0 ? groupCols.map((c) => String(r[c] ?? '').toLowerCase()).join('||') : '__ALL__';
+          // Trimmed and case-insensitive, like Join, window partitions and pivots:
+          // " CU1070" and "cu1070" are one group, under the first-seen spelling.
+          const key = groupCols.length > 0 ? groupCols.map((c) => groupKeyOf(r[c])).join('||') : '__ALL__';
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key)!.push(r);
         });
@@ -2290,7 +2294,7 @@ function executePipelineSteps(
             const rawVals = gRows.map((x) => x[agg.column]).filter((v) => !isBlank(v));
             const nums = rawVals.map((x) => parseSharedNumber(x)).filter((n): n is number => n !== null);
             if (fn === 'count') base[alias] = rawVals.length;
-            else if (fn === 'distinct_count') base[alias] = new Set(rawVals.map((v) => String(v).toLowerCase())).size;
+            else if (fn === 'distinct_count') base[alias] = new Set(rawVals.map((v) => groupKeyOf(v))).size;
             else if (fn === 'sum') base[alias] = nums.length ? cleanFloat(preciseSum(nums)) : null;
             else if (fn === 'avg' || fn === 'mean')
               base[alias] = nums.length ? cleanFloat(preciseSum(nums) / nums.length) : null;
@@ -7253,6 +7257,8 @@ export const localEngine = {
       return n.toLocaleString('en-US', { maximumFractionDigits: 1 });
     };
     const humanizeField = (name: string): string => humanize(name);
+    // "Total Net" summed is "Total Net", not "Total Total Net".
+    const totalTitle = (name: string): string => (/^total\b/i.test(humanizeField(name)) ? humanizeField(name) : `Total ${humanizeField(name)}`);
 
     // ---- KPI subtitles from the same numbers the cards show (dashboardData) ----
     let primarySubtitle = rows.length > 0 ? `Across ${rows.length.toLocaleString('en-US')} records` : 'Cumulative total';
@@ -7291,11 +7297,11 @@ export const localEngine = {
 
     const kpis: any[] = [];
     if (primaryMeasure) {
-      kpis.push({ id: `kpi_total_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: `Total ${humanizeField(primaryMeasure)}`, column: primaryMeasure, aggFunc: 'sum', subtitle: primarySubtitle, accentColor: '#10B981' });
+      kpis.push({ id: `kpi_total_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: totalTitle(primaryMeasure), column: primaryMeasure, aggFunc: 'sum', subtitle: primarySubtitle, accentColor: '#10B981' });
       kpis.push({ id: `kpi_avg_${primaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: `Average ${humanizeField(primaryMeasure)}`, column: primaryMeasure, aggFunc: 'avg', subtitle: avgSubtitle, accentColor: '#0D9488' });
     }
     if (secondaryMeasure) {
-      kpis.push({ id: `kpi_total_${secondaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: `Total ${humanizeField(secondaryMeasure)}`, column: secondaryMeasure, aggFunc: 'sum', subtitle: `Sum of ${humanizeField(secondaryMeasure)} across filtered rows`, accentColor: '#FB923C' });
+      kpis.push({ id: `kpi_total_${secondaryMeasure.replace(/\s+/g, '_').toLowerCase()}`, title: totalTitle(secondaryMeasure), column: secondaryMeasure, aggFunc: 'sum', subtitle: `Sum of ${humanizeField(secondaryMeasure)} across filtered rows`, accentColor: '#FB923C' });
     } else {
       kpis.push({ id: 'kpi_total_records', title: 'Total Records', column: primaryDim || cols[0]?.name || 'id', aggFunc: 'count', subtitle: 'Row count across active filters', accentColor: '#FB923C' });
     }

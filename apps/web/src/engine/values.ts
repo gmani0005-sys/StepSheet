@@ -35,7 +35,32 @@ const CURRENCY_SUFFIX = /\s*(?:[$€£¥₹]|rs\.?|inr|usd|eur|gbp|aed|sgd|\/-)$
  *   1.234.567               European thousands (2+ dot groups only)
  * Returns null for anything else.
  */
-function parseNumberCore(core: string): number | null {
+/**
+ * Which character is the decimal separator. 'auto' (default) reads every
+ * convention above; '.' makes "1.234" one point two three four and rejects
+ * "99,5"; ',' makes "1.234" one thousand two hundred thirty-four and
+ * "1,5" one and a half. A column-level choice removes the one real
+ * ambiguity: a European integer with one thousands dot.
+ */
+export type DecimalSeparator = 'auto' | 'dot' | 'comma';
+
+function parseNumberCoreFor(core: string, decimal: DecimalSeparator): number | null {
+  let normalised: string | null = null;
+  if (decimal === 'comma') {
+    if (/^\d+(,\d+)?$|^,\d+$/.test(core)) normalised = core.replace(',', '.');
+    else if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(core)) normalised = core.replace(/\./g, '').replace(',', '.');
+  } else {
+    if (/^\d+(\.\d+)?$|^\.\d+$/.test(core)) normalised = core;
+    else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(core)) normalised = core.replace(/,/g, '');
+    else if (/^\d{1,2}(,\d{2})+,\d{3}(\.\d+)?$/.test(core)) normalised = core.replace(/,/g, ''); // Indian
+  }
+  if (normalised === null) return null;
+  const n = Number(normalised);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseNumberCore(core: string, decimal: DecimalSeparator = 'auto'): number | null {
+  if (decimal !== 'auto') return parseNumberCoreFor(core, decimal);
   let normalised: string | null = null;
   if (/^\d+(\.\d+)?$|^\.\d+$/.test(core)) normalised = core;
   else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(core)) normalised = core.replace(/,/g, '');
@@ -93,7 +118,10 @@ function splitNumberParts(raw: string): { core: string; negative: boolean; perce
  * text column is more often a code than a number.
  * Anything else (blanks, free text) -> null. Never returns NaN.
  */
-export function parseSharedNumber(raw: any, opts: { allowScientific?: boolean } = {}): number | null {
+export function parseSharedNumber(
+  raw: any,
+  opts: { allowScientific?: boolean; decimal?: DecimalSeparator } = {}
+): number | null {
   if (raw === null || raw === undefined || raw === '') return null;
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
   if (typeof raw === 'boolean') return null;
@@ -102,12 +130,14 @@ export function parseSharedNumber(raw: any, opts: { allowScientific?: boolean } 
   const parts = splitNumberParts(str);
   if (!parts) return null;
   let n: number | null;
-  if (/^(?:\d+\.?\d*|\.\d+)[eE][-+]?\d+$/.test(parts.core)) {
+  const decimal = opts.decimal || 'auto';
+  const sci = decimal === 'comma' ? /^(?:\d+,?\d*|,\d+)[eE][-+]?\d+$/ : /^(?:\d+\.?\d*|\.\d+)[eE][-+]?\d+$/;
+  if (sci.test(parts.core)) {
     if (!opts.allowScientific) return null; // scientific stays text unless asked (SPEC.md import rule)
-    n = Number(parts.core);
+    n = Number(decimal === 'comma' ? parts.core.replace(',', '.') : parts.core);
     if (!Number.isFinite(n)) return null;
   } else {
-    n = parseNumberCore(parts.core);
+    n = parseNumberCore(parts.core, decimal);
   }
   if (n === null) return null;
   let result = parts.percent ? n / 100 : n;

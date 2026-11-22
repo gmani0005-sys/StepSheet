@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { NumberFormatSelect } from '../steps/NumberFormatSelect';
 import {
   X,
   Sparkles,
@@ -54,6 +55,7 @@ export const DataCleaningModal: React.FC<DataCleaningModalProps> = ({
   // --- Numeric clean state ---
   const [numCol, setNumCol] = useState(columns[0]?.name || '');
   const [numAction, setNumAction] = useState<'clean_numeric' | 'round' | 'outliers'>('clean_numeric');
+  const [numberFormat, setNumberFormat] = useState<string>('auto');
   const [roundDecimals, setRoundDecimals] = useState(2);
   const [outlierAction, setOutlierAction] = useState<'flag' | 'filter'>('flag');
 
@@ -191,6 +193,7 @@ export const DataCleaningModal: React.FC<DataCleaningModalProps> = ({
             column1: numCol,
             operation: 'clean_numeric',
             output_column: numCol,
+            number_format: numberFormat,
           },
         };
       } else if (numAction === 'round') {
@@ -704,6 +707,10 @@ export const DataCleaningModal: React.FC<DataCleaningModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {numAction === 'clean_numeric' && (
+                <NumberFormatSelect tone="light" value={numberFormat} onChange={setNumberFormat} testId="clean-numeric-number-format" />
+              )}
 
               {numAction === 'round' && (
                 <div>

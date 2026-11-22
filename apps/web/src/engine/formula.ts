@@ -1454,6 +1454,46 @@ export function evaluateFormula(expression: string, row: Record<string, any>): F
 const PARSE_FAILED = Symbol('parse-failed');
 const AST_CACHE = new Map<string, any>();
 
+/**
+ * Parse a formula once for a known column set and return a per-row
+ * evaluator. Gives the same result as evaluateFormula(expression, row) for
+ * any row whose own keys are exactly `columnNames`; callers check the row
+ * shape and fall back to evaluateFormula otherwise. Skips building the
+ * per-row cache key and column list, which cost about 20% of formula time.
+ */
+export function compileFormula(expression: string, columnNames: string[]): (row: Record<string, any>) => FxValue {
+  let expr = (expression ?? '').trim();
+  if (!expr) return () => null;
+  if (expr.startsWith('=')) expr = expr.slice(1);
+  let ast: any;
+  try {
+    ast = new Parser(tokenize(expr, columnNames)).parse();
+  } catch {
+    return () => VALUE_ERR();
+  }
+  const lower = new Map<string, string>();
+  for (const k of columnNames) {
+    const lk = k.toLowerCase();
+    if (!lower.has(lk)) lower.set(lk, k);
+  }
+  let row: Record<string, any> = {};
+  const ctx: FormulaContext = {
+    getColumn: (name: string) => {
+      if (Object.prototype.hasOwnProperty.call(row, name)) return row[name];
+      const key = lower.get(name.toLowerCase());
+      return key !== undefined ? row[key] : undefined;
+    },
+  };
+  return (r: Record<string, any>) => {
+    row = r;
+    try {
+      return evalNode(ast, ctx);
+    } catch {
+      return VALUE_ERR();
+    }
+  };
+}
+
 /** Convert a formula result into the plain JS value StepSheet stores in a cell. */
 export function formulaResultToCell(v: FxValue): any {
   if (isFxError(v)) return v.code;

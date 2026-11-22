@@ -10,7 +10,7 @@ import {
   SortCondition,
 } from '../types';
 import { GeneratedCode, StepDefinition, StepSummary } from '../types/steps';
-import { evaluateFormula, formulaResultToCell, isFxError } from '../engine/formula';
+import { compileFormula, evaluateFormula, formulaResultToCell, isFxError } from '../engine/formula';
 import { buildXlsx } from '../engine/xlsxWriter';
 import { toCsv } from '../engine/csv';
 import {
@@ -38,6 +38,7 @@ import {
   roundDownTowardZero,
   preciseSum,
   RunningSum,
+  type DecimalSeparator,
 } from '../engine/values';
 import { planChatQuery } from '../engine/chatPlanner';
 import { dashDateParts, dashItems, dashMetric, makeLabeler, monthlyTotals } from '../engine/dashboardData';
@@ -921,8 +922,68 @@ function evaluateRowCondition(rowVal: any, operator: string, targetVal: any): bo
   }
 }
 
+/** A step's number_format setting: '1,234.56' (dot), '1.234,56' (comma) or auto. */
+function numberDecimal(p: Record<string, any>): DecimalSeparator {
+  const v = String(p.number_format || p.decimal_separator || 'auto').toLowerCase();
+  if (v === 'dot' || v === '.' || v === '1,234.56') return 'dot';
+  if (v === 'comma' || v === ',' || v === '1.234,56') return 'comma';
+  return 'auto';
+}
+
 function evaluateFormulaForRow(expression: string, row: Record<string, any>): any {
   return formulaResultToCell(evaluateFormula(expression, row));
+}
+
+/**
+ * Fast path for steps that add one column to every row. Built from the first
+ * row's keys: `matches(r)` says a row has exactly those own keys, and
+ * `extend(r, col, val)` copies such a row with `col` set -- same key order
+ * and values as `{ ...r, [col]: val }`, about 3.5x faster on wide rows.
+ * Rows of another shape (an appended dataset with different columns) take
+ * the plain spread path and the generic formula evaluator.
+ */
+interface RowShape {
+  keys: string[];
+  matches: (r: Record<string, any>) => boolean;
+  extend: (r: Record<string, any>, col: string, val: any) => Record<string, any>;
+}
+const SPREAD_EXTEND = (r: Record<string, any>, col: string, val: any) => ({ ...r, [col]: val });
+function rowShape(sample: Record<string, any> | undefined, col: string): RowShape {
+  const keys = sample ? Object.keys(sample) : [];
+  const generic: RowShape = { keys, matches: () => false, extend: SPREAD_EXTEND };
+  // Names that also live on Object.prototype would fool an `in` check.
+  if (!sample || keys.length > 2000 || keys.some((k) => k in Object.prototype) || col in Object.prototype) return generic;
+  try {
+    const q = (k: string) => JSON.stringify(k);
+    const matches = new Function(
+      'r',
+      `return Object.keys(r).length === ${keys.length}${keys.map((k) => ` && ${q(k)} in r`).join('')};`
+    ) as RowShape['matches'];
+    const slots = keys.map((k) => (k === col ? `${q(k)}: v` : `${q(k)}: r[${q(k)}]`));
+    if (!keys.includes(col)) slots.push(`${q(col)}: v`);
+    const build = new Function('r', 'v', `return { ${slots.join(', ')} };`) as (r: any, v: any) => Record<string, any>;
+    return { keys, matches, extend: (r, c, v) => (c === col ? build(r, v) : SPREAD_EXTEND(r, c, v)) };
+  } catch {
+    return generic; // new Function unavailable (strict CSP)
+  }
+}
+
+/** Evaluate `expression` into `col` on every row (calculated-column steps). */
+function addFormulaColumn(rows: Record<string, any>[], expression: string, col: string): Record<string, any>[] {
+  const shape = rowShape(rows[0], col);
+  const compiled = compileFormula(expression, shape.keys);
+  const out = new Array(rows.length);
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (shape.matches(r)) {
+      const v = formulaResultToCell(compiled(r));
+      out[i] = shape.extend(r, col, v !== undefined ? v : '');
+    } else {
+      const v = evaluateFormulaForRow(expression, r);
+      out[i] = SPREAD_EXTEND(r, col, v !== undefined ? v : '');
+    }
+  }
+  return out;
 }
 
 function legacyEvaluateFormulaForRow(expression: string, row: Record<string, any>): any {
@@ -1727,6 +1788,52 @@ function warnMissingColumns(type: string, p: any, rows: Record<string, any>[], w
   }
 }
 
+/**
+ * The last full pipeline result, reused while the dataset, every dataset it
+ * can look up or join, and the steps are unchanged. Datasets are replaced,
+ * never edited in place, so object identity is a safe change check. Export
+ * (CSV / Excel / JSON) and Run Pipeline then reuse the result the preview
+ * just computed instead of running every step again.
+ */
+let lastPipelineRun: {
+  key: string;
+  sources: unknown[];
+  result: ReturnType<typeof executePipelineSteps>;
+} | null = null;
+function executePipelineCached(
+  ds: StoredLocalDataset,
+  steps: StepDefinition[],
+  all: StoredLocalDataset[]
+): ReturnType<typeof executePipelineSteps> {
+  let key: string | null = null;
+  try {
+    key = JSON.stringify([ds.meta.id, steps || []]);
+  } catch {
+    key = null; // unserializable step settings: always run
+  }
+  const sources: unknown[] = [ds.rows, ds.meta.schema_metadata];
+  for (const d of all) sources.push(d.meta.id, d.rows, d.meta.schema_metadata);
+  const hit =
+    key !== null &&
+    lastPipelineRun &&
+    lastPipelineRun.key === key &&
+    lastPipelineRun.sources.length === sources.length &&
+    lastPipelineRun.sources.every((x, i) => x === sources[i]);
+  if (hit) {
+    const r = lastPipelineRun!.result;
+    // Fresh summary objects so a caller annotating them can't leak into the cache.
+    return { ...r, stepSummaries: r.stepSummaries.map((st) => ({ ...st, cached: true })) };
+  }
+  const result = executePipelineSteps(ds.rows, steps, all, ds.meta.schema_metadata);
+  lastPipelineRun = key !== null ? { key, sources, result } : null;
+  return result;
+}
+
+/** Drop the cached pipeline result (tests, dataset reset). */
+export function clearPipelineCache() {
+  lastPipelineRun = null;
+}
+
 function executePipelineSteps(
   initialRows: Record<string, any>[],
   steps: StepDefinition[],
@@ -1744,6 +1851,11 @@ function executePipelineSteps(
   const stepSummaries: StepSummary[] = [];
   const sqlParts: string[] = ['WITH source_data AS (\n  SELECT * FROM dataset\n)'];
   let prevCte = 'source_data';
+  // Shared partition/sort layouts for consecutive window steps (see window_calc).
+  const windowLayouts: {
+    rows: Record<string, any>[] | null;
+    byKey: Map<string, { parts: { orig: number[]; evalOrder: number[] }[]; deps: string[] }>;
+  } = { rows: null, byKey: new Map() };
 
   const runOne = (step: StepDefinition, idx: number) => {
     if (!step) return;
@@ -1761,6 +1873,9 @@ function executePipelineSteps(
     };
 
     if (!step.enabled) return;
+    // Any other step may reorder or rewrite rows: window layouts only carry
+    // across back-to-back window steps.
+    if (step.type !== 'window_calc') windowLayouts.byKey.clear();
 
     const cteName = `step_${idx + 1}_${step.type}`;
     sqlParts.push(`${cteName} AS (\n  ${code.sql.replace(/prev_step/g, prevCte)}\n)`);
@@ -1813,10 +1928,10 @@ function executePipelineSteps(
             if (isBlank(val) || isNullToken(val)) return { ...r, [col]: null };
             let nextVal: any = null;
             if (targetType === 'integer') {
-              const parsed = parseSharedNumber(val, { allowScientific: true });
+              const parsed = parseSharedNumber(val, { allowScientific: true, decimal: numberDecimal(p) });
               nextVal = parsed !== null && Number.isInteger(parsed) ? parsed : null;
             } else if (targetType === 'float') {
-              nextVal = parseSharedNumber(val, { allowScientific: true });
+              nextVal = parseSharedNumber(val, { allowScientific: true, decimal: numberDecimal(p) });
             } else if (targetType === 'boolean') {
               if (typeof val === 'boolean') nextVal = val;
               else {
@@ -2047,10 +2162,9 @@ function executePipelineSteps(
         const decimals = p.decimals !== undefined ? Number(p.decimals) : 2;
         const targetCol = p.output_column || p.target_column || col1 || 'calculated';
 
-        rows = rows.map((r) => {
-          if (op === 'formula' && p.expression) {
-            return { ...r, [targetCol]: evaluateFormulaForRow(p.expression, r) };
-          }
+        if (op === 'formula' && p.expression) {
+          rows = addFormulaColumn(rows, p.expression, targetCol);
+        } else rows = rows.map((r) => {
 
           const raw1 = r[col1];
           const v1 = isBlank(raw1) ? null : parseSharedNumber(raw1);
@@ -2069,7 +2183,7 @@ function executePipelineSteps(
 
           if (op === 'clean_numeric') {
             // An explicit clean-up: read "1.2E+03" too, as Change Type does.
-            const num = parseSharedNumber(raw1, { allowScientific: true });
+            const num = parseSharedNumber(raw1, { allowScientific: true, decimal: numberDecimal(p) });
             if (num === null && !isBlank(raw1) && !isNullToken(raw1)) {
               unreadable++;
               if (unreadableEx.length < 3) unreadableEx.push(String(raw1));
@@ -2372,32 +2486,43 @@ function executePipelineSteps(
         // Window steps never change row order (SPEC.md): compute against an
         // "evaluation order" of original indices, then write results back
         // into the untouched `rows` array.
-        const nextRows = rows.map((r) => ({ ...r }));
+        const shape = rowShape(rows[0], outCol);
+        const nextRows = rows.map((r) => (shape.matches(r) ? shape.extend(r, outCol, null) : { ...r }));
 
-        // Partition original-index positions, preserving file order.
-        const partitions = new Map<string, number[]>();
-        rows.forEach((r, idx) => {
-          // Trimmed and case-insensitive, like Group By and Join: "c113" and
-          // "C113" are the same customer everywhere in a pipeline.
-          const key =
-            partitionCols.length > 0
-              ? partitionCols.map((c) => groupKeyOf(r[c])).join('||')
-              : '__ALL__';
-          if (!partitions.has(key)) partitions.set(key, []);
-          partitions.get(key)!.push(idx);
-        });
+        // Partitions and their sorted evaluation order depend only on the
+        // partition and order columns. Consecutive window steps over the same
+        // rows (running total, then lag, then row number) share one layout
+        // instead of re-partitioning and re-sorting each time.
+        if (windowLayouts.rows !== rows) windowLayouts.byKey.clear();
+        const layoutKey = JSON.stringify([partitionCols, orderCol ?? null, orderCol ? orderDir === 'desc' : false]);
+        let layout = windowLayouts.byKey.get(layoutKey)?.parts;
+        if (!layout) {
+          // Partition original-index positions, preserving file order.
+          const partitions = new Map<string, number[]>();
+          rows.forEach((r, idx) => {
+            // Trimmed and case-insensitive, like Group By and Join: "c113" and
+            // "C113" are the same customer everywhere in a pipeline.
+            const key =
+              partitionCols.length > 0
+                ? partitionCols.map((c) => groupKeyOf(r[c])).join('||')
+                : '__ALL__';
+            let list = partitions.get(key);
+            if (!list) partitions.set(key, (list = []));
+            list.push(idx);
+          });
+          const sortIndices = (indices: number[], byCol: string | undefined): number[] => {
+            if (!byCol) return indices;
+            // Same ordering as Sort: dates in any format order by date, so a
+            // running total over an unconverted date column is still in date order.
+            const withKey = indices.map((idx) => ({ idx, k: orderKey(rows[idx][byCol]) }));
+            withKey.sort((a, b) => compareOrderKeys(a.k, b.k, orderDir === 'desc') || a.idx - b.idx);
+            return withKey.map((w) => w.idx);
+          };
+          layout = [...partitions.values()].map((orig) => ({ orig, evalOrder: sortIndices(orig, orderCol) }));
+          windowLayouts.byKey.set(layoutKey, { parts: layout, deps: [...partitionCols, ...(orderCol ? [orderCol] : [])] });
+        }
 
-        const sortIndices = (indices: number[], byCol: string | undefined): number[] => {
-          if (!byCol) return indices;
-          // Same ordering as Sort: dates in any format order by date, so a
-          // running total over an unconverted date column is still in date order.
-          const withKey = indices.map((idx) => ({ idx, k: orderKey(rows[idx][byCol]) }));
-          withKey.sort((a, b) => compareOrderKeys(a.k, b.k, orderDir === 'desc') || a.idx - b.idx);
-          return withKey.map((w) => w.idx);
-        };
-
-        partitions.forEach((originalIndices) => {
-          const evalOrder = sortIndices(originalIndices, orderCol);
+        layout.forEach(({ orig: originalIndices, evalOrder }) => {
 
           if (fn === 'rank') {
             // Excel RANK.EQ by default: ties share a rank and the next rank
@@ -2422,9 +2547,15 @@ function executePipelineSteps(
             return;
           }
 
+          const numCache = new Map<number, number | null>();
           const numAt = (idx: number): number | null => {
-            const v = rows[idx][valCol];
-            return isBlank(v) ? null : parseSharedNumber(v);
+            let n = numCache.get(idx);
+            if (n === undefined) {
+              const v = rows[idx][valCol];
+              n = isBlank(v) ? null : parseSharedNumber(v);
+              numCache.set(idx, n);
+            }
+            return n;
           };
           const groupNums = evalOrder.map((idx) => numAt(idx)).filter((n): n is number => n !== null);
           const groupTotal = preciseSum(groupNums);
@@ -2461,7 +2592,11 @@ function executePipelineSteps(
           });
         });
 
+        // The layout stays valid for the next window step unless this step
+        // overwrote a column it was built from.
+        for (const [k, v] of windowLayouts.byKey) if (v.deps.includes(outCol)) windowLayouts.byKey.delete(k);
         rows = nextRows;
+        windowLayouts.rows = rows;
         break;
       }
 
@@ -3207,16 +3342,13 @@ function executePipelineSteps(
         const colName = (p.new_column || p.column || p.target_column || 'custom_col').trim();
         const rawVal = p.value;
         const expr = p.expression || p.formula;
-        rows = rows.map((r) => {
-          let val = rawVal;
-          if (expr) {
-            val = evaluateFormulaForRow(expr, r);
-          }
-          return {
-            ...r,
-            [colName]: val !== undefined ? val : '',
-          };
-        });
+        if (expr) {
+          rows = addFormulaColumn(rows, expr, colName);
+        } else {
+          const shape = rowShape(rows[0], colName);
+          const val = rawVal !== undefined ? rawVal : '';
+          rows = rows.map((r) => (shape.matches(r) ? shape.extend(r, colName, val) : SPREAD_EXTEND(r, colName, val)));
+        }
         break;
       }
 
@@ -4265,12 +4397,7 @@ export const localEngine = {
     const ds = all.find((d) => d.meta.id === datasetId);
     if (!ds) throw new Error(`Dataset not found: ${datasetId}`);
 
-    const { rows: pipelineRows, columns, compiledSql, stepSummaries } = executePipelineSteps(
-      ds.rows,
-      steps,
-      all,
-      ds.meta.schema_metadata
-    );
+    const { rows: pipelineRows, columns, compiledSql, stepSummaries } = executePipelineCached(ds, steps, all);
     let rows = [...pipelineRows];
 
     if (params.filters && params.filters.length > 0) {
@@ -4326,7 +4453,7 @@ export const localEngine = {
     const all = datasetsOverride || getStoredDatasets();
     const ds = all.find((d) => d.meta.id === datasetId);
     if (!ds) throw new Error(`Dataset not found: ${datasetId}`);
-    const res = executePipelineSteps(ds.rows, steps, all, ds.meta.schema_metadata);
+    const res = executePipelineCached(ds, steps, all);
     return {
       rows: res.rows.slice(0, limit),
       columns: res.columns,
@@ -7871,6 +7998,7 @@ for (const key of Object.keys(localEngine) as Array<keyof typeof localEngine>) {
 
 /** Test hook: forget the in-memory copy, as a page reload would. */
 export function __resetLocalStoreForTests(): void {
+  lastPipelineRun = null;
   memoryDatasets = null;
   seededDatasets = null;
   hydrated = false;

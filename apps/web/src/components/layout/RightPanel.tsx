@@ -273,8 +273,13 @@ export const RightPanel: React.FC = () => {
               // Warnings ride on the step card itself: in a long pipeline a
               // duplicate-key join or unmatched lookup on step 6 must be seen
               // without opening each step's details.
-              const stepWarnings: string[] =
-                (stepSummaries.find((s: any) => s && s.step_id === step.id) as any)?.warnings || [];
+              const stepSummary = stepSummaries.find((s: any) => s && s.step_id === step.id) as any;
+              const stepWarnings: string[] = stepSummary?.warnings || [];
+              // Per-step cost, so the slow step in a long pipeline is obvious.
+              const stepMs: number | undefined = step.enabled ? stepSummary?.duration_ms : undefined;
+              const stepRowsOut: number | undefined = step.enabled ? stepSummary?.rows_out : undefined;
+              const totalMs = stepSummaries.reduce((t: number, s: any) => t + (Number(s?.duration_ms) || 0), 0);
+              const isSlowStep = typeof stepMs === 'number' && stepMs >= 500 && totalMs > 0 && stepMs / totalMs >= 0.4;
               return (
                 <div
                   key={step.id}
@@ -353,6 +358,21 @@ export const RightPanel: React.FC = () => {
                     <span className="font-mono uppercase bg-[#F3F3F3] px-1.5 py-0.2 rounded-[2px] border border-[#D4D4D4] text-[#444444]">
                       {step.type.replace('_', ' ')}
                     </span>
+                    {(typeof stepMs === 'number' || typeof stepRowsOut === 'number') && (
+                      <span
+                        data-testid={`step-card-metrics-${idx + 1}`}
+                        title={
+                          isSlowStep
+                            ? `This step took ${Math.round((stepMs! / totalMs) * 100)}% of the pipeline time.`
+                            : 'Rows after this step and the time it took in the last run.'
+                        }
+                        className={`ml-auto mr-2 font-mono tabular-nums ${isSlowStep ? 'text-[#9D5D00] font-semibold' : 'text-[#8A8886]'}`}
+                      >
+                        {typeof stepRowsOut === 'number' ? `${stepRowsOut.toLocaleString()} rows` : ''}
+                        {typeof stepRowsOut === 'number' && typeof stepMs === 'number' ? ' · ' : ''}
+                        {typeof stepMs === 'number' ? formatStepDuration(stepMs) : ''}
+                      </span>
+                    )}
                     <label
                       className="flex items-center gap-1 cursor-pointer"
                       onClick={(e) => e.stopPropagation()}
@@ -599,3 +619,12 @@ export const RightPanel: React.FC = () => {
     </aside>
   );
 };
+
+/** "8 ms", "1.4 s", "2 min 5 s" for the step-card timing. */
+export function formatStepDuration(ms: number): string {
+  if (ms < 1) return '<1 ms';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+  const m = Math.floor(ms / 60000);
+  return `${m} min ${Math.round((ms % 60000) / 1000)} s`;
+}

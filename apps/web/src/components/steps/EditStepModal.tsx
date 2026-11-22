@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { NumberFormatSelect } from './NumberFormatSelect';
 import {
   X,
   Check,
@@ -779,6 +780,9 @@ export const EditStepModal: React.FC = () => {
                 <option value="boolean">Boolean (TRUE/FALSE)</option>
               </select>
             </div>
+            {(params.target_type === 'integer' || params.target_type === 'float') && (
+              <NumberFormatSelect value={params.number_format} onChange={(v) => handleParamChange('number_format', v)} />
+            )}
             <div>
               <label className="text-xs font-medium text-slate-300 block mb-1">Values that can't be converted</label>
               <select
@@ -1664,6 +1668,9 @@ export const EditStepModal: React.FC = () => {
                 <option value="formula">Custom Formula Expression</option>
               </select>
             </div>
+            {params.operation === 'clean_numeric' && (
+              <NumberFormatSelect value={params.number_format} onChange={(v) => handleParamChange('number_format', v)} />
+            )}
 
             {mode === 'formula' ? (
               <div>

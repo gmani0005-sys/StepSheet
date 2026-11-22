@@ -58,6 +58,8 @@ export interface StepSummary {
   duration_ms?: number;
   /** Rows after this step. */
   rows_out?: number;
+  /** True when this summary came from a reused (unchanged) earlier run. */
+  cached?: boolean;
 }
 
 export interface PipelinePreviewResponse {

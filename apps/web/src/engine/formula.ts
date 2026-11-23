@@ -1454,6 +1454,20 @@ export function evaluateFormula(expression: string, row: Record<string, any>): F
 const PARSE_FAILED = Symbol('parse-failed');
 const AST_CACHE = new Map<string, any>();
 
+/** Formula syntax tree, for translating a formula into other languages (code export). */
+export type FormulaAst = Node;
+/** Parse a formula into its syntax tree; null when it does not parse. */
+export function parseFormulaAst(expression: string, columnNames: string[]): FormulaAst | null {
+  let expr = (expression ?? '').trim();
+  if (expr.startsWith('=')) expr = expr.slice(1);
+  if (!expr) return null;
+  try {
+    return new Parser(tokenize(expr, columnNames)).parse();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Parse a formula once for a known column set and return a per-row
  * evaluator. Gives the same result as evaluateFormula(expression, row) for

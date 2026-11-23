@@ -18,6 +18,9 @@ const isStandalone =
   (typeof window !== 'undefined' && Boolean((window as any).__STEPSHEET_STANDALONE__)) ||
   (typeof window !== 'undefined' && (window as any).__STEPSHEET_FORCE_LOCAL__ === true);
 
+/** True when the app runs without the StepSheet server (single-file / browser-only build). */
+export const isStandaloneMode = () => isStandalone;
+
 const API_BASE = isFileProtocol ? 'http://127.0.0.1:8000/api/v1' : '/api/v1';
 
 /** Chat questions give up on the server after this long (local AI can be slow). */
@@ -724,7 +727,7 @@ export const api = {
         }
         return res.json();
       },
-      () => localEngine.getShareAccess(token)
+      () => localEngine.verifySharePasscode(token, passcode)
     );
   },
 

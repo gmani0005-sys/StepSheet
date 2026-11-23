@@ -12,7 +12,7 @@ import {
   Lock,
   Link as LinkIcon,
 } from 'lucide-react';
-import { api } from '../../api/client';
+import { api, isStandaloneMode } from '../../api/client';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -46,13 +46,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setIsLoading(true);
     try {
       const data = await api.listShares(projectId);
-      setShares(data);
+      setShares((data || []).filter((x: any) => x.is_active !== false));
     } catch (err) {
       console.error(err);
     } finally {
       setIsLoading(false);
     }
   };
+
+  const shareNeedsServer = isStandaloneMode();
 
   const handleGenerateShare = async () => {
     setIsGenerating(true);
@@ -166,9 +168,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               </div>
             </div>
 
+            {shareNeedsServer && (
+              <p data-testid="share-needs-server" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">
+                Share links need the StepSheet server. This browser-only app keeps your work on this computer, so a link would not open for anyone else. To share, download the workbook or export the pipeline.
+              </p>
+            )}
             <button
               onClick={handleGenerateShare}
-              disabled={isGenerating}
+              disabled={isGenerating || shareNeedsServer}
               className="w-full flex items-center justify-center gap-2 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm shadow-sky-600/30 transition-all"
             >
               <LinkIcon size={14} />

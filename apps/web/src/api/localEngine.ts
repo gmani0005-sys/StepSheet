@@ -10,6 +10,7 @@ import {
   SortCondition,
 } from '../types';
 import { GeneratedCode, StepDefinition, StepSummary } from '../types/steps';
+import { generatePipelineCode, type CodegenStepInput, type ColumnKind } from '../engine/codegen';
 import { compileFormula, evaluateFormula, formulaResultToCell, isFxError } from '../engine/formula';
 import { buildXlsx } from '../engine/xlsxWriter';
 import { toCsv } from '../engine/csv';
@@ -930,6 +931,69 @@ function numberDecimal(p: Record<string, any>): DecimalSeparator {
   return 'auto';
 }
 
+/** What the non-blank values of each column look like (first 500 rows), for code export. */
+function columnKinds(rows: Record<string, any>[], cols: string[]): Record<string, ColumnKind> {
+  const out: Record<string, ColumnKind> = {};
+  const sample = rows.length > 500 ? rows.slice(0, 500) : rows;
+  for (const c of cols) {
+    let num = true;
+    let date = true;
+    let seen = 0;
+    for (const r of sample) {
+      const v = r[c];
+      if (isBlank(v)) continue;
+      seen++;
+      if (num && parseSharedNumber(v) === null) num = false;
+      if (date && !num && !parseSharedDate(v)) date = false;
+      if (!num && !date) break;
+    }
+    out[c] = seen === 0 ? 'text' : num ? 'number' : date ? 'date' : 'text';
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- local versions
+function readLocalVersions(): any[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LOCAL_VERSIONS_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((v: any) => v && v.id !== 'ver-seed-1') : [];
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------- local share links
+function readLocalShares(): any[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LOCAL_SHARES_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.map((s: any) => ({ ...s, token: s.token || s.share_token || s.id })) : [];
+  } catch {
+    return [];
+  }
+}
+function writeLocalShares(list: any[]) {
+  try {
+    localStorage.setItem(LOCAL_SHARES_KEY, JSON.stringify(list));
+  } catch {
+    // storage full or blocked: the link simply is not saved
+  }
+}
+/** A share as the UI sees it: no passcode hash, salt or lockout counters. */
+function publicShare(s: any) {
+  const { passcode_hash: _h, passcode_salt: _s, failed_attempts: _f, locked_until: _l, ...rest } = s;
+  void _h; void _s; void _f; void _l;
+  return rest;
+}
+function randomHex(bytes: number): string {
+  const a = new Uint8Array(bytes);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function evaluateFormulaForRow(expression: string, row: Record<string, any>): any {
   return formulaResultToCell(evaluateFormula(expression, row));
 }
@@ -1838,7 +1902,8 @@ function executePipelineSteps(
   initialRows: Record<string, any>[],
   steps: StepDefinition[],
   allDatasets: StoredLocalDataset[],
-  baseColumns?: ColumnSchema[]
+  baseColumns?: ColumnSchema[],
+  onStep?: (index: number, rowsBefore: Record<string, any>[], rowsAfter: Record<string, any>[]) => void
 ): {
   rows: Record<string, any>[];
   columns: ColumnSchema[];
@@ -3579,10 +3644,21 @@ function executePipelineSteps(
   };
   // Per-step cost and row count, so a slow or row-dropping step can be
   // pointed at (the Applied Steps list and performance tests read these).
+  // Code shown per step (and the pipeline SQL) comes from the same generator as Export Code.
+  const codegenInputs: CodegenStepInput[] = [];
+  let lastCodegenCols: string[] = (baseColumns || []).map((c) => c.name);
   (steps || []).forEach((step, idx) => {
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const before = stepSummaries.length;
+    const rowsBefore = rows;
     runOne(step, idx);
+    if (onStep) onStep(idx, rowsBefore, rows);
+    {
+      const columnsIn = rowsBefore.length ? Object.keys(rowsBefore[0]) : lastCodegenCols;
+      const columnsOut = rows.length ? Object.keys(rows[0]) : columnsIn;
+      lastCodegenCols = columnsOut;
+      codegenInputs.push({ step, columnsIn, columnsOut, kindsIn: columnKinds(rowsBefore.length > 50 ? rowsBefore.slice(0, 50) : rowsBefore, columnsIn) });
+    }
     const summary = stepSummaries[before];
     if (summary) {
       summary.duration_ms = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0) * 10) / 10;
@@ -3590,7 +3666,24 @@ function executePipelineSteps(
     }
   });
 
-  const compiledSql = `${sqlParts.join(',\n')}\nSELECT * FROM ${prevCte};`;
+  let compiledSql = `${sqlParts.join(',\n')}\nSELECT * FROM ${prevCte};`;
+  try {
+    const code = generatePipelineCode(codegenInputs, {
+      datasetName: 'dataset',
+      sourceColumns: (baseColumns || []).map((c) => c.name),
+      datasets: allDatasets.map((d) => ({ id: d.meta.id, name: d.meta.name, columns: d.meta.schema_metadata.map((c) => c.name) })),
+    });
+    compiledSql = code.sql;
+    for (const ps of code.per_step) {
+      const st = (steps || [])[ps.index];
+      const summary = st && stepSummaries.find((x) => x.step_id === st.id);
+      if (summary) {
+        summary.generated_code = { ...summary.generated_code, sql: ps.sql, polars: ps.polars, power_query_m: ps.power_query_m };
+      }
+    }
+  } catch {
+    // Code display must never break a preview.
+  }
   let columns = inferSchema(rows);
   if (rows.length === 0 && baseColumns && baseColumns.length > 0) {
     // No rows left (a header-only file, a filter that matches nothing): the
@@ -4778,7 +4871,9 @@ export const localEngine = {
   },
 
   async runQualityCheck(datasetId: string, rules: any[], steps: any[] = []): Promise<any> {
-    const preview = await this.previewPipeline(datasetId, steps, { offset: 0, limit: 10000 });
+    // Every row is checked: a rule that only looked at the first 10,000 rows
+    // reported "0 failures" for problems further down (SPEC.md: no silent caps).
+    const preview = await this.previewPipeline(datasetId, steps, { offset: 0, limit: Number.MAX_SAFE_INTEGER });
     const rows: Record<string, any>[] = preview.rows;
     const total = rows.length;
 
@@ -4939,28 +5034,35 @@ export const localEngine = {
   },
 
   async exportCode(datasetId: string, steps: any[]): Promise<any> {
-    const preview = await this.previewPipeline(datasetId, steps || [], { offset: 0, limit: 10 });
-    const stepSummaries = preview.steps || [];
+    const all = await getStoredDatasets();
+    const ds = all.find((d) => d.meta.id === datasetId);
+    if (!ds) throw new Error('Dataset not found');
+    const list: StepDefinition[] = steps || [];
+    const inputs: CodegenStepInput[] = [];
+    const colsOf = (rs: Record<string, any>[], fallback: string[]) => (rs.length ? Object.keys(rs[0]) : fallback);
+    let lastCols = ds.meta.schema_metadata.map((c) => c.name);
+    const res = executePipelineSteps(ds.rows, list, all, ds.meta.schema_metadata, (idx, before, after) => {
+      const columnsIn = colsOf(before, lastCols);
+      const columnsOut = colsOf(after, columnsIn);
+      lastCols = columnsOut;
+      inputs[idx] = { step: list[idx], columnsIn, columnsOut, kindsIn: columnKinds(before, columnsIn) };
+    });
+    const code = generatePipelineCode(
+      list.map((step, i) => inputs[i] || { step: { ...step, enabled: false }, columnsIn: lastCols, columnsOut: lastCols, kindsIn: {} }),
+      {
+        datasetName: ds.meta.name,
+        sourceColumns: ds.meta.schema_metadata.map((c) => c.name),
+        datasets: all.map((d) => ({ id: d.meta.id, name: d.meta.name, columns: d.meta.schema_metadata.map((c) => c.name) })),
+      }
+    );
     return {
-      sql: preview.compiled_sql,
-      polars: [
-        'import polars as pl',
-        'df = pl.read_csv("dataset.csv")',
-        ...stepSummaries.map((s: any) => s.generated_code?.polars || '# step'),
-      ].join('\n'),
-      power_query_m: [
-        'let',
-        '  Source = Csv.Document(File.Contents("dataset.csv")),',
-        ...stepSummaries.map((s: any, i: number) => `  Step${i + 1} = ${s.generated_code?.power_query_m || 'Source'}`),
-        'in',
-        `  Step${stepSummaries.length || 1}`,
-      ].join('\n'),
-      excel_formulas: stepSummaries
+      sql: code.sql,
+      polars: code.polars,
+      power_query_m: code.power_query_m,
+      unsupported: code.unsupported,
+      excel_formulas: res.stepSummaries
         .filter((s: any) => s.generated_code?.excel_formula)
-        .map((s: any) => ({
-          step: s.label || s.step_id || 'Step',
-          formula: s.generated_code.excel_formula,
-        })),
+        .map((s: any) => ({ step: s.label || s.step_id || 'Step', formula: s.generated_code.excel_formula })),
     };
   },
 
@@ -5273,55 +5375,15 @@ export const localEngine = {
   },
 
   async listVersions(projectId: string): Promise<any[]> {
-    try {
-      const raw = localStorage.getItem(LOCAL_VERSIONS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((v: any) => ({
-            ...v,
-            author_email: v.author_email || v.created_by || 'local@stepsheet.app',
-            steps_snapshot: Array.isArray(v.steps_snapshot)
-              ? v.steps_snapshot
-              : Array.isArray(v.steps)
-              ? v.steps
-              : [],
-          }));
-        }
-      }
-    } catch {}
-
-    const initialVersion = {
-      id: 'ver-seed-1',
-      project_id: projectId || 'default-project',
-      version_number: 1,
-      message: 'Initial baseline pipeline snapshot',
-      author_email: 'local@stepsheet.app',
-      created_by: 'local@stepsheet.app',
-      steps_snapshot: [
-        {
-          id: 'seed-step-1',
-          type: 'filter_rows',
-          label: 'Filter amount > 0',
-          enabled: true,
-          params: { column: 'amount', operator: 'gt', value: '0' },
-        },
-      ],
-      steps: [
-        {
-          id: 'seed-step-1',
-          type: 'filter_rows',
-          label: 'Filter amount > 0',
-          enabled: true,
-          params: { column: 'amount', operator: 'gt', value: '0' },
-        },
-      ],
-      created_at: new Date(Date.now() - 60000).toISOString(),
-    };
-    try {
-      localStorage.setItem(LOCAL_VERSIONS_KEY, JSON.stringify([initialVersion]));
-    } catch {}
-    return [initialVersion];
+    // Only versions the user saved, for this project. (Earlier builds seeded a
+    // demo "Initial baseline" version with a step nobody made; it is dropped.)
+    return readLocalVersions()
+      .filter((v) => (v.project_id || 'default-project') === (projectId || 'default-project'))
+      .map((v: any) => ({
+        ...v,
+        author_email: v.author_email || v.created_by || 'local@stepsheet.app',
+        steps_snapshot: Array.isArray(v.steps_snapshot) ? v.steps_snapshot : Array.isArray(v.steps) ? v.steps : [],
+      }));
   },
 
   async createVersion(
@@ -5330,12 +5392,13 @@ export const localEngine = {
     steps: any[],
     datasetId?: string
   ): Promise<any> {
-    const versions = await this.listVersions(projectId);
-    const maxVer = versions.reduce((max, v) => Math.max(max, v.version_number || 0), 0);
+    const all = readLocalVersions();
+    const pid = projectId || 'default-project';
+    const maxVer = all.filter((v) => (v.project_id || 'default-project') === pid).reduce((max, v) => Math.max(max, v.version_number || 0), 0);
     const safeSteps = Array.isArray(steps) ? steps : [];
     const created = {
       id: crypto.randomUUID(),
-      project_id: projectId,
+      project_id: pid,
       version_number: maxVer + 1,
       message,
       author_email: 'local@stepsheet.app',
@@ -5345,10 +5408,11 @@ export const localEngine = {
       dataset_id: datasetId,
       created_at: new Date().toISOString(),
     };
-    const next = [created, ...versions];
     try {
-      localStorage.setItem(LOCAL_VERSIONS_KEY, JSON.stringify(next));
-    } catch {}
+      localStorage.setItem(LOCAL_VERSIONS_KEY, JSON.stringify([created, ...all]));
+    } catch {
+      throw new Error('The version could not be saved: browser storage is full or blocked.');
+    }
     logAudit(
       'version_created',
       { version_number: created.version_number, message, steps_count: safeSteps.length },
@@ -5361,6 +5425,7 @@ export const localEngine = {
     const versions = await this.listVersions(projectId);
     const vFrom = versions.find((v) => v.version_number === Number(fromVersion));
     const vTo = versions.find((v) => v.version_number === Number(toVersion));
+    if (!vFrom || !vTo) throw new Error(`Version ${!vFrom ? fromVersion : toVersion} does not exist in this project.`);
     const fromSteps: any[] = vFrom?.steps_snapshot || vFrom?.steps || [];
     const toSteps: any[] = vTo?.steps_snapshot || vTo?.steps || [];
 
@@ -5435,12 +5500,13 @@ export const localEngine = {
   async restoreVersion(projectId: string, versionId: string): Promise<any> {
     const versions = await this.listVersions(projectId);
     const found = versions.find((v) => v.id === versionId);
+    if (!found) throw new Error('That version does not exist in this project, so nothing was restored.');
     logAudit(
       'version_restored',
       { version_id: versionId, version_number: found?.version_number },
       'version'
     );
-    return found || { steps_snapshot: [], steps: [] };
+    return found;
   },
 
   async createShare(
@@ -5449,12 +5515,10 @@ export const localEngine = {
     expiresInDays?: number,
     passcode?: string
   ): Promise<any> {
-    const shares = await this.listShares(projectId);
-    const token = `stpsht_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-    const expiresAt = expiresInDays
-      ? new Date(Date.now() + expiresInDays * 86400000).toISOString()
-      : null;
-
+    const all = readLocalShares();
+    const token = `stpsht_${randomHex(24)}`;
+    const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 86400000).toISOString() : null;
+    const salt = passcode ? randomHex(16) : null;
     const created = {
       id: crypto.randomUUID(),
       project_id: projectId,
@@ -5465,43 +5529,56 @@ export const localEngine = {
       expires_in_days: expiresInDays,
       expires_at: expiresAt,
       has_passcode: Boolean(passcode),
+      // Only a salted hash of the passcode is kept, never the passcode itself.
+      passcode_salt: salt,
+      passcode_hash: passcode && salt ? await sha256Hex(`${salt}:${passcode}`) : null,
+      failed_attempts: 0,
+      locked_until: null,
+      // The browser app keeps links in this browser's storage: they open here only.
+      scope: 'this_browser',
       created_at: new Date().toISOString(),
     };
-    const next = [created, ...shares];
-    try {
-      localStorage.setItem(LOCAL_SHARES_KEY, JSON.stringify(next));
-    } catch {}
+    writeLocalShares([created, ...all]);
     logAudit('share_created', { role, expires_in_days: expiresInDays || 'never', has_passcode: Boolean(passcode) }, 'share');
-    return created;
+    return publicShare(created);
   },
-
-  async listShares(_projectId: string): Promise<any[]> {
-    try {
-      const raw = localStorage.getItem(LOCAL_SHARES_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return parsed.map((s: any) => ({
-            ...s,
-            token: s.token || s.share_token || s.id,
-          }));
-        }
-      }
-    } catch {}
-    return [];
+  async listShares(projectId: string): Promise<any[]> {
+    return readLocalShares()
+      .filter((s) => !projectId || !s.project_id || s.project_id === projectId)
+      .map(publicShare);
   },
-
   async revokeShare(projectId: string, shareId: string): Promise<void> {
-    const shares = await this.listShares(projectId);
-    const next = shares.filter((s) => s.id !== shareId);
-    try {
-      localStorage.setItem(LOCAL_SHARES_KEY, JSON.stringify(next));
-    } catch {}
-    logAudit('share_revoked', { share_id: shareId }, 'share');
+    const all = readLocalShares();
+    writeLocalShares(all.map((s) => (s.id === shareId ? { ...s, is_active: false, revoked_at: new Date().toISOString() } : s)));
+    logAudit('share_revoked', { share_id: shareId, project_id: projectId }, 'share');
   },
-
+  /**
+   * Open a share link. Unknown, revoked and expired links are refused; a link
+   * with a passcode reports that one is needed until verifySharePasscode()
+   * succeeds. Failed passcodes lock the link for 15 minutes after 5 tries.
+   */
   async getShareAccess(token: string): Promise<any> {
-    return { valid: true, token, share_token: token, role: 'viewer' };
+    const share = readLocalShares().find((s) => s.token === token || s.share_token === token);
+    if (!share || share.is_active === false) throw new Error('This share link was not found or has been revoked.');
+    if (share.expires_at && Date.parse(share.expires_at) <= Date.now()) throw new Error('This share link has expired.');
+    if (share.passcode_hash) return { valid: false, requires_passcode: true, token, role: share.role, scope: share.scope };
+    return { valid: true, token, share_token: token, role: share.role, project_id: share.project_id, scope: share.scope };
+  },
+  async verifySharePasscode(token: string, passcode: string): Promise<any> {
+    const all = readLocalShares();
+    const share = all.find((s) => s.token === token || s.share_token === token);
+    if (!share || share.is_active === false) throw new Error('This share link was not found or has been revoked.');
+    if (share.expires_at && Date.parse(share.expires_at) <= Date.now()) throw new Error('This share link has expired.');
+    if (!share.passcode_hash) return { valid: true, token, role: share.role, project_id: share.project_id, scope: share.scope };
+    if (share.locked_until && Date.parse(share.locked_until) > Date.now()) {
+      throw new Error('Too many wrong passcodes. This link is locked for 15 minutes.');
+    }
+    const ok = (await sha256Hex(`${share.passcode_salt}:${passcode}`)) === share.passcode_hash;
+    const failed = ok ? 0 : (share.failed_attempts || 0) + 1;
+    const lockedUntil = !ok && failed >= 5 ? new Date(Date.now() + 15 * 60000).toISOString() : null;
+    writeLocalShares(all.map((s) => (s.id === share.id ? { ...s, failed_attempts: lockedUntil ? 0 : failed, locked_until: lockedUntil } : s)));
+    if (!ok) throw new Error(lockedUntil ? 'Too many wrong passcodes. This link is locked for 15 minutes.' : 'Wrong passcode.');
+    return { valid: true, token, role: share.role, project_id: share.project_id, scope: share.scope };
   },
 
   async listAuditLogs(_projectId: string, action?: string): Promise<any> {
